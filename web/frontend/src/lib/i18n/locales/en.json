@@ -1301,7 +1301,7 @@
 			"errDiscordUrlRequired": "A Discord webhook URL is required.",
 			"labelDiscordMentionUsers": "Mention users (optional)",
 			"labelDiscordMentionRoles": "Mention roles (optional)",
-			"hintDiscordMentions": "Discord IDs, separated by commas or spaces — not names. In Discord, turn on Settings → Advanced → Developer Mode, then right-click a member or a role and choose Copy ID. Mentioned people are notified on every alert this channel sends, so a channel restricted to a higher minimum severity is the way to be pinged less often.",
+			"hintDiscordMentions": "Discord IDs, separated by commas or spaces — not names. Everyone listed is notified on every alert this channel sends.",
 			"errDiscordMentionUser": "\"{value}\" is not a user ID. Discord notifies only on numeric IDs: turn on Developer Mode, then right-click the member and choose Copy User ID.",
 			"errDiscordMentionRole": "\"{value}\" is not a role ID. Discord notifies only on numeric IDs: turn on Developer Mode, then right-click the role and choose Copy Role ID.",
 			"errDiscordUrlHost": "That does not look like a Discord webhook URL (it must start with https://discord.com/ or https://discordapp.com/)."
