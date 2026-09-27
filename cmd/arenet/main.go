@@ -90,9 +90,35 @@ import (
 	// imports bring in; the CrowdSec layer-4 matcher comes from the
 	// bouncer already imported above.
 	_ "github.com/mholt/caddy-l4/modules/l4close"
+	// v2.49 — the protocol matchers a service can be told to accept
+	// (storage.AcceptProtocol*). These MUST be blank-imported here: a
+	// matcher named in the emitted JSON but absent from this binary's
+	// registry fails the reload outright with
+	// "unknown module: layer4.matchers.ssh", which is exactly how
+	// layer4.matchers.crowdsec escaped to production in v2.42.
+	// TestBuildConfigJSON_LoadsCleanly_EveryAcceptProtocol walks
+	// storage.AcceptProtocolsFor and provisions each one, so a protocol
+	// offered without its import fails in CI instead of on the host.
+	//
+	// l4quic and l4socks are deliberately NOT here, and Arenet offers
+	// neither protocol — see storage.acceptProtocolTransports for quic,
+	// and for socks: importing l4socks drags in a whole SOCKS5 SERVER
+	// implementation (github.com/things-go/go-socks5, via that package's
+	// socks5_handler.go) to obtain a matcher that reads eight bytes.
+	// Not a trade this project makes for a protocol a homelab reverse
+	// proxy rarely relays.
+	_ "github.com/mholt/caddy-l4/modules/l4dns"
+	_ "github.com/mholt/caddy-l4/modules/l4http"
+	_ "github.com/mholt/caddy-l4/modules/l4openvpn"
+	_ "github.com/mholt/caddy-l4/modules/l4postgres"
 	_ "github.com/mholt/caddy-l4/modules/l4proxy"
+	_ "github.com/mholt/caddy-l4/modules/l4rdp"
+	_ "github.com/mholt/caddy-l4/modules/l4ssh"
 	_ "github.com/mholt/caddy-l4/modules/l4subroute"
 	_ "github.com/mholt/caddy-l4/modules/l4tls"
+	_ "github.com/mholt/caddy-l4/modules/l4winbox"
+	_ "github.com/mholt/caddy-l4/modules/l4wireguard"
+	_ "github.com/mholt/caddy-l4/modules/l4xmpp"
 
 	"github.com/caddyserver/caddy/v2"
 

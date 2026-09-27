@@ -48,6 +48,17 @@ type Handler struct {
 	// fills it; an empty value means "count nothing", which is what
 	// a hand-written config without it would deserve.
 	ServiceID string `json:"service_id,omitempty"`
+
+	// Cause, when set, makes this handler count a REFUSAL instead of a
+	// connection: the route it sits on has already decided to close,
+	// and the next handler is `close`.
+	//
+	// It deliberately touches none of the traffic counters. A refused
+	// connection never reaches the backend, so counting it as a
+	// connection — or wrapping it to count its bytes — would inflate
+	// the figures the operator uses to judge whether the relay is
+	// working. See Registry.Refused.
+	Cause string `json:"cause,omitempty"`
 }
 
 func (Handler) CaddyModule() caddy.ModuleInfo {
@@ -57,11 +68,23 @@ func (Handler) CaddyModule() caddy.ModuleInfo {
 	}
 }
 
-// Handle wraps the connection so reads and writes are counted, then
-// calls the next handler — the proxy, in every config Arenet emits.
+// Handle counts, then hands over.
+//
+// On a refusal route (Cause set) it records the refusal and hands the
+// connection to `close` untouched. Otherwise it wraps the connection so
+// reads and writes are counted, then calls the next handler — the proxy,
+// in every config Arenet emits.
 func (h Handler) Handle(cx *layer4.Connection, next layer4.Handler) error {
 	reg := GlobalRegistry()
 	if reg == nil || h.ServiceID == "" {
+		return next.Handle(cx)
+	}
+
+	if h.Cause != "" {
+		reg.Refused(h.ServiceID, h.Cause)
+		// No Opened, no wrapping: this connection is being closed, and
+		// the traffic counters must keep meaning "traffic that reached
+		// the backend".
 		return next.Handle(cx)
 	}
 

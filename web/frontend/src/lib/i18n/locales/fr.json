@@ -336,7 +336,7 @@
 			"titleNew": "Nouvelle route",
 			"titleEdit": "Éditer la route",
 			"unsaved": "modifications non enregistrées",
-		"idLabel": "id",
+			"idLabel": "id",
 			"metricsLink": "Métriques de cette route →",
 			"securityLink": "Sécurité de cette route →",
 			"deleteButton": "Supprimer"
@@ -670,8 +670,12 @@
 				"bypassIpsAdd": "+ Ajouter une IP de contournement"
 			}
 		},
-		"disabled": { "badge": "Désactivée" },
-		"maintenance": { "badge": "Maintenance" },
+		"disabled": {
+			"badge": "Désactivée"
+		},
+		"maintenance": {
+			"badge": "Maintenance"
+		},
 		"disable": {
 			"action": "Désactiver",
 			"confirm": {
@@ -685,7 +689,9 @@
 				}
 			}
 		},
-		"enable": { "action": "Activer" },
+		"enable": {
+			"action": "Activer"
+		},
 		"state": {
 			"active": "Active",
 			"maintenance": "Maintenance",
@@ -874,19 +880,27 @@
 			"relaySentence": "{protocol} sur {listen} est relayé vers {backend}.",
 			"delete": "Supprimer",
 			"cancel": "Annuler",
-			"save": "Enregistrer"
+			"save": "Enregistrer",
+			"acceptProtocol": "Protocole accepté",
+			"acceptProtocolAny": "N'importe lequel",
+			"acceptProtocolHint": "Ferme les connexions dont la poignée de main n'est pas ce protocole, avant qu'elles atteignent le backend. Un backend correct refuse déjà le charabia : c'est donc du durcissement — ce que ça apporte, c'est qu'un scanneur ne passe jamais, et que les erreurs répétées sont comptées. La liste dépend du transport ci-dessus."
 		},
 		"deleteDialog": {
 			"title": "Supprimer ce service ?",
 			"message": "Le port cesse d'être servi dès que tu confirmes.",
 			"confirm": "Supprimer",
 			"cancel": "Annuler"
-		}
+		},
+		"colRefused": "Refusées",
+		"refusedNone": "aucune",
+		"refusedProtocol": "mauvais protocole",
+		"refusedIPFilter": "filtre source",
+		"refusedCrowdSec": "CrowdSec",
+		"refusedTooltip": "Connexions fermées par une garde avant le backend. Non comptées comme connexions : elles n'ont jamais atteint le relai."
 	},
 	"map": {
 		"emptyTitle": "Aucun événement de sécurité",
 		"emptyBody": "Les arcs se tracent au fil des décisions WAF, limitation de débit, CrowdSec et authentification. Une carte calme signifie que rien n'a été bloqué depuis l'ouverture de la page.",
-
 		"eyebrow": "Trafic · Carte",
 		"subtitle": "Visualisation géographique en temps réel des sources de trafic et des décisions de sécurité. WAF, throttle, CrowdSec et échecs d'authentification sont rendus sous forme d'arcs colorés depuis la source jusqu'à cette instance Arenet.",
 		"loading": "Chargement de la position du serveur…",
@@ -2330,7 +2344,6 @@
 		"emptyTitle": "Rien à afficher pour le moment",
 		"emptyBody": "Le graphe montre tes noms d'hôtes, le hub Arenet et les backends derrière lui, avec le trafic en direct sur les liens. Crée une route et elle apparaît ici en quelques secondes.",
 		"emptyAction": "Créer une route",
-
 		"headTitle": "Topology v2 — Arenet",
 		"relayout": "Reconstruire la disposition",
 		"eyebrow": "TRAFIC · VUE FLUX",
@@ -2358,7 +2371,9 @@
 			"actionReloadCaddy": "Recharger la config Caddy",
 			"actionSnapshotJSON": "Snapshot topology (JSON)"
 		},
-		"disabled": { "tooltip": "Désactivée — ne sert aucun trafic" }
+		"disabled": {
+			"tooltip": "Désactivée — ne sert aucun trafic"
+		}
 	},
 	"logs": {
 		"pageEyebrow": "Trafic · Journaux",

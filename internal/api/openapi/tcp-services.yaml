@@ -231,6 +231,32 @@ components:
             Prepends the PROXY header so the backend sees the real client
             IP. The backend must be configured to expect it from this
             host; on Stalwart that is proxyTrustedNetworks.
+        acceptProtocol:
+          type: string
+          enum: ['', tls, ssh, http, postgres, rdp, xmpp, winbox, dns, openvpn, wireguard]
+          description: |
+            Application protocol the relay accepts at the handshake, as a
+            caddy-l4 matcher name. Empty accepts anything, which is the
+            pre-v2.49 behaviour; a connection whose handshake is not that
+            protocol is closed and counted under cause `protocol`.
+
+            Not to be confused with `protocol`, which is the TRANSPORT.
+            The two are different axes, and the set here depends on the
+            transport: `wireguard` is UDP only, `dns` and `openvpn` work
+            on both, and every other value is TCP only. A combination the
+            transport does not support is refused with 400 — a matcher
+            that can never match would refuse every connection, since the
+            gate is emitted as a negation.
+
+            `quic` and the SOCKS matchers exist in caddy-l4 but are not
+            offered: quic sets no ALPN in its bare form and is unverified,
+            and importing the SOCKS matcher would pull a whole SOCKS5
+            server library into the binary.
+
+            This is hardening, not a hole being closed: a correct backend
+            already rejects garbage. What it buys is that garbage never
+            reaches the backend, and that a repeated mismatch is
+            countable.
         ipFilter: { $ref: '#/components/schemas/RoutesIPFilter' }
         crowdSecEnabled:
           type: boolean
@@ -258,6 +284,24 @@ components:
         bytesIn: { type: integer, description: Sent by clients. }
         bytesOut: { type: integer, description: Received by clients. }
         errors: { type: integer, description: Connections the relay could not complete. }
+        refused:
+          type: object
+          additionalProperties: { type: integer }
+          description: |
+            Connections a gate closed before they reached the backend,
+            keyed by cause: `protocol`, `ipFilter`, `crowdsec`. Absent
+            when nothing was refused, and a cause that never fired is
+            left out rather than reported as 0.
+
+            These are NOT a subset of `connections`: a refused connection
+            never reaches the relay, so it is counted here and nowhere
+            else. Before v2.49 it was counted nowhere at all, which made
+            a relay that was protecting the operator indistinguishable
+            from one whose protection was switched off.
+
+            An object rather than fields so a later gate adds a key, and
+            an older client ignores what it does not know.
+          example: { crowdsec: 42, ipFilter: 17 }
         lastConnectionAt: { type: string, format: date-time }
 
     TCPServiceTestResult:
