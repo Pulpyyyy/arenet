@@ -112,10 +112,25 @@
 		testing = true;
 		formError = '';
 		try {
-			// If the form has an apiKey, use it; else fall back to
-			// the stored row (useStored=true). The operator may be
-			// probing the saved config without editing.
-			const useStored = form.apiKey === '' && (settings?.configured ?? false);
+			// Send whatever the form holds. The backend falls back to
+			// the stored row PER FIELD, so an empty apiKey — which is
+			// the normal case, since a saved secret is never echoed
+			// back into the form — still probes with the stored key
+			// while honouring a URL the operator has just changed.
+			//
+			// This used to key off the apiKey alone: an empty key meant
+			// useStored, which ignores the wire fields wholesale. So an
+			// operator who moved their LAPI, typed the new URL and
+			// pressed Test was told the connection failed — against the
+			// OLD address, which they had never asked to probe. Exactly
+			// what happened on 2026-09-27 when a LAPI moved from
+			// 127.0.0.1 to a WireGuard address: "connection refused",
+			// reported for a URL that was no longer on screen.
+			//
+			// useStored now means what its name says: nothing in the
+			// form, probe what is saved.
+			const untouched = form.lapiUrl.trim() === '' && form.apiKey === '';
+			const useStored = untouched && (settings?.configured ?? false);
 			const res = await settingsApi.testCrowdSecConnection(
 				useStored
 					? { useStored: true }

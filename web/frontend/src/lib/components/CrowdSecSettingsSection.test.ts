@@ -254,19 +254,60 @@ describe('CrowdSecSettingsSection — test connection', () => {
 		});
 	});
 
-	it('uses useStored=true when the form has no key but settings are configured', async () => {
+	// REVERSED, and the old assertion is why.
+	//
+	// This used to assert `{ useStored: true }` whenever the apiKey
+	// field was empty — which it ALWAYS is, because the server redacts
+	// the stored secret and never sends it back (see the fixture). So
+	// every Test press on a configured install ignored the URL on
+	// screen and probed the saved one. Not an edge case: the only case.
+	//
+	// An operator who moved their LAPI to a WireGuard address, typed the
+	// new URL and pressed Test was told "connection refused" — truthful
+	// about 127.0.0.1, which nothing was listening on any more, and
+	// completely misleading about what they had asked. Reported
+	// 2026-09-27.
+	//
+	// The backend falls back to the stored row per field, so sending an
+	// empty apiKey alongside a real URL is exactly right.
+	it('probes the URL on screen, falling back to the stored key', async () => {
 		getMock.mockResolvedValue(configuredSettings);
 		testMock.mockResolvedValue({ ok: true, version: 'v1.6.3' });
 
 		render(CrowdSecSettingsSection);
 		await waitFor(() => expect(getMock).toHaveBeenCalled());
 
-		// Form apiKey is blank; configured=true → useStored path.
 		await fireEvent.click(screen.getByRole('button', { name: /Test connection/i }));
 
 		await waitFor(() => {
-			expect(testMock).toHaveBeenCalledWith({ useStored: true });
+			expect(testMock).toHaveBeenCalledWith({
+				lapiUrl: configuredSettings.lapiUrl,
+				apiKey: '',
+				timeoutSeconds: configuredSettings.timeoutSeconds
+			});
 		});
+	});
+
+	// The operator's actual scenario: the LAPI moved, the new address is
+	// typed, the key is untouched. The probe must go to the new address.
+	it('probes a URL the operator just changed, not the saved one', async () => {
+		getMock.mockResolvedValue(configuredSettings);
+		testMock.mockResolvedValue({ ok: true, version: 'v1.8.1' });
+
+		render(CrowdSecSettingsSection);
+		await waitFor(() => expect(getMock).toHaveBeenCalled());
+
+		const url = screen.getByLabelText(/LAPI URL/i);
+		await fireEvent.input(url, { target: { value: 'http://10.66.0.1:8080' } });
+		await fireEvent.click(screen.getByRole('button', { name: /Test connection/i }));
+
+		await waitFor(() => {
+			expect(testMock).toHaveBeenCalledWith(
+				expect.objectContaining({ lapiUrl: 'http://10.66.0.1:8080' })
+			);
+		});
+		// And never the address it replaced.
+		expect(testMock).not.toHaveBeenCalledWith(expect.objectContaining({ useStored: true }));
 	});
 });
 
