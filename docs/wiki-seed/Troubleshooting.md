@@ -247,6 +247,42 @@ If you locked yourself out completely, you can temporarily disable the CrowdSec 
 
 ---
 
+## CrowdSec bans nothing of your own
+
+### Symptom
+CrowdSec is configured, the bouncer says connected, but no decision ever appears that you did not import from the community blocklist. Nothing local is ever detected.
+
+### Diagnostic
+```bash
+# 1. Is Arenet writing an access log at all? (off by default)
+#    Settings → Security → HTTP access log — read the path it prints.
+sudo ls -l /var/log/arenet/access.log
+
+# 2. Is it growing? Load one of your routes while this runs.
+sudo tail -f /var/log/arenet/access.log
+
+# 3. Is the agent reading it?
+sudo cscli metrics | grep -A 5 Acquisition
+
+# 4. Can the agent read it at all? Caddy writes the file 0600.
+systemctl show crowdsec -p User
+sudo cscli explain --file /var/log/arenet/access.log --type caddy | head -20
+```
+
+### Fix
+The four checks above fail in four different ways, and each has its own answer.
+
+1. **No file.** The access log is off by default — it records every visitor's IP and URL, so Arenet does not turn it on for you. Enable it in Settings → Security, and note that the path shown there is the one to use: it differs between a systemd install (`/var/log/arenet/access.log`) and a container (inside the data volume).
+2. **File exists but stays empty.** Requests are not reaching the sink. Check that saving the setting actually reloaded Caddy — the log is part of the emitted config. Report this: it is a bug, not a configuration.
+3. **Acquisition count stays at zero.** The agent is not reading. Confirm the path in `/etc/crowdsec/acquis.d/` matches exactly, and that `labels: type: caddy` is set. On Docker the agent needs the volume mounted read-only (`arenet-data:/var/lib/arenet:ro`).
+4. **`cscli explain` reports a parser failure.** Install the collection: `sudo cscli collections install crowdsecurity/caddy`.
+
+The most common cause by far is **permissions**: Caddy creates the file `0600` owned by the Arenet user, so the agent has to be root. It is by default on a package install, but not if you changed it.
+
+Worth knowing: failed logins to Arenet's **own admin interface** are never in this log — the admin plane is served separately and never reaches Caddy. Those are covered by Security Automation, whose rules are all **disabled by default**, which is the other reason an operator sees no `arenet/…` decisions. See [CrowdSec](CrowdSec).
+
+---
+
 ## Backup file is huge (> 10 MB)
 
 ### Symptom

@@ -72,6 +72,34 @@ restart-loop with `permission denied`. Named volumes don't need
 this step — Docker inherits the correct ownership from the image
 automatically.
 
+### Where files live
+
+Everything Arenet writes goes under `/var/lib/arenet` inside the
+container — the database, the certificates, and the HTTP access
+log at `/var/lib/arenet/logs/access.log` once you enable it.
+
+That is deliberate rather than conventional: `/var/log` inside a
+container belongs to the writable layer, not to a mount, so a log
+written there would be destroyed the next time the container is
+replaced — which is what an upgrade is.
+
+The access log is **off by default**; it records every visitor's
+IP and the URLs they request. Enable it in Settings → Security
+when you want CrowdSec to detect attacks against this host. A
+CrowdSec agent in a sibling container reads it by mounting the
+same volume read-only:
+
+```yaml
+crowdsec:
+  volumes:
+    - arenet-data:/var/lib/arenet:ro
+```
+
+The agent must run as root to read it: Caddy creates the file
+`0600` owned by uid 65532, the same `nonroot` user as above. The
+official CrowdSec image does. See
+[CrowdSec](../wiki-seed/CrowdSec.md).
+
 ## 4. Get the setup token
 
 On first boot Arenet generates a one-shot setup token. Tail the

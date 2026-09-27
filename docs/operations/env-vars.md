@@ -59,7 +59,7 @@ rationale).
 
 ## Runtime config (always-on)
 
-These 11 variables shape every Arenet boot. Most have sensible
+These variables shape every Arenet boot. Most have sensible
 defaults; you'll typically touch 2–3 on a real install.
 
 ### `ARENET_DEV`
@@ -272,6 +272,40 @@ defaults; you'll typically touch 2–3 on a real install.
 - **Source**: `internal/config/config.go` (struct field
   `TopologyTickMs`; env parser around the `LookupEnv` block).
 
+### `ARENET_ACCESS_LOG_PATH`
+
+- **Purpose**: file the HTTP access log is written to, when
+  the operator enables it in **Settings → Security → HTTP
+  access log**. The log exists so a CrowdSec agent has
+  requests to parse: before v2.50 Arenet emitted none, so an
+  agent beside it enforced the community blocklist and
+  detected nothing local. This variable only decides *where*;
+  it does not switch the log on.
+- **Default**: empty, which derives
+  `<ARENET_DATA_DIR>/logs/access.log`. The systemd unit sets
+  `/var/log/arenet/access.log` via `Environment=`, and Docker
+  keeps the derived path — `/var/log` in a container is the
+  writable layer, so a log there dies with the container.
+- **Format**: absolute file path. A relative path is refused:
+  it would resolve against Caddy's working directory, which
+  is neither documented nor your shell.
+- **Example**: `ARENET_ACCESS_LOG_PATH=/var/log/arenet/access.log`
+- **Notes**: a path under `/var/log` only works if systemd is
+  allowed to write there. The unit ships
+  `LogsDirectory=arenet`, which creates `/var/log/arenet` with
+  the service's ownership and is implicitly exempt from
+  `ProtectSystem=strict`; point this somewhere else under
+  `/var/log` and the write fails at runtime with nothing on
+  screen to explain it. The unit declares `Environment=`
+  *before* `EnvironmentFile=`, so setting this in
+  `/etc/arenet/arenet.env` still wins. Caddy creates the file
+  `0600`, so a CrowdSec agent must run as root to read it.
+  An operator override typed in the settings UI beats this
+  variable.
+- **Source**: `internal/config/config.go` (struct field
+  `AccessLogPath`), resolved by
+  `caddymgr.ResolveAccessLogPath`.
+
 ---
 
 ## CrowdSec integration
@@ -452,7 +486,7 @@ exits.
 
 ### No defaults missing
 
-All 22 variables documented above have an explicit default in
+Every variable documented above has an explicit default in
 the codebase. There are no variables whose default behaviour
 is unclear or undefined.
 

@@ -106,6 +106,79 @@ Depuis la **v2.26.0**, un visiteur bloqué reçoit la **page d'erreur personnali
 
 ---
 
+## Trois briques, et laquelle vous avez
+
+C'est la question à laquelle l'écran de réglages ne répond pas seul, parce que CrowdSec apparaît à **trois** endroits dans Arenet, qui ne font pas la même chose.
+
+| Brique | Sens | Identifiants | Rôle |
+|---|---|---|---|
+| **Bouncer** (Réglages → CrowdSec) | Arenet **lit** | `cscli bouncers add arenet` | Refuse les IP que LAPI désigne. C'est l'application. |
+| **Journal d'accès** (Réglages → Sécurité) | Arenet **écrit un fichier** | aucun | Donne à CrowdSec des requêtes à analyser, pour qu'*il* détecte. |
+| **Security Automation** (Réglages → Sécurité) | Arenet **écrit dans LAPI** | `cscli machines add arenet-writer` | Arenet décide lui-même et pousse des bannissements. |
+
+**Pourquoi deux jeux d'identifiants pour la même LAPI.** C'est le modèle d'authentification de CrowdSec, pas une bizarrerie d'Arenet : un *bouncer* ne peut que lire des décisions, une *machine* (watcher) peut créer des alertes. Une clé de bouncer ne permet pas d'écrire, donc pousser un bannissement exige la seconde.
+
+**Avec le bouncer seul**, vous avez la liste communautaire. C'est une vraie couche — des milliers d'opérateurs signalant les IP actuellement malveillantes — mais rien de ce qui concerne *votre* machine n'est jamais détecté.
+
+**Le journal d'accès** est ce qui permet aux scénarios de CrowdSec de voir votre trafic : balayages, force brute contre les applications derrière Arenet, tentatives d'exploitation connues. Arenet n'émettait aucun journal d'accès avant la **v2.50**, ce qui explique qu'un agent pouvait rester en place des mois sans jamais déclencher un scénario.
+
+**Security Automation** est l'autre détecteur, et il travaille à partir de ce qu'Arenet comprend déjà plutôt que des requêtes brutes : événements WAF, événements de limitation de débit, et échecs de connexion à l'administration d'Arenet. Quand une IP source franchit un seuil dans une fenêtre, Arenet pousse un bannissement dans LAPI avec `origin=arenet` et un scénario nommé `arenet/…`. Il déduplique, et si vous levez un bannissement à la main il se retient au lieu de le repousser aussitôt.
+
+> **Toutes les règles d'automation sont désactivées par défaut.** Si vous avez renseigné les identifiants du watcher sans jamais voir de décision `arenet/…`, c'est presque certainement la raison : les identifiants seuls ne font rien.
+
+Les deux détecteurs ne se recouvrent pas : Security Automation voit ce qu'Arenet a déjà qualifié, CrowdSec voit ce qu'Arenet se contente de transmettre.
+
+### Un mot sur « watcher »
+
+Le terme désigne deux choses sans rapport dans Arenet. Un **watcher** CrowdSec est une machine autorisée à écrire dans LAPI. Le **watcher** de la page [Alerting](Alerting-FR) est la boucle qui évalue vos règles d'alerte toutes les 30 secondes. Même mot, aucun lien.
+
+---
+
+## Activer la détection
+
+1. **Réglages → Sécurité → Journal d'accès HTTP** → cochez *Écrire un journal d'accès*.
+2. Lisez le **chemin affiché par la carte**. Ne le devinez pas : le défaut est `/var/log/arenet/access.log` sur une installation systemd et `/var/lib/arenet/logs/access.log` dans le conteneur sous Docker, et seul le processus en cours sait lequel s'applique.
+3. Enregistrez. Arenet recharge Caddy — le journal fait partie de la configuration émise, donc rien n'apparaît avant ce rechargement.
+4. Sur la machine CrowdSec :
+
+```bash
+sudo cscli collections install crowdsecurity/caddy
+```
+
+```yaml
+# /etc/crowdsec/acquis.d/arenet.yaml
+filenames:
+  - /var/log/arenet/access.log      # le chemin de l'étape 2
+labels:
+  type: caddy
+```
+
+```bash
+sudo systemctl restart crowdsec
+```
+
+5. Vérifiez que l'agent lit réellement :
+
+```bash
+sudo cscli metrics | grep -A 5 Acquisition
+```
+
+Le fichier doit apparaître avec un compteur de lignes qui **augmente**. Zéro signifie que l'agent n'arrive pas à le lire — voir [Troubleshooting](Troubleshooting-FR).
+
+**Le journal est désactivé par défaut, volontairement.** Il enregistre l'adresse IP de chaque visiteur et les URL demandées. C'est ce dont un moteur de détection a besoin, et ce sont aussi des données personnelles sur votre disque ; lequel des deux compte le plus vous appartient, ce n'est pas à un défaut d'en décider. La rotation n'est pas optionnelle — 10 Mo sur 5 fichiers compressés par défaut, et le formulaire affiche le plafond correspondant.
+
+**Docker** : montez le volume en lecture seule dans l'agent plutôt que d'utiliser un chemin de l'hôte —
+
+```yaml
+crowdsec:
+  volumes:
+    - arenet-data:/var/lib/arenet:ro
+```
+
+**Ce qui n'est pas dans ce journal** : l'interface d'administration d'Arenet, servie séparément et qui n'atteint jamais Caddy. Les échecs de connexion à l'administration sont couverts par Security Automation.
+
+---
+
 ## Ce qui se fait bloquer
 
 Le bouncer applique **les décisions dont l'agent dispose**. Les scénarios installés par défaut (après `cscli scenarios install crowdsecurity/http-cve`, par exemple) couvrent :
