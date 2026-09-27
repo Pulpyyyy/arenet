@@ -336,7 +336,7 @@
 			"titleNew": "New route",
 			"titleEdit": "Edit route",
 			"unsaved": "unsaved changes",
-		"idLabel": "id",
+			"idLabel": "id",
 			"metricsLink": "Metrics for this route →",
 			"securityLink": "Security for this route →",
 			"deleteButton": "Delete"
@@ -670,8 +670,12 @@
 				"bypassIpsAdd": "+ Add bypass IP"
 			}
 		},
-		"disabled": { "badge": "Disabled" },
-		"maintenance": { "badge": "Maintenance" },
+		"disabled": {
+			"badge": "Disabled"
+		},
+		"maintenance": {
+			"badge": "Maintenance"
+		},
 		"disable": {
 			"action": "Disable",
 			"confirm": {
@@ -685,7 +689,9 @@
 				}
 			}
 		},
-		"enable": { "action": "Enable" },
+		"enable": {
+			"action": "Enable"
+		},
 		"state": {
 			"active": "Active",
 			"maintenance": "Maintenance",
@@ -874,19 +880,27 @@
 			"relaySentence": "{protocol} on {listen} is relayed to {backend}.",
 			"delete": "Delete",
 			"cancel": "Cancel",
-			"save": "Save"
+			"save": "Save",
+			"acceptProtocol": "Accepted protocol",
+			"acceptProtocolAny": "Anything",
+			"acceptProtocolHint": "Closes connections whose handshake is not this protocol, before they reach the backend. A correct backend already refuses garbage, so this is hardening — what it adds is that a scanner never gets through, and that repeated mismatches are counted. The list depends on the transport above."
 		},
 		"deleteDialog": {
 			"title": "Delete this service?",
 			"message": "The port stops being served as soon as you confirm.",
 			"confirm": "Delete",
 			"cancel": "Cancel"
-		}
+		},
+		"colRefused": "Refused",
+		"refusedNone": "none",
+		"refusedProtocol": "wrong protocol",
+		"refusedIPFilter": "source filter",
+		"refusedCrowdSec": "CrowdSec",
+		"refusedTooltip": "Connections closed by a guard before the backend. Not counted as connections: they never reached the relay."
 	},
 	"map": {
 		"emptyTitle": "No security event yet",
 		"emptyBody": "Arcs are drawn as WAF, rate-limit, CrowdSec and authentication decisions happen. A quiet map means nothing has been blocked since this page was opened.",
-
 		"eyebrow": "Traffic · Map",
 		"subtitle": "Real-time geographic view of traffic sources and security decisions. WAF, throttle, CrowdSec and auth failures are drawn as coloured arcs from the source to this Arenet instance.",
 		"loading": "Loading the server position…",
@@ -2330,7 +2344,6 @@
 		"emptyTitle": "Nothing to draw yet",
 		"emptyBody": "The graph shows your hostnames, the Arenet hub and the backends behind it, with live traffic on the links. Create a route and it appears here within seconds.",
 		"emptyAction": "Create a route",
-
 		"headTitle": "Topology v2 — Arenet",
 		"relayout": "Rebuild the layout",
 		"eyebrow": "TRAFFIC · FLOW VIEW",
@@ -2358,7 +2371,9 @@
 			"actionReloadCaddy": "Reload Caddy config",
 			"actionSnapshotJSON": "Snapshot topology (JSON)"
 		},
-		"disabled": { "tooltip": "Disabled — not serving traffic" }
+		"disabled": {
+			"tooltip": "Disabled — not serving traffic"
+		}
 	},
 	"logs": {
 		"pageEyebrow": "Traffic · Logs",

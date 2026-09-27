@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/barto95100/arenet/internal/l4metrics"
 	"github.com/barto95100/arenet/internal/metrics"
 	"github.com/barto95100/arenet/internal/storage"
 	"github.com/caddyserver/caddy/v2"
@@ -33,9 +34,35 @@ import (
 	// the test binary's module registry exactly as they are in the
 	// production binary (cmd/arenet/main.go).
 	_ "github.com/mholt/caddy-l4/modules/l4close"
+	// v2.49 — the protocol matchers a service can be told to accept
+	// (storage.AcceptProtocol*). These MUST be blank-imported here: a
+	// matcher named in the emitted JSON but absent from this binary's
+	// registry fails the reload outright with
+	// "unknown module: layer4.matchers.ssh", which is exactly how
+	// layer4.matchers.crowdsec escaped to production in v2.42.
+	// TestBuildConfigJSON_LoadsCleanly_EveryAcceptProtocol walks
+	// storage.AcceptProtocolsFor and provisions each one, so a protocol
+	// offered without its import fails in CI instead of on the host.
+	//
+	// l4quic and l4socks are deliberately NOT here, and Arenet offers
+	// neither protocol — see storage.acceptProtocolTransports for quic,
+	// and for socks: importing l4socks drags in a whole SOCKS5 SERVER
+	// implementation (github.com/things-go/go-socks5, via that package's
+	// socks5_handler.go) to obtain a matcher that reads eight bytes.
+	// Not a trade this project makes for a protocol a homelab reverse
+	// proxy rarely relays.
+	_ "github.com/mholt/caddy-l4/modules/l4dns"
+	_ "github.com/mholt/caddy-l4/modules/l4http"
+	_ "github.com/mholt/caddy-l4/modules/l4openvpn"
+	_ "github.com/mholt/caddy-l4/modules/l4postgres"
 	_ "github.com/mholt/caddy-l4/modules/l4proxy"
+	_ "github.com/mholt/caddy-l4/modules/l4rdp"
+	_ "github.com/mholt/caddy-l4/modules/l4ssh"
 	_ "github.com/mholt/caddy-l4/modules/l4subroute"
 	_ "github.com/mholt/caddy-l4/modules/l4tls"
+	_ "github.com/mholt/caddy-l4/modules/l4winbox"
+	_ "github.com/mholt/caddy-l4/modules/l4wireguard"
+	_ "github.com/mholt/caddy-l4/modules/l4xmpp"
 )
 
 // proxyOf returns the proxy handler of a route, skipping the metrics
@@ -182,9 +209,70 @@ func TestBuildLayer4App_ProxyProtocolAndHealthCheck(t *testing.T) {
 	}
 }
 
-// An allow filter gates the relay and everything else is closed
-// explicitly — we never rely on caddy-l4's implicit drop for a
-// refusal we decided.
+// refusalOf reads a refusal route: the cause it records and the
+// matcher set that selects the connections it closes.
+//
+// Shape asserted here rather than inline everywhere, because it is the
+// contract the counters depend on: metrics handler with a cause FIRST,
+// then close. Reversed, the connection would be gone before it was
+// counted.
+func refusalOf(t *testing.T, route map[string]any) (cause string, match map[string]any) {
+	t.Helper()
+	handle, _ := route["handle"].([]map[string]any)
+	if len(handle) != 2 {
+		t.Fatalf("refusal route: want [metrics, close], got %v", handle)
+	}
+	if handle[0]["handler"] != l4metrics.HandlerName {
+		t.Fatalf("refusal route: want the metrics handler first, got %v", handle[0])
+	}
+	if handle[1]["handler"] != l4HandlerClose {
+		t.Fatalf("refusal route: want close last, got %v", handle[1])
+	}
+	cause, _ = handle[0]["cause"].(string)
+	if cause == "" {
+		t.Fatalf("refusal route: the metrics handler carries no cause: %v", handle[0])
+	}
+	ms, _ := route["match"].([]map[string]any)
+	if len(ms) != 1 {
+		t.Fatalf("refusal route: want exactly one matcher set, got %v", ms)
+	}
+	return cause, ms[0]
+}
+
+// negated returns the matcher set inside a `not`, failing when the
+// route is not a negation.
+func negated(t *testing.T, match map[string]any) map[string]any {
+	t.Helper()
+	inner, ok := match[l4MatcherNot].([]map[string]any)
+	if !ok || len(inner) != 1 {
+		t.Fatalf("want a single negated matcher set, got %v", match)
+	}
+	return inner[0]
+}
+
+// assertRelay checks the last route is the ungated relay: after v2.49
+// every refusal owns a route, so the relay carries no matcher and no
+// cause.
+func assertRelay(t *testing.T, route map[string]any) {
+	t.Helper()
+	if _, gated := route["match"]; gated {
+		t.Fatalf("the relay must not be gated once refusals own their routes: %v", route)
+	}
+	handle, _ := route["handle"].([]map[string]any)
+	if handle[0]["handler"] != l4metrics.HandlerName {
+		t.Fatalf("the relay must be counted: %v", handle)
+	}
+	if _, hasCause := handle[0]["cause"]; hasCause {
+		t.Fatalf("the relay handler must carry no cause — it counts traffic, not refusals: %v", handle[0])
+	}
+	if proxyOf(t, route)["handler"] != l4HandlerProxy {
+		t.Fatalf("the relay must relay: %v", route)
+	}
+}
+
+// An allow filter refuses everything it does not list, and says so:
+// the refusal is counted under its own cause instead of vanishing into
+// a shared close.
 func TestBuildLayer4App_IPFilterAllow(t *testing.T) {
 	svc := imapsService()
 	svc.IPFilter = &storage.IPFilter{Mode: storage.IPFilterModeAllow, CIDRs: []string{"192.168.1.0/24"}}
@@ -192,28 +280,22 @@ func TestBuildLayer4App_IPFilterAllow(t *testing.T) {
 	app := buildLayer4App([]storage.TCPService{svc}, false)
 	routes := app["servers"].(map[string]any)["svc_svc1"].(map[string]any)["routes"].([]map[string]any)
 	if len(routes) != 2 {
-		t.Fatalf("want relay + close, got %d routes: %v", len(routes), routes)
+		t.Fatalf("want refusal + relay, got %d routes: %v", len(routes), routes)
 	}
 
-	match := routes[0]["match"].([]map[string]any)[0]
-	ip, _ := match[l4MatcherRemoteIP].(map[string]any)
+	cause, match := refusalOf(t, routes[0])
+	if cause != l4metrics.CauseIPFilter {
+		t.Fatalf("cause: got %q", cause)
+	}
+	ip, _ := negated(t, match)[l4MatcherRemoteIP].(map[string]any)
 	ranges, _ := ip["ranges"].([]string)
 	if len(ranges) != 1 || ranges[0] != "192.168.1.0/24" {
 		t.Fatalf("remote_ip ranges: got %v", match)
 	}
-	if proxyOf(t, routes[0])["handler"] != l4HandlerProxy {
-		t.Fatal("the gated route must relay")
-	}
-	if routes[1]["handle"].([]map[string]any)[0]["handler"] != l4HandlerClose {
-		t.Fatalf("the fallback must close, got %v", routes[1])
-	}
-	if _, hasMatch := routes[1]["match"]; hasMatch {
-		t.Fatal("the fallback must match everything")
-	}
+	assertRelay(t, routes[1])
 }
 
-// A deny filter closes the listed sources first, then relays the rest
-// with no matcher at all.
+// A deny filter refuses the sources it lists — no negation needed.
 func TestBuildLayer4App_IPFilterDeny(t *testing.T) {
 	svc := imapsService()
 	svc.IPFilter = &storage.IPFilter{Mode: storage.IPFilterModeDeny, CIDRs: []string{"203.0.113.0/24"}}
@@ -221,17 +303,21 @@ func TestBuildLayer4App_IPFilterDeny(t *testing.T) {
 	app := buildLayer4App([]storage.TCPService{svc}, false)
 	routes := app["servers"].(map[string]any)["svc_svc1"].(map[string]any)["routes"].([]map[string]any)
 	if len(routes) != 2 {
-		t.Fatalf("want close + relay, got %d routes: %v", len(routes), routes)
+		t.Fatalf("want refusal + relay, got %d routes: %v", len(routes), routes)
 	}
-	if routes[0]["handle"].([]map[string]any)[0]["handler"] != l4HandlerClose {
-		t.Fatalf("denied sources must be closed first, got %v", routes[0])
+
+	cause, match := refusalOf(t, routes[0])
+	if cause != l4metrics.CauseIPFilter {
+		t.Fatalf("cause: got %q", cause)
 	}
-	if proxyOf(t, routes[1])["handler"] != l4HandlerProxy {
-		t.Fatalf("the rest must relay, got %v", routes[1])
+	if _, negatedFilter := match[l4MatcherNot]; negatedFilter {
+		t.Fatalf("a deny list matches what it refuses; no negation: %v", match)
 	}
-	if _, hasMatch := routes[1]["match"]; hasMatch {
-		t.Fatal("the relay must not be gated when the filter is a deny list")
+	ip, _ := match[l4MatcherRemoteIP].(map[string]any)
+	if ranges, _ := ip["ranges"].([]string); len(ranges) != 1 || ranges[0] != "203.0.113.0/24" {
+		t.Fatalf("remote_ip ranges: got %v", match)
 	}
+	assertRelay(t, routes[1])
 }
 
 // The CrowdSec matcher is only wired when the bouncer app is in the
@@ -242,15 +328,81 @@ func TestBuildLayer4App_CrowdSecOnlyWhenAvailable(t *testing.T) {
 
 	without := buildLayer4App([]storage.TCPService{svc}, false)
 	routes := without["servers"].(map[string]any)["svc_svc1"].(map[string]any)["routes"].([]map[string]any)
-	if _, hasMatch := routes[0]["match"]; hasMatch {
-		t.Fatal("no bouncer configured: the crowdsec matcher must not be emitted")
+	if len(routes) != 1 {
+		t.Fatalf("no bouncer configured: want the relay alone, got %v", routes)
 	}
+	assertRelay(t, routes[0])
 
 	with := buildLayer4App([]storage.TCPService{svc}, true)
 	routes = with["servers"].(map[string]any)["svc_svc1"].(map[string]any)["routes"].([]map[string]any)
-	match := routes[0]["match"].([]map[string]any)[0]
-	if _, ok := match[l4MatcherCrowdSec]; !ok {
+	if len(routes) != 2 {
+		t.Fatalf("want refusal + relay, got %v", routes)
+	}
+	cause, match := refusalOf(t, routes[0])
+	if cause != l4metrics.CauseCrowdSec {
+		t.Fatalf("cause: got %q", cause)
+	}
+	if _, ok := negated(t, match)[l4MatcherCrowdSec]; !ok {
 		t.Fatalf("crowdsec matcher missing: %v", match)
+	}
+}
+
+// The protocol gate refuses whatever does not speak it (v2.49).
+func TestBuildLayer4App_AcceptProtocol(t *testing.T) {
+	svc := imapsService()
+	svc.AcceptProtocol = storage.AcceptProtocolTLS
+
+	app := buildLayer4App([]storage.TCPService{svc}, false)
+	routes := app["servers"].(map[string]any)["svc_svc1"].(map[string]any)["routes"].([]map[string]any)
+	if len(routes) != 2 {
+		t.Fatalf("want refusal + relay, got %v", routes)
+	}
+	cause, match := refusalOf(t, routes[0])
+	if cause != l4metrics.CauseProtocol {
+		t.Fatalf("cause: got %q", cause)
+	}
+	if _, ok := negated(t, match)[storage.AcceptProtocolTLS]; !ok {
+		t.Fatalf("want a negated tls matcher, got %v", match)
+	}
+}
+
+// Every gate keeps its own route and its own cause, in the order a
+// connection meets them: the address gates decide from the socket, then
+// CrowdSec looks a decision up, then the protocol matcher has to read
+// the handshake. A single shared close could not attribute any of them,
+// which is the defect this ordering exists to fix.
+func TestBuildLayer4App_EachGateOwnsItsCause(t *testing.T) {
+	svc := imapsService()
+	svc.IPFilter = &storage.IPFilter{Mode: storage.IPFilterModeDeny, CIDRs: []string{"203.0.113.0/24"}}
+	svc.CrowdSecEnabled = true
+	svc.AcceptProtocol = storage.AcceptProtocolTLS
+
+	app := buildLayer4App([]storage.TCPService{svc}, true)
+	routes := app["servers"].(map[string]any)["svc_svc1"].(map[string]any)["routes"].([]map[string]any)
+	if len(routes) != 4 {
+		t.Fatalf("want three refusals + relay, got %d: %v", len(routes), routes)
+	}
+
+	want := []string{l4metrics.CauseIPFilter, l4metrics.CauseCrowdSec, l4metrics.CauseProtocol}
+	for i, wantCause := range want {
+		cause, _ := refusalOf(t, routes[i])
+		if cause != wantCause {
+			t.Errorf("route %d: cause = %q, want %q", i, cause, wantCause)
+		}
+	}
+	assertRelay(t, routes[3])
+
+	// No two refusals may share a cause, or the counter would blur two
+	// different reasons into one number.
+	seen := map[string]int{}
+	for i := range want {
+		cause, _ := refusalOf(t, routes[i])
+		seen[cause]++
+	}
+	for cause, n := range seen {
+		if n != 1 {
+			t.Errorf("cause %q emitted %d times", cause, n)
+		}
 	}
 }
 
@@ -334,6 +486,131 @@ func TestBuildConfigJSON_LoadsCleanly_WithTCPService(t *testing.T) {
 	if err := caddy.Validate(&cfg); err != nil {
 		t.Fatalf("caddy.Validate on a config carrying a TCP service: %v\n%s", err, raw)
 	}
+}
+
+// Every protocol Arenet offers must actually LOAD.
+//
+// This is the gate that matters most for v2.49, because the empty form
+// of a matcher is not one shape: `http` unmarshals into a slice and
+// `"http": {}` cannot decode at all, while `tls` and the others want an
+// object. Both produce a config Caddy refuses — so the failure mode is
+// a relay that will not come up, not one that misbehaves subtly.
+//
+// It runs the real caddy.Validate, which provisions each matcher module,
+// and it walks the offer rather than a hand-written list: a protocol
+// added to storage without being loadable fails here.
+func TestBuildConfigJSON_LoadsCleanly_EveryAcceptProtocol(t *testing.T) {
+	metrics.SetRegistry(metrics.NewRegistry())
+	t.Cleanup(metrics.ResetForTest)
+
+	routes := []storage.Route{{
+		ID: "r1", Host: "app.local",
+		Upstreams: []storage.Upstream{{URL: "http://127.0.0.1:9000", Weight: 1}},
+		LBPolicy:  storage.LBPolicyRoundRobin,
+	}}
+
+	seen := 0
+	for _, transport := range []string{storage.TCPServiceProtocolTCP, storage.TCPServiceProtocolUDP} {
+		offered := storage.AcceptProtocolsFor(transport)
+		if len(offered) == 0 {
+			t.Fatalf("%s: nothing offered — the walk would assert nothing", transport)
+		}
+		for _, proto := range offered {
+			seen++
+			t.Run(transport+"/"+proto, func(t *testing.T) {
+				svc := imapsService()
+				svc.Protocol = transport
+				svc.AcceptProtocol = proto
+				// An active check needs a real connection, which UDP
+				// has not; the fixture must stay valid on both.
+				svc.HealthCheck = nil
+
+				if err := svc.Validate(); err != nil {
+					t.Fatalf("the offer contains a service storage refuses: %v", err)
+				}
+
+				raw, err := buildConfigJSON(routes, buildOpts{
+					DevMode:     true,
+					TCPServices: []storage.TCPService{svc},
+				})
+				if err != nil {
+					t.Fatalf("buildConfigJSON: %v", err)
+				}
+				var cfg caddy.Config
+				if err := json.Unmarshal(raw, &cfg); err != nil {
+					t.Fatalf("unmarshal config: %v\n%s", err, raw)
+				}
+				if err := caddy.Validate(&cfg); err != nil {
+					t.Fatalf("caddy.Validate with accept_protocol %q on %s: %v\n%s",
+						proto, transport, err, raw)
+				}
+			})
+		}
+	}
+	// 9 on TCP + 3 on UDP with the current offer. A floor, not an
+	// equality, so adding a protocol does not fail this for the wrong
+	// reason — but a truncated offer does.
+	if seen < 12 {
+		t.Errorf("only %d (transport, protocol) pairs exercised; the offer looks truncated", seen)
+	}
+}
+
+// The offer is transport-aware, and storage refuses what it does not
+// offer. Those two must not drift: a UI that offers wireguard on TCP
+// would produce a service the API rejects, and — worse — a matcher that
+// can never match refuses every connection, since the gate is emitted
+// as not(<matcher>).
+func TestAcceptProtocol_OfferMatchesValidation(t *testing.T) {
+	for _, transport := range []string{storage.TCPServiceProtocolTCP, storage.TCPServiceProtocolUDP} {
+		offered := map[string]bool{}
+		for _, p := range storage.AcceptProtocolsFor(transport) {
+			offered[p] = true
+		}
+		for _, p := range []string{
+			storage.AcceptProtocolTLS, storage.AcceptProtocolSSH, storage.AcceptProtocolHTTP,
+			storage.AcceptProtocolPostgres, storage.AcceptProtocolRDP, storage.AcceptProtocolXMPP,
+			storage.AcceptProtocolWinbox, storage.AcceptProtocolDNS,
+			storage.AcceptProtocolWireGuard, storage.AcceptProtocolOpenVPN,
+		} {
+			svc := imapsService()
+			svc.Protocol = transport
+			svc.AcceptProtocol = p
+			svc.HealthCheck = nil
+			err := svc.Validate()
+			if offered[p] && err != nil {
+				t.Errorf("%s/%s is offered but refused: %v", transport, p, err)
+			}
+			if !offered[p] && err == nil {
+				t.Errorf("%s/%s is not offered yet accepted", transport, p)
+			}
+		}
+	}
+
+	// wireguard is the one that must flip between the two transports,
+	// so the test cannot pass by offering everything everywhere.
+	if slicesHas(storage.AcceptProtocolsFor(storage.TCPServiceProtocolTCP), storage.AcceptProtocolWireGuard) {
+		t.Error("wireguard must not be offered on TCP")
+	}
+	if !slicesHas(storage.AcceptProtocolsFor(storage.TCPServiceProtocolUDP), storage.AcceptProtocolWireGuard) {
+		t.Error("wireguard must be offered on UDP")
+	}
+	// quic is deliberately absent everywhere until a live probe settles
+	// it: bare, it sets no ALPN, and not(quic) that never matches would
+	// refuse every connection.
+	for _, transport := range []string{storage.TCPServiceProtocolTCP, storage.TCPServiceProtocolUDP} {
+		if slicesHas(storage.AcceptProtocolsFor(transport), "quic") {
+			t.Errorf("%s: quic is offered but was not verified", transport)
+		}
+	}
+}
+
+func slicesHas(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestValidateTCPListen_ReservedPorts(t *testing.T) {
@@ -454,15 +731,37 @@ func TestLayer4ModuleIDs_AllRegistered(t *testing.T) {
 	}
 
 	ids := map[string]bool{}
+	// collectMatchers RECURSES through `not`.
+	//
+	// v2.49 — the refusal routes wrap their matchers in
+	// layer4.matchers.not, so a flat walk over the top level of each
+	// match object stops seeing `crowdsec` and `remote_ip` entirely.
+	// This guard exists precisely because a matcher name that is not a
+	// registered module fails at reload time with
+	// "unknown module: layer4.matchers.crowdsec" and no test caught it
+	// once already. A walk that quietly looks at nothing is worse than
+	// no walk, so it descends.
+	var collectMatchers func(m map[string]any)
+	collectMatchers = func(m map[string]any) {
+		for name, raw := range m {
+			ids["layer4.matchers."+name] = true
+			if name != l4MatcherNot {
+				continue
+			}
+			nested, _ := raw.([]map[string]any)
+			for _, inner := range nested {
+				collectMatchers(inner)
+			}
+		}
+	}
+
 	for _, srv := range app["servers"].(map[string]any) {
 		for _, route := range srv.(map[string]any)["routes"].([]map[string]any) {
-			// A route without matchers is the catch-all; only the
-			// handlers of such a route carry an ID.
+			// A route without matchers is the relay; only the handlers
+			// of such a route carry an ID.
 			match, _ := route["match"].([]map[string]any)
 			for _, m := range match {
-				for name := range m {
-					ids["layer4.matchers."+name] = true
-				}
+				collectMatchers(m)
 			}
 			handle, _ := route["handle"].([]map[string]any)
 			for _, h := range handle {
@@ -474,10 +773,13 @@ func TestLayer4ModuleIDs_AllRegistered(t *testing.T) {
 		}
 	}
 
-	// Sanity: the walk must have seen the matcher that regressed,
-	// otherwise this test would pass by looking at nothing.
-	if !ids["layer4.matchers.crowdsec"] {
-		t.Fatalf("test fixture emitted no crowdsec matcher: %v", ids)
+	// Sanity: the walk must have seen the matcher that regressed AND
+	// the wrapper it now hides behind, otherwise this test would pass
+	// by looking at nothing.
+	for _, want := range []string{"layer4.matchers.crowdsec", "layer4.matchers.not"} {
+		if !ids[want] {
+			t.Fatalf("test fixture emitted no %s: %v", want, ids)
+		}
 	}
 
 	for id := range ids {

@@ -59,8 +59,12 @@ import (
 const (
 	l4MatcherRemoteIP = "remote_ip"
 	l4MatcherCrowdSec = "crowdsec"
-	l4HandlerProxy    = "proxy"
-	l4HandlerClose    = "close"
+	// l4MatcherNot negates the matcher sets it carries. Its JSON is a
+	// LIST of matcher sets, not an object — it unmarshals straight into
+	// []caddy.ModuleMap (layer4/matchers.go:320-323).
+	l4MatcherNot   = "not"
+	l4HandlerProxy = "proxy"
+	l4HandlerClose = "close"
 )
 
 // buildLayer4App returns the `layer4` app block, or nil when there is
@@ -98,52 +102,114 @@ func l4ServerName(svc storage.TCPService) string {
 	return "svc_" + svc.ID
 }
 
-// buildLayer4Routes renders the gates then the relay, in the order the
-// connection meets them.
+// buildLayer4Routes renders one refusal route per gate, then the relay.
+//
+// v2.49 — the gates used to be expressed the other way round: the
+// conditions a connection had to SATISFY were collected into the relay
+// route's single match object, and anything that failed any of them fell
+// through to one shared `close`. That config was correct and told the
+// operator nothing. A refused connection never reaches the relay chain,
+// so it never reached the metrics handler either, and CrowdSec, the IP
+// filter and now the protocol check were indistinguishable from each
+// other — and from a relay whose protection was simply switched off.
+//
+// Each gate now owns a route that matches what it REJECTS, counts the
+// refusal under its own cause, and closes. The relay is then
+// unconditional: everything that survived the gates above belongs to it.
+// Behaviour is unchanged — the same connections are refused — but the
+// operator can finally see which gate did it.
+//
+// Ordering is the order a connection meets them, cheapest first: the
+// address gates decide from the socket alone, CrowdSec needs a store
+// lookup, and the protocol matcher has to read the handshake.
 func buildLayer4Routes(svc storage.TCPService, crowdSecAvailable bool) []map[string]any {
-	routes := make([]map[string]any, 0, 3)
+	routes := make([]map[string]any, 0, 5)
 
-	// 1. A denied source is closed before anything else looks at it.
-	if f := svc.IPFilter; f != nil && f.Mode == storage.IPFilterModeDeny && len(f.CIDRs) > 0 {
-		routes = append(routes, map[string]any{
-			"match":  []map[string]any{{l4MatcherRemoteIP: map[string]any{"ranges": f.CIDRs}}},
-			"handle": []map[string]any{{"handler": l4HandlerClose}},
-		})
+	if f := svc.IPFilter; f != nil && len(f.CIDRs) > 0 {
+		switch f.Mode {
+		case storage.IPFilterModeDeny:
+			// Listed sources are refused.
+			routes = append(routes, l4RefusalRoute(svc.ID, l4metrics.CauseIPFilter,
+				map[string]any{l4MatcherRemoteIP: map[string]any{"ranges": f.CIDRs}}))
+		case storage.IPFilterModeAllow:
+			// Everything NOT listed is refused. Fail-closed, as before.
+			routes = append(routes, l4RefusalRoute(svc.ID, l4metrics.CauseIPFilter,
+				l4Not(map[string]any{l4MatcherRemoteIP: map[string]any{"ranges": f.CIDRs}})))
+		}
 	}
 
-	// 2. The relay itself, gated by whatever must be true to reach it.
-	match := map[string]any{}
 	if crowdSecAvailable && svc.CrowdSecEnabled {
-		// The matcher takes no options; an empty object is how a
-		// Caddy matcher with no configuration is written.
-		match[l4MatcherCrowdSec] = map[string]any{}
-	}
-	if f := svc.IPFilter; f != nil && f.Mode == storage.IPFilterModeAllow && len(f.CIDRs) > 0 {
-		match[l4MatcherRemoteIP] = map[string]any{"ranges": f.CIDRs}
+		// The matcher takes no options; an empty object is how a Caddy
+		// matcher with no configuration is written. Negated, it matches
+		// exactly the connections the bouncer refuses.
+		//
+		// Fail-open is preserved and comes from the bouncer, not from
+		// here: with enable_hard_fails false its core returns "no
+		// decision" when LAPI is unreachable, so the matcher says
+		// allowed, the negation does not match, and the connection
+		// reaches the relay.
+		routes = append(routes, l4RefusalRoute(svc.ID, l4metrics.CauseCrowdSec,
+			l4Not(map[string]any{l4MatcherCrowdSec: map[string]any{}})))
 	}
 
-	// The metrics handler goes FIRST in the chain: it wraps the
-	// connection so everything the proxy then reads and writes is
-	// counted. It never refuses a connection — a relay that stopped
-	// relaying because of a counter would be a poor trade.
-	relay := map[string]any{"handle": []map[string]any{
+	if p := svc.AcceptProtocol; p != storage.AcceptProtocolAny {
+		// Anything whose handshake is not that protocol is refused.
+		routes = append(routes, l4RefusalRoute(svc.ID, l4metrics.CauseProtocol,
+			l4Not(l4ProtocolMatcher(p))))
+	}
+
+	// The relay, for everything the gates above let through. The metrics
+	// handler goes FIRST in the chain: it wraps the connection so
+	// everything the proxy then reads and writes is counted. It never
+	// refuses a connection — a relay that stopped relaying because of a
+	// counter would be a poor trade.
+	routes = append(routes, map[string]any{"handle": []map[string]any{
 		{"handler": l4metrics.HandlerName, "service_id": svc.ID},
 		buildLayer4Proxy(svc),
-	}}
-	if len(match) > 0 {
-		relay["match"] = []map[string]any{match}
-	}
-	routes = append(routes, relay)
-
-	// 3. Anything that did not reach the relay is closed explicitly
-	//    rather than left to the implicit drop — but only when a gate
-	//    could actually reject: without one, this route is dead code.
-	if len(match) > 0 {
-		routes = append(routes, map[string]any{
-			"handle": []map[string]any{{"handler": l4HandlerClose}},
-		})
-	}
+	}})
 	return routes
+}
+
+// l4Not wraps matchers so the route matches when they do NOT. The value
+// is a list of matcher sets (see l4MatcherNot).
+func l4Not(matchers map[string]any) map[string]any {
+	return map[string]any{l4MatcherNot: []map[string]any{matchers}}
+}
+
+// l4ProtocolMatcher renders a protocol matcher with no sub-matchers,
+// which is "match any connection speaking it".
+//
+// The empty value is NOT the same shape for every matcher, and getting
+// it wrong fails config load rather than misbehaving quietly:
+//
+//   - `http` unmarshals straight into caddyhttp.RawMatcherSets, i.e.
+//     []caddy.ModuleMap (modules/l4http/httpmatcher.go:57-59), so its
+//     value must be a JSON ARRAY. `"http": {}` cannot decode at all.
+//   - `tls` and the rest hold a caddy.ModuleMap or a plain struct whose
+//     fields are all optional (modules/l4tls/matcher.go:37), so an
+//     OBJECT is right for them.
+//
+// Verified by reading each matcher in caddy-l4 v0.1.1 on 2026-09-27.
+func l4ProtocolMatcher(protocol string) map[string]any {
+	if protocol == storage.AcceptProtocolHTTP {
+		return map[string]any{protocol: []map[string]any{}}
+	}
+	return map[string]any{protocol: map[string]any{}}
+}
+
+// l4RefusalRoute closes a connection and records why.
+//
+// The metrics handler precedes `close` so the refusal is counted; on
+// this route it is in cause mode, which deliberately leaves the traffic
+// counters alone (l4metrics.Handler.Cause).
+func l4RefusalRoute(serviceID, cause string, match map[string]any) map[string]any {
+	return map[string]any{
+		"match": []map[string]any{match},
+		"handle": []map[string]any{
+			{"handler": l4metrics.HandlerName, "service_id": serviceID, "cause": cause},
+			{"handler": l4HandlerClose},
+		},
+	}
 }
 
 // buildLayer4Proxy renders the proxy handler. `dial` is a list in

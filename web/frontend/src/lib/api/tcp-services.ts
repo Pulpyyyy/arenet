@@ -53,6 +53,34 @@ export interface TCPServiceIPFilter {
 export const TCP_SERVICE_PROTOCOLS = ['tcp', 'udp'] as const;
 export type TCPServiceProtocol = (typeof TCP_SERVICE_PROTOCOLS)[number];
 
+/**
+ * Application protocols a relay can be told to accept, per TRANSPORT
+ * (v2.49). Mirror of `acceptProtocolTransports` in
+ * internal/storage/tcpservice.go, which is the source of truth and is
+ * what the API validates against.
+ *
+ * Offering a pair the backend refuses would only earn a 400 — but the
+ * reason the table is transport-aware is sharper than that: the gate is
+ * emitted as `not(<matcher>)`, so a matcher that can never see this
+ * transport's traffic refuses EVERY connection. Do not widen a row
+ * without widening the Go table first.
+ *
+ * `quic` and the SOCKS matchers exist in caddy-l4 and are deliberately
+ * absent — see the Go file for why.
+ */
+export const ACCEPT_PROTOCOLS: Record<TCPServiceProtocol, readonly string[]> = {
+	tcp: ['tls', 'ssh', 'http', 'postgres', 'rdp', 'xmpp', 'winbox', 'dns', 'openvpn'],
+	udp: ['wireguard', 'dns', 'openvpn']
+};
+
+/** Protocols valid for a transport; '' (accept anything) is added by the form. */
+export const acceptProtocolsFor = (transport: TCPServiceProtocol | undefined): readonly string[] =>
+	ACCEPT_PROTOCOLS[transport === 'udp' ? 'udp' : 'tcp'];
+
+/** Causes a connection can be refused for, in `TCPServiceCounters.refused`. */
+export const REFUSAL_CAUSES = ['protocol', 'ipFilter', 'crowdsec'] as const;
+export type RefusalCause = (typeof REFUSAL_CAUSES)[number];
+
 export interface TCPService {
 	id: string;
 	name: string;
@@ -67,6 +95,15 @@ export interface TCPService {
 	 * socket always succeeds, so the check could never fail).
 	 */
 	protocol?: TCPServiceProtocol;
+	/**
+	 * Application protocol accepted at the handshake — a caddy-l4
+	 * matcher name. Empty accepts anything, which is what every service
+	 * did before v2.49. A connection whose handshake is not that
+	 * protocol is closed and counted under cause `protocol`.
+	 *
+	 * NOT the same axis as `protocol` above, which is the transport.
+	 */
+	acceptProtocol?: string;
 	upstreams: TCPUpstream[];
 	lbPolicy?: TCPLBPolicy;
 	healthCheck?: TCPHealthCheck;
@@ -150,6 +187,15 @@ export interface TCPServiceCounters {
 	bytesOut: number;
 	/** Connections the relay could not complete. */
 	errors: number;
+	/**
+	 * Connections a gate closed before the backend, keyed by cause.
+	 * Absent when nothing was refused; a cause that never fired is
+	 * left out rather than sent as 0.
+	 *
+	 * NOT a subset of `connections`: a refused connection never reaches
+	 * the relay, so it is counted here and nowhere else.
+	 */
+	refused?: Partial<Record<RefusalCause, number>>;
 	lastConnectionAt?: string;
 }
 

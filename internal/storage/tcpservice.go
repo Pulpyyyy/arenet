@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -80,6 +81,93 @@ const (
 	ProxyProtocolV1  = "v1"
 	ProxyProtocolV2  = "v2"
 )
+
+// Application protocols a relay can be told to accept (v2.49). Each
+// value is a caddy-l4 matcher module name, so it goes into the emitted
+// config verbatim — the set was taken from the module IDs registered by
+// caddy-l4 v0.1.1, not from the protocols one might expect.
+const (
+	AcceptProtocolAny       = ""
+	AcceptProtocolTLS       = "tls"
+	AcceptProtocolSSH       = "ssh"
+	AcceptProtocolHTTP      = "http"
+	AcceptProtocolPostgres  = "postgres"
+	AcceptProtocolRDP       = "rdp"
+	AcceptProtocolXMPP      = "xmpp"
+	AcceptProtocolWinbox    = "winbox"
+	AcceptProtocolDNS       = "dns"
+	AcceptProtocolWireGuard = "wireguard"
+	AcceptProtocolOpenVPN   = "openvpn"
+)
+
+// acceptProtocolTransports says which transports each protocol may be
+// offered on. Read the two kinds of claim here separately, because they
+// rest on different evidence.
+//
+// What the CODE proves (caddy-l4 v0.1.1, read 2026-09-27):
+//   - only `quic` gates on transport at all, refusing any non-UDP local
+//     address outright (modules/l4quic/matcher.go:84);
+//   - `dns` and `openvpn` are genuinely dual, with explicit branches
+//     keyed on *net.TCPAddr (modules/l4dns/matcher.go:74,
+//     modules/l4openvpn/matcher.go:201) — the TCP wire format carries a
+//     2-byte length prefix the UDP one does not;
+//   - every other matcher has NO transport check whatsoever and runs
+//     identically on either. So the source does NOT establish that they
+//     are TCP-only.
+//
+// What the PROTOCOLS decide: SSH, PostgreSQL, RDP, XMPP, SOCKS, Winbox
+// and cleartext HTTP/1.x are TCP protocols, and the TLS matcher parses
+// TLS-over-TCP record framing rather than DTLS. WireGuard is UDP. There
+// is no point offering a combination whose matcher can run but can
+// never see the traffic it is looking for — that is not advice to the
+// operator, it is not offering something broken.
+//
+// Why this matters more than a cosmetic UI restriction: a refusal is
+// emitted as not(<matcher>), so a matcher that can never match refuses
+// EVERY connection. A wrong entry here does not degrade a relay, it
+// kills it.
+//
+// `socks4` and `socks5` are absent for a different reason: the matcher
+// is trivial, but its Go package cannot be imported without pulling in a
+// full SOCKS5 server library that Arenet would never run. The project is
+// conservative with dependencies, and a homelab reverse proxy rarely
+// relays SOCKS.
+//
+// `quic` is deliberately absent. It is UDP-only and correctly gated,
+// but in its bare form it sets no ALPN, and quic-go documents that the
+// TLS config must define an application protocol — its upstream tests
+// only pass under a fake packet conn. An unverified matcher, combined
+// with the not() inversion above, risks a relay that refuses
+// everything. It goes in when a live probe says it works.
+var acceptProtocolTransports = map[string][]string{
+	AcceptProtocolTLS:       {TCPServiceProtocolTCP},
+	AcceptProtocolSSH:       {TCPServiceProtocolTCP},
+	AcceptProtocolHTTP:      {TCPServiceProtocolTCP},
+	AcceptProtocolPostgres:  {TCPServiceProtocolTCP},
+	AcceptProtocolRDP:       {TCPServiceProtocolTCP},
+	AcceptProtocolXMPP:      {TCPServiceProtocolTCP},
+	AcceptProtocolWinbox:    {TCPServiceProtocolTCP},
+	AcceptProtocolWireGuard: {TCPServiceProtocolUDP},
+	AcceptProtocolDNS:       {TCPServiceProtocolTCP, TCPServiceProtocolUDP},
+	AcceptProtocolOpenVPN:   {TCPServiceProtocolTCP, TCPServiceProtocolUDP},
+}
+
+// AcceptProtocolsFor lists the protocols a relay on this transport may
+// be told to accept, so the UI offers exactly what can work. Sorted, so
+// the order is the same on every call and in every test.
+func AcceptProtocolsFor(transport string) []string {
+	if transport != TCPServiceProtocolUDP {
+		transport = TCPServiceProtocolTCP
+	}
+	out := make([]string, 0, len(acceptProtocolTransports))
+	for proto, transports := range acceptProtocolTransports {
+		if slices.Contains(transports, transport) {
+			out = append(out, proto)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
 
 // tcpLBPolicies is the set accepted by Validate.
 var tcpLBPolicies = map[string]struct{}{
@@ -143,8 +231,25 @@ type TCPService struct {
 	// pairs the two.
 	ProxyProtocol string `json:"proxyProtocol,omitempty"`
 
+	// AcceptProtocol (v2.49) is the application protocol the relay
+	// accepts at the handshake — a layer4.matchers.<name> module.
+	// Empty accepts anything, which is the pre-v2.49 behaviour; a
+	// connection whose handshake is not that protocol is closed and
+	// counted under cause "protocol".
+	//
+	// Named AcceptProtocol and not Protocol because Protocol above is
+	// the TRANSPORT (tcp / udp). Two different axes, and names that
+	// would otherwise be one letter apart.
+	//
+	// This is hardening, not a hole being closed: a correct backend
+	// already rejects garbage. What it buys is that garbage never
+	// reaches the backend, and that a repeated mismatch is countable.
+	AcceptProtocol string `json:"acceptProtocol,omitempty"`
+
 	// IPFilter is the same source-IP gate the HTTP routes use; at
-	// layer 4 it is enforced by layer4.matchers.ip.
+	// layer 4 it is enforced by layer4.matchers.remote_ip — the
+	// emitter's l4MatcherRemoteIP. (It said `layer4.matchers.ip`
+	// until v2.49; no such module exists in caddy-l4.)
 	IPFilter *IPFilter `json:"ipFilter,omitempty"`
 
 	// CrowdSecEnabled applies the instance's CrowdSec decisions to
@@ -211,6 +316,20 @@ func (s *TCPService) Validate() error {
 	default:
 		return fmt.Errorf("tcp service: protocol %q must be %q or %q",
 			s.Protocol, TCPServiceProtocolTCP, TCPServiceProtocolUDP)
+	}
+
+	if s.AcceptProtocol != AcceptProtocolAny {
+		transports, known := acceptProtocolTransports[s.AcceptProtocol]
+		if !known {
+			return fmt.Errorf("tcp service: accept_protocol %q is not supported", s.AcceptProtocol)
+		}
+		// Refused rather than silently ignored: the gate is emitted as
+		// not(<matcher>), so a protocol whose matcher cannot see this
+		// transport's traffic would refuse every connection.
+		if !slices.Contains(transports, s.Network()) {
+			return fmt.Errorf("tcp service: accept_protocol %q does not apply to %s",
+				s.AcceptProtocol, s.Network())
+		}
 	}
 
 	if len(s.Upstreams) == 0 {

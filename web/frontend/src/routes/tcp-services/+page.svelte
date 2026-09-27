@@ -42,6 +42,9 @@
 		testTCPService,
 		type TCPService,
 		type TCPServiceRequest,
+		acceptProtocolsFor,
+		REFUSAL_CAUSES,
+		type RefusalCause,
 		type TCPServiceTestResult,
 		tcpServicesMetrics,
 		type TCPServiceProtocol,
@@ -74,6 +77,7 @@
 	// --- form state ---------------------------------------------
 	let fName = $state('');
 	let fProtocol = $state<TCPServiceProtocol>('tcp');
+	let fAcceptProtocol = $state('');
 	let fListenAddr = $state('');
 	let fListenPort = $state<number | null>(null);
 	let fBackendHost = $state('');
@@ -89,6 +93,26 @@
 		{ value: 'tcp' as const, label: 'TCP', hint: tl('tcpServices.form.protocolTCPHint'), tone: 'neutral' as const },
 		{ value: 'udp' as const, label: 'UDP', hint: tl('tcpServices.form.protocolUDPHint'), tone: 'neutral' as const }
 	]);
+
+	// Cause -> i18n key. Named rather than interpolated at the call site
+	// so the mapping is in one place and a missing translation shows up
+	// as one obvious key instead of a computed string nobody greps for.
+	function refusedLabelKey(cause: RefusalCause): string {
+		return `tcpServices.refused${cause[0].toUpperCase()}${cause.slice(1)}`;
+	}
+
+	// The protocols valid for the chosen transport, plus "anything".
+	const acceptProtocolChoices = $derived(acceptProtocolsFor(fProtocol));
+
+	// Switching transport can invalidate the chosen protocol — tls means
+	// nothing on a UDP relay. Clearing it here keeps the form from
+	// submitting a pair the API refuses, which the operator would read as
+	// an unexplained 400.
+	$effect(() => {
+		if (fAcceptProtocol && !acceptProtocolChoices.includes(fAcceptProtocol)) {
+			fAcceptProtocol = '';
+		}
+	});
 
 	const proxyOptions = $derived([
 		{ value: '' as const, label: tl('tcpServices.form.proxyNone'), hint: tl('tcpServices.form.proxyNoneHint'), tone: 'neutral' as const },
@@ -181,6 +205,7 @@
 	function resetForm() {
 		fName = '';
 		fProtocol = 'tcp';
+		fAcceptProtocol = '';
 		fListenAddr = '';
 		fListenPort = null;
 		fBackendHost = '';
@@ -206,6 +231,7 @@
 		editingId = svc.id;
 		fName = svc.name;
 		fProtocol = svc.protocol ?? 'tcp';
+		fAcceptProtocol = svc.acceptProtocol ?? '';
 		fListenAddr = svc.listenAddr ?? '';
 		fListenPort = svc.listenPort;
 		fBackendHost = svc.upstreams[0]?.host ?? '';
@@ -227,6 +253,11 @@
 		return {
 			name: fName.trim(),
 			protocol: fProtocol,
+			// Every field of this payload is rebuilt by hand, so a new
+			// one that is not listed here is silently dropped on save
+			// with a success toast — that is how the v2.46 path
+			// redirect was lost. See the buildPayload test.
+			acceptProtocol: fAcceptProtocol || undefined,
 			listenAddr: fListenAddr.trim(),
 			listenPort: fListenPort ?? 0,
 			upstreams: [{ host: fBackendHost.trim(), port: fBackendPort ?? 0 }],
@@ -368,6 +399,9 @@
 							<th class="px-4 py-3 font-medium">{tl('tcpServices.colBackend')}</th>
 							<th class="px-4 py-3 font-medium">{tl('tcpServices.colGuards')}</th>
 							<th class="px-4 py-3 font-medium">{tl('tcpServices.colTraffic')}</th>
+							<th class="px-4 py-3 font-medium" title={tl('tcpServices.refusedTooltip')}
+								>{tl('tcpServices.colRefused')}</th
+							>
 						</tr>
 					</thead>
 					<tbody>
@@ -427,6 +461,36 @@
 											<span class="text-down">· {c.errors} {tl('tcpServices.errShort')}</span>
 										{/if}
 										<div class="text-muted">{formatBytes(c.bytesIn)} ↓ · {formatBytes(c.bytesOut)} ↑</div>
+									{:else}
+										<span class="text-muted">—</span>
+									{/if}
+								</td>
+								<!--
+								  v2.49 — refusals, per cause.
+								  Until now a connection closed by CrowdSec, the source
+								  filter or (new) the protocol gate incremented nothing
+								  anywhere: the metrics handler lives in the relay chain,
+								  which a refused connection never reaches. The operator
+								  could not tell a relay that was protecting them from one
+								  whose protection was off. Hence a column, not a tooltip.
+								-->
+								<td class="px-4 py-3 font-mono text-xs" data-testid="tcp-refused-{svc.id}">
+									{#if counters[svc.id]}
+										{@const refused = counters[svc.id].refused ?? {}}
+										{#if Object.keys(refused).length > 0}
+											<div class="flex flex-col gap-0.5">
+												{#each REFUSAL_CAUSES as cause (cause)}
+													{#if refused[cause]}
+														<span class="text-down"
+															>{refused[cause]}
+															<span class="text-muted">{tl(refusedLabelKey(cause))}</span></span
+														>
+													{/if}
+												{/each}
+											</div>
+										{:else}
+											<span class="text-muted">{tl('tcpServices.refusedNone')}</span>
+										{/if}
 									{:else}
 										<span class="text-muted">—</span>
 									{/if}
@@ -520,6 +584,25 @@
 					<div class="flex flex-col gap-2">
 						<span class="text-sm font-medium text-secondary">{tl('tcpServices.form.protocol')}</span>
 						<ModeSelector id="tcp-protocol" bind:value={fProtocol} options={protocolOptions} ariaLabel={tl('tcpServices.form.protocol')} />
+					</div>
+
+					<div class="flex flex-col gap-2">
+						<span class="text-sm font-medium text-secondary"
+							>{tl('tcpServices.form.acceptProtocol')}</span
+						>
+						<select
+							id="tcp-accept-protocol"
+							bind:value={fAcceptProtocol}
+							aria-label={tl('tcpServices.form.acceptProtocol')}
+							data-testid="tcp-accept-protocol"
+							class="h-9 rounded-md border border-border-subtle bg-surface px-2 text-sm text-primary"
+						>
+							<option value="">{tl('tcpServices.form.acceptProtocolAny')}</option>
+							{#each acceptProtocolChoices as proto (proto)}
+								<option value={proto}>{proto}</option>
+							{/each}
+						</select>
+						<span class="text-xs text-muted">{tl('tcpServices.form.acceptProtocolHint')}</span>
 					</div>
 
 					{#if relaySentence}

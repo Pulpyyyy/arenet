@@ -38,6 +38,34 @@ import (
 	"time"
 )
 
+// Causes a connection can be refused for, in the JSON shape the API
+// speaks (camelCase, like the counter names beside them).
+//
+// A gate's refusal is otherwise invisible: the relay chain — and with
+// it every counter below — never runs, so an operator cannot tell a
+// relay that is protecting them from one whose protection is off. That
+// was true of every layer-4 refusal up to v2.48.
+const (
+	CauseProtocol = "protocol"
+	CauseIPFilter = "ipFilter"
+	CauseCrowdSec = "crowdsec"
+)
+
+// knownCauses is the fixed set every cell carries a counter for.
+//
+// Fixed on purpose: a cell can then be built once and read with plain
+// atomics, no lock and no allocation on the refusal path. A cause the
+// emitter does not know counts nothing, exactly like an unknown
+// service — metrics never cost a relay a connection.
+var knownCauses = [...]string{CauseProtocol, CauseIPFilter, CauseCrowdSec}
+
+// Causes returns the refusal causes a cell counts, in a stable order.
+//
+// Exported so the API documentation and the UI can be checked against
+// the set the registry actually emits, instead of repeating it and
+// drifting.
+func Causes() []string { return knownCauses[:] }
+
 // ServiceCounters is one service's live view.
 type ServiceCounters struct {
 	// Connections accepted since start.
@@ -50,6 +78,15 @@ type ServiceCounters struct {
 	// Errors counts connections the relay could not complete —
 	// almost always a backend that refused or timed out.
 	Errors uint64 `json:"errors"`
+	// Refused counts connections a gate closed before they reached the
+	// backend, keyed by cause. Absent when nothing was refused, and
+	// causes that never fired are left out rather than reported as 0 —
+	// a map so a later gate (country, rate) adds a key instead of a
+	// field, and an older UI ignores what it does not know.
+	//
+	// These are NOT a subset of Connections: a refused connection never
+	// reaches the relay chain, so it is counted here and nowhere else.
+	Refused map[string]uint64 `json:"refused,omitempty"`
 	// LastConnectionAt is empty until the first connection.
 	LastConnectionAt string `json:"lastConnectionAt,omitempty"`
 }
@@ -61,6 +98,20 @@ type cell struct {
 	bytesOut    atomic.Uint64
 	errors      atomic.Uint64
 	lastNanos   atomic.Int64
+	// refused is populated for every known cause at construction and
+	// never written to afterwards, so it needs no lock.
+	refused map[string]*atomic.Uint64
+}
+
+// newCell builds a cell with its refusal counters in place. Every cell
+// must come from here: a bare &cell{} has a nil refused map and would
+// silently drop refusals.
+func newCell() *cell {
+	c := &cell{refused: make(map[string]*atomic.Uint64, len(knownCauses))}
+	for _, cause := range knownCauses {
+		c.refused[cause] = new(atomic.Uint64)
+	}
+	return c
 }
 
 // Registry holds one cell per known service.
@@ -91,7 +142,7 @@ func (r *Registry) Sync(serviceIDs []string) {
 	}
 	for id := range wanted {
 		if _, exists := r.cells[id]; !exists {
-			r.cells[id] = &cell{}
+			r.cells[id] = newCell()
 		}
 	}
 }
@@ -161,6 +212,21 @@ func (rec *Recorder) AddOut(n uint64) {
 	}
 }
 
+// Refused records a connection a gate closed before the relay.
+//
+// An unknown cause is ignored rather than added: the set is fixed so
+// the cell needs no lock, and a typo in a hand-written config must not
+// grow a map that connections are reading.
+func (r *Registry) Refused(serviceID, cause string) {
+	c := r.cellFor(serviceID)
+	if c == nil {
+		return
+	}
+	if n := c.refused[cause]; n != nil {
+		n.Add(1)
+	}
+}
+
 // Failed records a connection the relay could not complete.
 func (r *Registry) Failed(serviceID string) {
 	if c := r.cellFor(serviceID); c != nil {
@@ -181,6 +247,14 @@ func (r *Registry) Snapshot() map[string]ServiceCounters {
 			BytesIn:     c.bytesIn.Load(),
 			BytesOut:    c.bytesOut.Load(),
 			Errors:      c.errors.Load(),
+		}
+		for cause, n := range c.refused {
+			if v := n.Load(); v > 0 {
+				if sc.Refused == nil {
+					sc.Refused = make(map[string]uint64, len(knownCauses))
+				}
+				sc.Refused[cause] = v
+			}
 		}
 		if nanos := c.lastNanos.Load(); nanos > 0 {
 			sc.LastConnectionAt = time.Unix(0, nanos).UTC().Format(time.RFC3339)

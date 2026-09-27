@@ -172,6 +172,94 @@ describe('/tcp-services — saving', () => {
 		expect(payload.upstreams[0]).toMatchObject({ host: '10.20.0.5', port: 993 });
 	});
 
+	// v2.49 — the accepted protocol must SURVIVE the save.
+	//
+	// buildPayload() rebuilds every field by hand, which is exactly how
+	// the v2.46 path redirect was lost: the operator saw a success toast,
+	// the log said "config is unchanged", and nothing had been stored.
+	// Three places have to agree — buildPayload, resetForm and openEdit —
+	// and this covers the first two.
+	it('ships the accepted protocol, and does not drop it', async () => {
+		api.createTCPService.mockResolvedValue(service());
+		render(Page);
+		await waitFor(() => expect(screen.getByTestId('tcp-empty')).toBeInTheDocument());
+		await userEvent.click(screen.getAllByText('+ New service')[0]);
+		await tick();
+
+		await userEvent.type(document.getElementById('tcp-name') as HTMLInputElement, 'imaps');
+		await userEvent.type(document.getElementById('tcp-listen-port') as HTMLInputElement, '993');
+		await userEvent.type(document.getElementById('tcp-backend-host') as HTMLInputElement, '10.20.0.5');
+		await userEvent.type(document.getElementById('tcp-backend-port') as HTMLInputElement, '993');
+		await userEvent.selectOptions(screen.getByTestId('tcp-accept-protocol'), 'tls');
+		await tick();
+		await userEvent.click(screen.getByText('Save'));
+
+		await waitFor(() => expect(api.createTCPService).toHaveBeenCalledTimes(1));
+		expect(api.createTCPService.mock.calls[0][0].acceptProtocol).toBe('tls');
+	});
+
+	// Left at "anything", nothing is sent: an existing relay must keep
+	// emitting the config it emitted before v2.49.
+	it('sends no protocol when the operator did not choose one', async () => {
+		api.createTCPService.mockResolvedValue(service());
+		render(Page);
+		await waitFor(() => expect(screen.getByTestId('tcp-empty')).toBeInTheDocument());
+		await userEvent.click(screen.getAllByText('+ New service')[0]);
+		await tick();
+
+		await userEvent.type(document.getElementById('tcp-name') as HTMLInputElement, 'imaps');
+		await userEvent.type(document.getElementById('tcp-listen-port') as HTMLInputElement, '993');
+		await userEvent.type(document.getElementById('tcp-backend-host') as HTMLInputElement, '10.20.0.5');
+		await userEvent.type(document.getElementById('tcp-backend-port') as HTMLInputElement, '993');
+		await tick();
+		await userEvent.click(screen.getByText('Save'));
+
+		await waitFor(() => expect(api.createTCPService).toHaveBeenCalledTimes(1));
+		expect(api.createTCPService.mock.calls[0][0].acceptProtocol).toBeUndefined();
+	});
+
+	// Editing an existing relay must LOAD the stored value, or the first
+	// save after opening the form would silently clear it — the other
+	// half of the path-redirect bug, which had the same hole in openEdit.
+	it('keeps the stored protocol when an existing service is edited', async () => {
+		api.listTCPServices.mockResolvedValue([service({ acceptProtocol: 'ssh' })]);
+		api.updateTCPService.mockResolvedValue(service({ acceptProtocol: 'ssh' }));
+		render(Page);
+		await waitFor(() => expect(screen.getByTestId('tcp-row-svc1')).toBeInTheDocument());
+		await userEvent.click(screen.getByTestId('tcp-row-svc1'));
+		await tick();
+
+		expect((screen.getByTestId('tcp-accept-protocol') as HTMLSelectElement).value).toBe('ssh');
+
+		await userEvent.click(screen.getByText('Save'));
+		await waitFor(() => expect(api.updateTCPService).toHaveBeenCalledTimes(1));
+		expect(api.updateTCPService.mock.calls[0][1].acceptProtocol).toBe('ssh');
+	});
+
+	// Switching to UDP must clear a TCP-only protocol rather than submit
+	// a pair the API refuses with a 400 the operator cannot interpret.
+	it('clears a TCP-only protocol when the transport becomes UDP', async () => {
+		api.createTCPService.mockResolvedValue(service());
+		render(Page);
+		await waitFor(() => expect(screen.getByTestId('tcp-empty')).toBeInTheDocument());
+		await userEvent.click(screen.getAllByText('+ New service')[0]);
+		await tick();
+
+		await userEvent.selectOptions(screen.getByTestId('tcp-accept-protocol'), 'tls');
+		await tick();
+		expect((screen.getByTestId('tcp-accept-protocol') as HTMLSelectElement).value).toBe('tls');
+
+		await userEvent.click(screen.getByText('UDP'));
+		await tick();
+		expect((screen.getByTestId('tcp-accept-protocol') as HTMLSelectElement).value).toBe('');
+		// And the offer itself follows the transport.
+		const options = Array.from(
+			(screen.getByTestId('tcp-accept-protocol') as HTMLSelectElement).options
+		).map((o) => o.value);
+		expect(options).toContain('wireguard');
+		expect(options).not.toContain('tls');
+	});
+
 	it('surfaces what the server refused', async () => {
 		api.createTCPService.mockRejectedValue(new Error('port 443 is used by Arenet HTTPS routes'));
 		render(Page);

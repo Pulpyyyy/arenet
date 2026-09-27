@@ -1982,7 +1982,7 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 	// request that none of the prior host-matched routes handled.
 	// v2.9.10 Bug 1: body resolved from opts.ErrorTemplates (operator-flagged
 	// IsCatchallDefault template's Pages[404], else builtin Arenet 404 HTML).
-	httpRoutes = append(httpRoutes, catchAllRoute(opts.ErrorTemplates))
+	httpRoutes = append(httpRoutes, catchAllRoute(opts.ErrorTemplates, opts.CrowdSec.apiKey != ""))
 
 	httpListen, httpsListen := listenPortsFor(opts.DevMode)
 
@@ -2057,7 +2057,7 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 
 	if len(httpsRoutes) > 0 {
 		// v2.9.10 Bug 1: same branded-body resolution as the HTTP server.
-		httpsRoutes = append(httpsRoutes, catchAllRoute(opts.ErrorTemplates))
+		httpsRoutes = append(httpsRoutes, catchAllRoute(opts.ErrorTemplates, opts.CrowdSec.apiKey != ""))
 		httpsServer := httpServer{
 			Listen: []string{httpsListen},
 			AutomaticHTTPS: &automaticHTTPSConfig{
@@ -3730,20 +3730,42 @@ func forwardAuthDial(raw string) string {
 // Pre-v2.9.10 this returned plain text "Not Found - no route
 // configured for this host" with no Content-Type, breaking
 // visual consistency.
-func catchAllRoute(templates map[string]storage.ErrorPageTemplate) httpRoute {
+// catchAllRoute answers everything no host-matched route claimed.
+//
+// crowdSec prepends the bouncer so a banned source is refused here too
+// (v2.49). Until then the catch-all answered a bare 404 before CrowdSec
+// was ever consulted, because the bouncer lives in each route's own
+// handler chain — so an operator who had banned an IP watched it get a
+// 404 from an unknown host and could not tell whether the ban worked.
+// That is the confusion reported on 2026-09-26.
+//
+// It is worth saying plainly that this buys very little security: a
+// banned IP got a 404 before and gets a 403 now, and no attack is
+// prevented either way. It is here for predictability — a ban should
+// mean refused everywhere — and because under a flood a short refusal
+// beats a rendered 404 page.
+//
+// The cost is one in-memory lookup: Arenet runs the bouncer in
+// streaming mode (crowdsecApp.EnableStreaming), where a decision is
+// resolved from the local store rather than by asking LAPI
+// (caddy-crowdsec-bouncer internal/core/decisions.go:105-106). And
+// enable_hard_fails stays false, so a LAPI outage still cannot turn
+// this into a wall: unresolvable means allowed, and the 404 comes back.
+func catchAllRoute(templates map[string]storage.ErrorPageTemplate, crowdSec bool) httpRoute {
 	body := resolveCatchallBody(templates)
-	return httpRoute{
-		Handle: []map[string]any{
-			{
-				"handler":     "static_response",
-				"status_code": 404,
-				"headers": map[string]any{
-					"Content-Type": []string{"text/html; charset=utf-8"},
-				},
-				"body": body,
-			},
-		},
+	handle := make([]map[string]any, 0, 2)
+	if crowdSec {
+		handle = append(handle, map[string]any{"handler": "crowdsec"})
 	}
+	handle = append(handle, map[string]any{
+		"handler":     "static_response",
+		"status_code": 404,
+		"headers": map[string]any{
+			"Content-Type": []string{"text/html; charset=utf-8"},
+		},
+		"body": body,
+	})
+	return httpRoute{Handle: handle}
 }
 
 // HasHTTPSServer reports whether the current store contents would produce an
