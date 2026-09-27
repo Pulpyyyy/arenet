@@ -179,6 +179,71 @@ crowdsec:
 
 ---
 
+## Plusieurs machines, une seule liste de décisions
+
+Arenet est le reverse proxy : toutes les requêtes arrivent par lui. C'est donc l'endroit naturel pour **appliquer** — et cela signifie que la détection peut se faire n'importe où, puisque quoi que trouve une machine, c'est chez Arenet que le blocage évite réellement du travail.
+
+Concrètement : une autre machine, avec Traefik et des conteneurs, détecte une attaque, écrit la décision dans la LAPI que lit Arenet, et **Arenet refuse cette IP à la réception**. La requête n'atteint jamais l'autre machine.
+
+C'est le modèle multi-serveurs de CrowdSec lui-même : plusieurs agents peuvent alimenter une LAPI, et plusieurs bouncers peuvent la lire. Rien là-dedans n'est spécifique à Arenet.
+
+> **Arenet ne lit qu'une seule LAPI.** Il ne peut pas en agréger deux. Les agents des autres machines doivent donc écrire *dans* celle que lit Arenet, et non l'inverse.
+
+### Brancher une autre machine
+
+Sur l'autre machine, un agent **sans LAPI locale** :
+
+```bash
+sudo cscli lapi register -u http://<machine-arenet>:8080
+# puis dans /etc/crowdsec/config.yaml, sous api.server :
+#   enable: false
+sudo systemctl restart crowdsec
+```
+
+Les identifiants atterrissent dans `/etc/crowdsec/local_api_credentials.yaml`. Sur la machine Arenet, validez la machine et faites écouter la LAPI au-delà de la boucle locale :
+
+```bash
+sudo cscli machines list
+sudo cscli machines validate <nom-de-la-machine>
+# /etc/crowdsec/config.yaml — api.server.listen_uri
+```
+
+**N'exposez pas la LAPI sur l'internet.** Elle accepte des écritures et distribue votre politique de blocage. Établissez un tunnel WireGuard entre les machines et faites écouter la LAPI sur l'adresse du tunnel uniquement ; à défaut, TLS plus un pare-feu restreint à l'adresse de l'autre machine.
+
+### ⚠️ L'erreur qui coupe tout
+
+Si tout le trafic atteint l'autre machine **à travers Arenet**, alors son serveur web ne voit plus vos visiteurs : il voit **Arenet**. Son agent CrowdSec analyse des journaux où chaque attaque semble venir d'Arenet, bannit Arenet, écrit ce bannissement dans la LAPI partagée, et le bouncer d'Arenet l'applique contre lui-même.
+
+Tous les conteneurs derrière deviennent injoignables, et la cause n'a l'air de rien.
+
+Trois choses, dans cet ordre d'importance :
+
+1. **Mettez Arenet en liste blanche d'abord, comme filet.** Faites-le *avant* de brancher le second agent, pour que rien ne puisse bannir votre point d'entrée même si le reste est mal réglé.
+
+   ```bash
+   sudo cscli postoverflows install crowdsecurity/whitelists
+   # puis ajoutez l'adresse d'Arenet dans
+   # /etc/crowdsec/postoverflows/s01-whitelist/whitelists.yaml
+   ```
+
+2. **Faites consigner la vraie IP du client par l'autre serveur**, en lui faisant reconnaître Arenet comme proxy amont — `forwardedHeaders.trustedIPs` chez Traefik, `set_real_ip_from` chez nginx. Arenet envoie toujours `X-Forwarded-For` : l'information est là, c'est au backend de l'utiliser au lieu de l'adresse de connexion.
+
+3. **Vérifiez que son parseur lit bien ce champ**, et non l'adresse de socket :
+
+   ```bash
+   sudo cscli explain --file /var/log/traefik/access.log --type traefik | head -20
+   ```
+
+   Si l'IP source extraite est celle d'Arenet, arrêtez-vous et corrigez l'étape 2 avant d'aller plus loin.
+
+### Pourquoi s'embêter, si tout passe déjà par Arenet
+
+Parce que les deux étages ne voient pas la même chose. Arenet voit la **forme** du trafic HTTP : balayages, rafales de 404, mauvais protocole sur un relai de niveau 4. Les applications derrière voient le **sens** : un échec de connexion WordPress, un 401 applicatif, une API maltraitée d'une façon parfaitement bien formée vue de l'extérieur.
+
+La détection appartient à l'endroit où se trouve l'information. L'application appartient à la porte d'entrée.
+
+---
+
 ## Ce qui se fait bloquer
 
 Le bouncer applique **les décisions dont l'agent dispose**. Les scénarios installés par défaut (après `cscli scenarios install crowdsecurity/http-cve`, par exemple) couvrent :

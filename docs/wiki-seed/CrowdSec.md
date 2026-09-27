@@ -176,6 +176,71 @@ crowdsec:
 
 ---
 
+## Several hosts, one decision list
+
+Arenet is the reverse proxy, so every request arrives through it. That makes it the natural place to **enforce** — and it means detection can happen anywhere, because whatever any host works out, Arenet is where the block actually saves work.
+
+Concretely: another host running Traefik and containers detects an attack, writes the decision into the LAPI Arenet reads, and **Arenet refuses that IP at reception**. The request never reaches the other host at all.
+
+This is CrowdSec's own multi-server model: several agents may report to one LAPI, and several bouncers may read it. Nothing about it is Arenet-specific.
+
+> **Arenet reads exactly one LAPI.** It cannot aggregate two. So the other hosts' agents must report *into* the LAPI Arenet reads — not the other way round.
+
+### Wiring another host
+
+On the other host, run an agent with **no local LAPI**:
+
+```bash
+sudo cscli lapi register -u http://<arenet-host>:8080
+# then in /etc/crowdsec/config.yaml, under api.server:
+#   enable: false
+sudo systemctl restart crowdsec
+```
+
+Credentials land in `/etc/crowdsec/local_api_credentials.yaml`. On the Arenet host, validate the machine and let LAPI listen beyond loopback:
+
+```bash
+sudo cscli machines list
+sudo cscli machines validate <machine-name>
+# /etc/crowdsec/config.yaml — api.server.listen_uri
+```
+
+**Do not publish LAPI on the internet.** It accepts writes and hands out your blocking policy. Put a WireGuard tunnel between the hosts and have LAPI listen on the tunnel address only; failing that, TLS plus a firewall restricted to the other host's address.
+
+### ⚠️ The mistake that takes everything down
+
+If all traffic reaches the other host **through Arenet**, then its web server no longer sees your visitors — it sees **Arenet**. Its CrowdSec agent parses logs where every attack appears to come from Arenet, bans Arenet, writes that into the shared LAPI, and Arenet's own bouncer enforces it against itself.
+
+Every container behind it stops being reachable, and the cause looks like nothing at all.
+
+Three things, in this order of importance:
+
+1. **Whitelist Arenet first, as a safety net.** Do this *before* connecting the second agent, so nothing can ban your entry point even if the rest is misconfigured.
+
+   ```bash
+   sudo cscli postoverflows install crowdsecurity/whitelists
+   # then add Arenet's address in
+   # /etc/crowdsec/postoverflows/s01-whitelist/whitelists.yaml
+   ```
+
+2. **Make the other server log the real client IP**, by trusting Arenet as an upstream proxy — `forwardedHeaders.trustedIPs` in Traefik, `set_real_ip_from` in nginx. Arenet always sends `X-Forwarded-For`, so the information is there; it is the backend's job to use it instead of the connection address.
+
+3. **Check its parser reads that field**, not the socket address:
+
+   ```bash
+   sudo cscli explain --file /var/log/traefik/access.log --type traefik | head -20
+   ```
+
+   If the extracted source IP is Arenet's, stop and fix step 2 before going further.
+
+### Why bother, if everything passes through Arenet anyway
+
+Because the two layers see different things. Arenet sees the **shape** of HTTP traffic — scanning, bursts of 404s, a wrong protocol on a layer-4 relay. The applications behind it see the **meaning**: a failed WordPress login, an application-level 401, an API being abused in a way that looks perfectly well-formed from the outside.
+
+Detection belongs where the information is. Enforcement belongs at the door.
+
+---
+
 ## What gets blocked
 
 The bouncer enforces **whatever decisions the agent has**. Default scenarios (after `cscli scenarios install crowdsecurity/http-cve` etc.) include :
