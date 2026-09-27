@@ -77,6 +77,22 @@ type crowdSecResponse struct {
 	TimeoutSeconds int    `json:"timeoutSeconds"`
 	Configured     bool   `json:"configured"`
 	UpdatedAt      string `json:"updatedAt,omitempty"`
+	// RestartRequired (v2.51) is set on a PUT that MOVED the LAPI
+	// address. Arenet reloads Caddy, and the bouncer is re-provisioned
+	// with the new URL — but its streaming client keeps dialling the
+	// previous one until the PROCESS restarts.
+	//
+	// Observed 2026-09-27 moving a LAPI from 127.0.0.1 to a WireGuard
+	// address: the bouncer logged `address: http://10.66.0.1:8080` while
+	// every request went to `http://127.0.0.1:8080`, so the log asserted
+	// the new address and the traffic used the old one. A restart fixed
+	// it immediately.
+	//
+	// This matters more than a cosmetic delay: the bouncer fails OPEN, so
+	// for as long as it cannot reach LAPI it blocks nothing at all, with
+	// no error anywhere in the UI. An operator who believes the change
+	// took effect is unprotected and has no way to tell.
+	RestartRequired bool `json:"restartRequired,omitempty"`
 }
 
 // crowdSecConfigForAudit returns a copy of c with the APIKey
@@ -245,7 +261,18 @@ func (h *Handler) putCrowdSecSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	h.appendAudit(r, evt)
 
-	writeJSON(w, http.StatusOK, crowdSecResponseFor(persisted, persisted.APIKey != ""))
+	resp := crowdSecResponseFor(persisted, persisted.APIKey != "")
+	// Only when the ADDRESS moved. Rotating the key alone re-provisions
+	// cleanly, so demanding a restart for it would train the operator to
+	// ignore the warning.
+	resp.RestartRequired = !errors.Is(prevErr, storage.ErrNotFound) &&
+		previous.LAPIURL != persisted.LAPIURL &&
+		persisted.APIKey != ""
+	if resp.RestartRequired {
+		h.logger.Warn("crowdsec: the LAPI address changed; the bouncer keeps the previous one until Arenet restarts, and blocks nothing until then (fail-open)",
+			"from", previous.LAPIURL, "to", persisted.LAPIURL)
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // crowdSecTestRequest is the wire shape accepted by POST

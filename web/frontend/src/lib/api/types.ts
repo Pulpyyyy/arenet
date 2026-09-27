@@ -2774,6 +2774,18 @@ export interface CrowdSecSettings {
 	timeoutSeconds: number;
 	configured: boolean;
 	updatedAt?: string;
+	/**
+	 * Set on a save that MOVED the LAPI address (v2.51).
+	 *
+	 * Arenet reloads Caddy and the bouncer is re-provisioned with the new
+	 * URL, but its streaming client keeps dialling the previous one until
+	 * the process restarts — it logs the new address while using the old.
+	 *
+	 * The bouncer fails open, so until the restart Arenet blocks nothing
+	 * at all and nothing else on screen says so. The UI must not let this
+	 * pass quietly.
+	 */
+	restartRequired?: boolean;
 }
 
 /**

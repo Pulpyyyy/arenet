@@ -46,6 +46,12 @@
 	import { language } from '$lib/stores/language.svelte';
 
 	let settings = $state<CrowdSecSettings | null>(null);
+	// Sticky: set when a save moved the LAPI address, and NOT cleared by
+	// a later reload of the settings. Until Arenet restarts, the bouncer
+	// still dials the old address and — failing open — blocks nothing.
+	// An operator who dismisses this by navigating away would be
+	// unprotected with no other sign of it.
+	let restartRequired = $state(false);
 	let loading = $state(true);
 	let loadError = $state('');
 
@@ -94,6 +100,7 @@
 				timeoutSeconds: form.timeoutSeconds
 			});
 			settings = next;
+			if (next.restartRequired) restartRequired = true;
 			form.apiKey = ''; // clear so a re-visit doesn't show ghost value
 			pushToast(
 				next.configured
@@ -312,6 +319,25 @@
 				</div>
 			{/if}
 
+			{#if restartRequired}
+				<!-- Deliberately an alert, not a toast: a toast disappears
+				     and this state persists until the operator acts. While
+				     it stands, the bouncer is dialling the previous LAPI
+				     address and, failing open, blocking nothing. -->
+				<div
+					class="md:col-span-2 rounded border border-warn/40 bg-warn/10 px-3 py-2"
+					role="alert"
+					data-testid="crowdsec-restart-required"
+				>
+					<p class="text-sm font-medium text-warn">
+						{t('crowdsecSettings.restartRequiredTitle')}
+					</p>
+					<p class="text-xs text-secondary mt-1">
+						{t('crowdsecSettings.restartRequiredBody')}
+					</p>
+					<code class="text-xs mt-2 block">sudo systemctl restart arenet</code>
+				</div>
+			{/if}
 			{#if formError}
 				<p class="text-sm text-down md:col-span-2" role="alert">{formError}</p>
 			{/if}

@@ -1626,7 +1626,9 @@
 		"resetDialogTitle": "Réinitialiser la configuration CrowdSec ?",
 		"resetDialogMessage": "Le bouncer s'arrêtera immédiatement de gater le trafic. Les routes resteront protégées par le WAF + rate-limiter, mais la gate IP-reputation sera désactivée. Aucun impact sur la configuration Security Automation (watcher credentials).",
 		"resetDialogConfirm": "Réinitialiser",
-		"resetDialogCancel": "Annuler"
+		"resetDialogCancel": "Annuler",
+		"restartRequiredTitle": "Redémarrez Arenet pour que la nouvelle adresse LAPI prenne effet",
+		"restartRequiredBody": "L'adresse est enregistrée, mais le bouncer continue d'utiliser la précédente jusqu'au redémarrage du processus — il annonce la nouvelle adresse dans le journal tout en contactant l'ancienne. Jusqu'au redémarrage, CrowdSec ne bloque rien : le bouncer laisse passer par conception, donc le trafic circule sans protection et rien d'autre ici ne vous le signalera."
 	},
 	"geoipSettings": {
 		"title": "Base GeoIP",

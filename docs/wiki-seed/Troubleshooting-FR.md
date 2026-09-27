@@ -250,6 +250,41 @@ Si tu t'es complètement lockout, tu peux temporairement désactiver l'intégrat
 
 ---
 
+## Changer l'adresse LAPI arrête silencieusement tout blocage
+
+### Symptôme
+Vous avez modifié l'URL de la LAPI dans Réglages → CrowdSec, enregistré, et CrowdSec ne bloque plus rien. Le journal affiche la nouvelle adresse mais les erreurs nomment l'ancienne :
+
+```
+"address":"http://10.66.0.1:8080"
+"error":"... Get \"http://127.0.0.1:8080/v1/decisions/stream?...\": connection refused"
+```
+
+### Cause
+L'enregistrement recharge Caddy et le bouncer est reconstruit avec la nouvelle URL, mais son client de flux continue d'appeler la précédente jusqu'au redémarrage du **processus**. Il annonce la nouvelle adresse tout en utilisant l'ancienne.
+
+Le bouncer **laisse passer par conception**, donc pendant tout ce temps le trafic circule sans aucune protection et rien d'autre dans l'interface ne le signale.
+
+### Fix
+```bash
+sudo systemctl restart arenet          # systemd
+docker compose restart arenet          # Docker
+```
+
+Depuis la v2.51, le panneau de réglages affiche un avertissement disant exactement cela après un enregistrement qui déplace l'adresse. Sur une version antérieure, redémarrez systématiquement après tout changement d'URL de LAPI.
+
+Vérifiez ensuite que le bouncer a réellement suivi — et lisez le **journal**, pas `cscli bouncers list` :
+
+```bash
+journalctl -u arenet --since "2 min ago" | grep -i crowdsec
+```
+
+Aucun `connection refused` et une ligne `using API key auth` portant la nouvelle adresse : c'est réussi.
+
+`cscli bouncers list` est trompeur ici : CrowdSec indexe un bouncer par nom **et par IP**, donc après le déplacement les pulls alimentent une seconde ligne (`arenet@<nouvelle-ip>`) tandis que la ligne d'origine reste figée à son dernier pull, définitivement. Un horodatage périmé sur l'ancienne ligne n'est pas un échec : c'est une ligne que plus rien n'écrit.
+
+---
+
 ## CrowdSec ne bannit rien qui vienne de chez vous
 
 ### Symptôme
