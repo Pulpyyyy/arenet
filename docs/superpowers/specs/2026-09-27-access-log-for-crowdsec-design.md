@@ -122,6 +122,78 @@ gate**, not an assumption — see G1.
 
 ---
 
+## Where the file actually lands
+
+The operator asked this directly, and the answer differs per install
+method because the data dir does. Verified against the unit, the compose
+file and the config defaults rather than assumed.
+
+| Install | Data dir | Access log | Owner / mode |
+|---|---|---|---|
+| **systemd** | `/var/lib/arenet` (`arenet.service:43`) | `/var/lib/arenet/logs/access.log` | `arenet:arenet`, file `0600`, dir `0700` |
+| **Docker** | `/var/lib/arenet` in the container = named volume `arenet-data` (`docker-compose.yml:85,102`) | `/var/lib/arenet/logs/access.log` **inside** the container | uid `65532` (distroless nonroot), file `0600`, dir `0700` |
+| **dev** (`make run`) | `./data` (`internal/config/config.go:139`) | `./data/logs/access.log` | the developer's own user |
+
+`0600` / `0700` are Caddy's, not a choice of ours
+(`modules/logging/filewriter.go:190,201`).
+
+### What that means for the CrowdSec agent
+
+**systemd.** Acquisition reads the path directly:
+
+```yaml
+filenames: [/var/lib/arenet/logs/access.log]
+labels: { type: caddy }
+```
+
+The file is `0600` owned by `arenet`, so the agent must be **root** —
+which the package install is by default. The operator confirms with
+`systemctl show crowdsec -p User` rather than taking our word for it.
+
+**Docker.** The file lives inside the `arenet-data` volume, whose host
+path is an implementation detail of the Docker daemon
+(`docker volume inspect arenet-data`) and must not be hard-coded in docs.
+A CrowdSec **container** mounts the volume read-only instead:
+
+```yaml
+crowdsec:
+  volumes:
+    - arenet-data:/var/lib/arenet:ro
+```
+
+and must run as root to read a `0600` file owned by uid 65532. The
+official CrowdSec image does.
+
+| # | Decision | Rationale |
+|---|---|---|
+| D9 | **Keep Caddy's `0600`/`0700`; do not expose a mode setting** | The log is a list of every visitor's IP and the URLs they asked for. A knob inviting `0644` would turn a restrictive default into a world-readable one on someone's shared host. Both supported topologies run the agent as root, so nothing needs widening — and where it does, that is a prerequisite to document, not a default to weaken |
+| D10 | **The settings panel prints the resolved absolute path and the acquisition snippet** | Arenet knows its own data dir, so it can state the exact path instead of leaving the operator to work out which of three it is. This is the difference between a feature that works and one that silently never fires, which is the failure mode this whole subject keeps producing |
+
+---
+
+## Documentation to update
+
+Not an afterthought: a feature whose entire value is "a second program
+reads this file" is documentation-shaped, and the wiki is what operators
+actually read (the v2.49 CrowdSec page was Docker-only for months
+precisely because nobody checked).
+
+- `docs/wiki-seed/CrowdSec.md` + `-FR.md` — a section on turning
+  detection on: the toggle, the resolved path per install method, the
+  acquisition snippet, the collection to install
+  (`cscli collections install crowdsecurity/caddy`), and the permission
+  note. Both languages, in real French.
+- `docs/setup/crowdsec.md` — the same wiring at the level of detail that
+  file already uses, including the Docker sibling-container case.
+- `docs/operations/env-vars.md` — any `ARENET_*` variable this adds.
+- `docs/wiki-seed/Troubleshooting.md` + `-FR.md` — "CrowdSec bans
+  nothing": check the toggle, check the file is growing, check
+  `cscli metrics` shows the acquisition reading lines, check the agent
+  can read the file at all.
+- `docs/roadmap.md` — stays uncommitted per the operator's standing rule.
+
+---
+
 ## Empirical validation gates
 
 1. **G1 — the emitted config loads and actually routes.** `caddy.Validate`
