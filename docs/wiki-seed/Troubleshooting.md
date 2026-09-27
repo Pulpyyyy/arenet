@@ -247,6 +247,41 @@ If you locked yourself out completely, you can temporarily disable the CrowdSec 
 
 ---
 
+## Moving the LAPI address silently stops all blocking
+
+### Symptom
+You changed the LAPI URL in Settings → CrowdSec, saved, and CrowdSec no longer blocks anything. The log shows the new address but the errors name the old one:
+
+```
+"address":"http://10.66.0.1:8080"
+"error":"... Get \"http://127.0.0.1:8080/v1/decisions/stream?...\": connection refused"
+```
+
+### Cause
+A save reloads Caddy and the bouncer is re-provisioned with the new URL, but its streaming client keeps dialling the previous one until the **process** restarts. It reports the new address while using the old.
+
+The bouncer **fails open** by design, so while this lasts traffic flows entirely unprotected and nothing else in the UI says so.
+
+### Fix
+```bash
+sudo systemctl restart arenet          # systemd
+docker compose restart arenet          # Docker
+```
+
+Since v2.51 the settings panel shows a warning saying exactly this after a save that moved the address. On an older version, restart after any LAPI URL change as a matter of course.
+
+Then confirm the bouncer really moved — and read the **log**, not `cscli bouncers list`:
+
+```bash
+journalctl -u arenet --since "2 min ago" | grep -i crowdsec
+```
+
+No `connection refused` and a `using API key auth` line carrying the new address means it worked.
+
+`cscli bouncers list` is misleading here: CrowdSec keys a bouncer by name **and IP**, so after the move the pulls land on a second row (`arenet@<new-ip>`) while the original row stays frozen at its last pull forever. A stale timestamp on the old row is not a failure — it is a row nothing writes to any more.
+
+---
+
 ## CrowdSec bans nothing of your own
 
 ### Symptom

@@ -311,6 +311,78 @@ describe('CrowdSecSettingsSection — test connection', () => {
 	});
 });
 
+describe('CrowdSecSettingsSection — LAPI address moved (v2.51)', () => {
+	// Moving a LAPI leaves the bouncer dialling the old address until the
+	// PROCESS restarts — it logs the new one while using the old. And it
+	// fails open, so in the meantime Arenet blocks nothing and nothing
+	// else on screen says so. Silence here is the actual danger.
+	it('warns, and says a restart is needed', async () => {
+		getMock.mockResolvedValue(configuredSettings);
+		putMock.mockResolvedValue({
+			...configuredSettings,
+			lapiUrl: 'http://10.66.0.1:8080',
+			restartRequired: true
+		});
+
+		render(CrowdSecSettingsSection);
+		await waitFor(() => expect(getMock).toHaveBeenCalled());
+
+		await fireEvent.input(screen.getByLabelText(/LAPI URL/i), {
+			target: { value: 'http://10.66.0.1:8080' }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Save/i }));
+
+		const banner = await screen.findByTestId('crowdsec-restart-required');
+		expect(banner.textContent).toMatch(/restart/i);
+		// The part that matters most: unprotected until then.
+		expect(banner.textContent).toMatch(/blocks nothing|fails open/i);
+	});
+
+	// Rotating only the key re-provisions cleanly. Warning there too
+	// would train the operator to ignore the banner.
+	it('stays quiet when only the key changed', async () => {
+		getMock.mockResolvedValue(configuredSettings);
+		putMock.mockResolvedValue({ ...configuredSettings, restartRequired: false });
+
+		render(CrowdSecSettingsSection);
+		await waitFor(() => expect(getMock).toHaveBeenCalled());
+
+		await fireEvent.input(screen.getByLabelText(/API key/i), {
+			target: { value: 'a-new-key' }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Save/i }));
+
+		await waitFor(() => expect(putMock).toHaveBeenCalled());
+		expect(screen.queryByTestId('crowdsec-restart-required')).toBeNull();
+	});
+
+	// Sticky on purpose: the condition persists until the operator acts,
+	// so a later successful save of something else must not clear it.
+	it('keeps the warning until the operator restarts', async () => {
+		getMock.mockResolvedValue(configuredSettings);
+		putMock.mockResolvedValueOnce({
+			...configuredSettings,
+			lapiUrl: 'http://10.66.0.1:8080',
+			restartRequired: true
+		});
+
+		render(CrowdSecSettingsSection);
+		await waitFor(() => expect(getMock).toHaveBeenCalled());
+		await fireEvent.input(screen.getByLabelText(/LAPI URL/i), {
+			target: { value: 'http://10.66.0.1:8080' }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /Save/i }));
+		await screen.findByTestId('crowdsec-restart-required');
+
+		// A second save that does not move the address.
+		putMock.mockResolvedValueOnce({ ...configuredSettings, restartRequired: false });
+		await fireEvent.click(screen.getByRole('button', { name: /Save/i }));
+		await waitFor(() => expect(putMock).toHaveBeenCalledTimes(2));
+
+		expect(screen.queryByTestId('crowdsec-restart-required')).not.toBeNull();
+	});
+});
+
 describe('CrowdSecSettingsSection — Reset (CS.2 follow-up)', () => {
 	it('hides the Réinitialiser button on a fresh install', async () => {
 		getMock.mockResolvedValue(notConfiguredSettings);
