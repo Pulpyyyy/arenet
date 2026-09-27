@@ -444,8 +444,42 @@ func resolveErrorPage(route storage.Route, code int, templates map[string]storag
 			}
 		}
 	}
+	// v2.51 — the operator's default for routes that chose nothing.
+	//
+	// Sits BELOW the route's own template on purpose: an explicit choice
+	// must keep winning. And it is a separate flag from the catch-all
+	// one, because an operator read "default catch-all page" as meaning
+	// this and was surprised — the two are different decisions (an
+	// unknown host may deserve a neutral 404 while real routes get the
+	// branded set), and merging them would have changed behaviour under
+	// existing installations without anyone asking.
+	if body := routeDefaultErrorPage(templates, code); body != "" {
+		return body
+	}
 	if body, ok := arenetDefaultErrorPages[code]; ok && body != "" {
 		return body
+	}
+	return ""
+}
+
+// routeDefaultErrorPage returns the body for code from the template the
+// operator flagged as the route default, or "" when none is flagged or
+// it defines nothing for that code.
+//
+// Falling through on a code the template leaves blank is deliberate: a
+// template that only customises 404 and 502 should not blank out the
+// other six, it should let Arenet's own pages serve them.
+func routeDefaultErrorPage(templates map[string]storage.ErrorPageTemplate, code int) string {
+	for _, t := range templates {
+		if !t.IsRouteDefault {
+			continue
+		}
+		if body, ok := t.Pages[code]; ok && body != "" {
+			return SanitizeErrorPageBody(body)
+		}
+		// At most one template carries the flag (storage enforces it),
+		// so there is nothing further to look at.
+		break
 	}
 	return ""
 }

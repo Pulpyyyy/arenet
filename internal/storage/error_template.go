@@ -90,9 +90,26 @@ type ErrorPageTemplate struct {
 	// JSON tag is camelCase to match the rest of the type's wire
 	// format; omitempty keeps the field out of GET responses for
 	// templates that don't have it set (the common case).
-	IsCatchallDefault bool      `json:"isCatchallDefault,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	IsCatchallDefault bool `json:"isCatchallDefault,omitempty"`
+	// IsRouteDefault (v2.51) marks this template as the default for
+	// every ROUTE that has not chosen one of its own. At most one
+	// template carries it, enforced the same way as the flag above.
+	//
+	// Deliberately SEPARATE from IsCatchallDefault, which an operator
+	// reasonably read as meaning this. They are different decisions: an
+	// unknown host arguably deserves a neutral 404 that reveals no
+	// branding to a scanner, while real routes deserve the branded set —
+	// and an operator may want the reverse. Folding them into one flag
+	// would also have silently changed behaviour for every installation
+	// that had already flagged a catch-all template.
+	//
+	// It sits between the route's own template and Arenet's built-in
+	// pages in the resolution order (caddymgr.resolveErrorPage), so a
+	// route that picked a template still wins, and nothing changes for an
+	// installation that never sets this.
+	IsRouteDefault bool      `json:"isRouteDefault,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // ValidateErrorPageTemplate is a public shim around the private
@@ -172,10 +189,8 @@ func (s *Store) CreateErrorPageTemplate(ctx context.Context, t ErrorPageTemplate
 			return err
 		}
 		b := tx.Bucket([]byte(bucketErrorTemplates))
-		if t.IsCatchallDefault {
-			if err := clearCatchallDefaultExcept(b, t.ID); err != nil {
-				return err
-			}
+		if err := applyExclusiveFlags(b, t); err != nil {
+			return err
 		}
 		buf, err := json.Marshal(t)
 		if err != nil {
@@ -188,11 +203,37 @@ func (s *Store) CreateErrorPageTemplate(ctx context.Context, t ErrorPageTemplate
 	return t, nil
 }
 
-// clearCatchallDefaultExcept (v2.9.10 Bug 1) walks every template
-// in the bucket and clears IsCatchallDefault on any whose ID is NOT
-// `keepID`. Called from inside Create/Update bbolt write transactions
-// when the incoming payload has IsCatchallDefault=true, to enforce
-// the "at most one default" invariant atomically.
+// exclusiveFlags are the template flags of which at most one template
+// may carry each. v2.51 generalised this from a single hard-coded flag
+// to a pair, rather than copying the walker below.
+var exclusiveFlags = []struct {
+	name string
+	ptr  func(*ErrorPageTemplate) *bool
+}{
+	{"isCatchallDefault", func(t *ErrorPageTemplate) *bool { return &t.IsCatchallDefault }},
+	{"isRouteDefault", func(t *ErrorPageTemplate) *bool { return &t.IsRouteDefault }},
+}
+
+// applyExclusiveFlags clears every exclusive flag that `t` claims from
+// all OTHER templates, inside the caller's write transaction.
+func applyExclusiveFlags(b *bolt.Bucket, t ErrorPageTemplate) error {
+	for _, f := range exclusiveFlags {
+		local := t
+		if !*f.ptr(&local) {
+			continue
+		}
+		if err := clearExclusiveFlagExcept(b, t.ID, f.name, f.ptr); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// clearExclusiveFlagExcept (v2.9.10 Bug 1, generalised v2.51) walks
+// every template in the bucket and clears the named flag on any whose
+// ID is NOT `keepID`. Called from inside Create/Update bbolt write
+// transactions when the incoming payload claims that flag, to enforce
+// the "at most one" invariant atomically.
 //
 // keepID may be empty when called from a write that wants to clear
 // the flag globally without preserving any winner (not currently
@@ -202,7 +243,7 @@ func (s *Store) CreateErrorPageTemplate(ctx context.Context, t ErrorPageTemplate
 // txn serialises the whole sequence, so a concurrent reader either
 // sees the pre-clear state or the post-clear state — never a
 // half-cleared map.
-func clearCatchallDefaultExcept(b *bolt.Bucket, keepID string) error {
+func clearExclusiveFlagExcept(b *bolt.Bucket, keepID, flagName string, flag func(*ErrorPageTemplate) *bool) error {
 	type rewrite struct {
 		key []byte
 		t   ErrorPageTemplate
@@ -211,12 +252,12 @@ func clearCatchallDefaultExcept(b *bolt.Bucket, keepID string) error {
 	if err := b.ForEach(func(k, v []byte) error {
 		var t ErrorPageTemplate
 		if err := json.Unmarshal(v, &t); err != nil {
-			return fmt.Errorf("clearCatchallDefaultExcept: unmarshal: %w", err)
+			return fmt.Errorf("clearExclusiveFlagExcept(%s): unmarshal: %w", flagName, err)
 		}
-		if t.ID == keepID || !t.IsCatchallDefault {
+		if t.ID == keepID || !*flag(&t) {
 			return nil
 		}
-		t.IsCatchallDefault = false
+		*flag(&t) = false
 		t.UpdatedAt = time.Now().UTC()
 		pending = append(pending, rewrite{key: append([]byte(nil), k...), t: t})
 		return nil
@@ -226,7 +267,7 @@ func clearCatchallDefaultExcept(b *bolt.Bucket, keepID string) error {
 	for _, r := range pending {
 		buf, err := json.Marshal(r.t)
 		if err != nil {
-			return fmt.Errorf("clearCatchallDefaultExcept: marshal: %w", err)
+			return fmt.Errorf("clearExclusiveFlagExcept(%s): marshal: %w", flagName, err)
 		}
 		if err := b.Put(r.key, buf); err != nil {
 			return err
@@ -318,10 +359,8 @@ func (s *Store) UpdateErrorPageTemplate(ctx context.Context, t ErrorPageTemplate
 		}
 		t.CreatedAt = existing.CreatedAt
 		t.UpdatedAt = time.Now().UTC()
-		if t.IsCatchallDefault {
-			if err := clearCatchallDefaultExcept(b, t.ID); err != nil {
-				return err
-			}
+		if err := applyExclusiveFlags(b, t); err != nil {
+			return err
 		}
 		buf, err := json.Marshal(t)
 		if err != nil {

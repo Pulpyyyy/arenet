@@ -831,7 +831,9 @@ paths:
       summary: Create an error-page template
       description: |
         Stores raw HTML per status code (sanitized when emitted to Caddy).
-        Setting `isCatchallDefault` clears it on every other template.
+        Setting `isCatchallDefault` or `isRouteDefault` clears that same
+        flag on every other template; the two are independent and one
+        template may hold both.
         Reloads Caddy (best effort). Storage validation errors are 400.
       tags: [Error pages]
       x-arenet-role: admin
@@ -1826,7 +1828,28 @@ components:
           additionalProperties: { type: string }
         isCatchallDefault:
           type: boolean
-          description: Use this template's 404 for hosts no route serves (at most one template).
+          description: |
+            Use this template's 404 for a host that matches NO route (at
+            most one template). This does not affect your routes — see
+            `isRouteDefault`.
+        isRouteDefault:
+          type: boolean
+          description: |
+            Use this template for every ROUTE that has not chosen one (at
+            most one template).
+
+            Resolution order for a route's error page, highest first: the
+            route's own per-code override, the template the route selected,
+            this default, then Arenet's built-in pages. So an explicit
+            choice still wins, and a code this template leaves blank falls
+            through rather than blanking the page.
+
+            Deliberately separate from `isCatchallDefault`: an operator read
+            that flag as meaning this and was surprised. The two are
+            different decisions — an unknown host may deserve a neutral 404
+            that reveals no branding to a scanner, while real routes get the
+            branded set — and merging them would have changed behaviour
+            under installations that had already set the catch-all flag.
     ErrorPageTemplate:
       type: object
       required: [id, name, pages, createdAt, updatedAt]
@@ -1839,6 +1862,7 @@ components:
         updatedAt: { type: string, format: date-time }
         isBuiltin: { type: boolean, description: True on the read-only `arenet-default`. }
         isCatchallDefault: { type: boolean }
+        isRouteDefault: { type: boolean }
 
     # ---------------- Settings tied to routes ----------------
     RoutesMaintenancePage:
