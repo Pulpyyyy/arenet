@@ -158,6 +158,55 @@ describe('/settings/error-pages — create flow', () => {
 		expect(req.name).toBe('New One');
 	});
 
+	// v2.51 — the two roles are independent, and both must SURVIVE the
+	// save. The payload is rebuilt field by field, which is how the v2.46
+	// path redirect was lost: success toast, nothing stored.
+	//
+	// The flag exists because an operator ticked the CATCH-ALL one
+	// expecting their routes to use the template. They never did — the
+	// catch-all governs only hosts matching no route.
+	it('ships both default flags, independently', async () => {
+		apiMock.list.mockResolvedValue([]);
+		apiMock.create.mockResolvedValue(sampleTemplate({ id: 'new-id' }));
+		render(Page);
+		await screen.findByText(/No custom template/);
+		await fireEvent.click(screen.getByRole('button', { name: '+ New template' }));
+		const nameInput = await screen.findByPlaceholderText(/WGW Branding/);
+		await fireEvent.input(nameInput, { target: { value: 'Brand' } });
+
+		// Only the ROUTE default — the operator's actual intent.
+		await fireEvent.click(screen.getByTestId('tmpl-route-default'));
+		await fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+
+		await waitFor(() => expect(apiMock.create).toHaveBeenCalledTimes(1));
+		const [req] = apiMock.create.mock.calls[0];
+		expect(req.isRouteDefault).toBe(true);
+		// And ticking one must not tick the other.
+		expect(req.isCatchallDefault).toBe(false);
+	});
+
+	// Editing must LOAD the stored flag, or the first save after opening
+	// the form would silently clear it — the other half of the
+	// path-redirect hole, which had the same gap in openEdit.
+	it('keeps a stored route-default flag when the template is edited', async () => {
+		const stored = sampleTemplate({ id: 't1', name: 'Brand', isRouteDefault: true });
+		apiMock.list.mockResolvedValue([stored]);
+		apiMock.get.mockResolvedValue(stored);
+		apiMock.update.mockResolvedValue(stored);
+		render(Page);
+		await screen.findByText('Brand');
+		// The row's Edit button, as the other edit tests do — clicking the
+		// name does not open the editor.
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+		const box = (await screen.findByTestId('tmpl-route-default')) as HTMLInputElement;
+		expect(box.checked).toBe(true);
+
+		await fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+		await waitFor(() => expect(apiMock.update).toHaveBeenCalledTimes(1));
+		expect(apiMock.update.mock.calls[0][1].isRouteDefault).toBe(true);
+	});
+
 	it('rejects empty name with a toast', async () => {
 		apiMock.list.mockResolvedValue([]);
 		render(Page);

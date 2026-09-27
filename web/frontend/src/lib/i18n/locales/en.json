@@ -1472,8 +1472,8 @@
 		"metaNamePlaceholder": "e.g. WGW Branding",
 		"metaDescriptionLabel": "Description (optional)",
 		"metaDescriptionPlaceholder": "Branded error pages for example.com",
-		"catchallToggleLabel": "Use as default catch-all page",
-		"catchallHint": "This template's 404 page will be served for any request reaching a host not configured in Arenet. Only one template can be catch-all at a time.",
+		"catchallToggleLabel": "Use for hosts that are not configured in Arenet",
+		"catchallHint": "This template's 404 page will be served for a request reaching a host that matches no route at all. This does NOT affect your routes — for that, use the option above. Only one template can hold this at a time.",
 		"tabsAriaLabel": "Status codes",
 		"editorPaneLabel": "HTML editor — code {code}",
 		"editorAriaLabel": "HTML body for status code {code}",
@@ -1531,7 +1531,9 @@
 				"uri": "Full request URI",
 				"uuid": "Per-request ID (handy for support)"
 			}
-		}
+		},
+		"routeDefaultToggleLabel": "Use for every route that has no template",
+		"routeDefaultHint": "Routes that keep “None (Arenet branded default)” will serve THIS template's pages instead of Arenet's built-in ones. A route that picks its own template still wins, and codes this template leaves blank fall back to Arenet's. Only one template can hold this at a time."
 	},
 	"settingsSubcards": {
 		"automationReset": "Reset",

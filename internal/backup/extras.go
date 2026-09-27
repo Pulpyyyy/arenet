@@ -443,6 +443,8 @@ func validateExtras(snap *Snapshot, cleared clearedSet) error {
 	}
 
 	catchall := 0
+
+	routeDefault := 0
 	seenTmpl := map[string]bool{}
 	for _, t := range ex.ErrorTemplates {
 		if err := storage.ValidateErrorPageTemplate(t); err != nil {
@@ -455,9 +457,19 @@ func validateExtras(snap *Snapshot, cleared clearedSet) error {
 		if t.IsCatchallDefault {
 			catchall++
 		}
+		if t.IsRouteDefault {
+			routeDefault++
+		}
 	}
 	if catchall > 1 {
 		return fmt.Errorf("restore: %d error templates are marked catch-all default; at most one is allowed", catchall)
+	}
+	// v2.51 — same invariant for the route default, and for a sharper
+	// reason: resolveErrorPage walks the template map, whose iteration
+	// order is random, so two flagged templates would serve different
+	// error pages from one reload to the next.
+	if routeDefault > 1 {
+		return fmt.Errorf("restore: %d error templates are marked route default; at most one is allowed", routeDefault)
 	}
 
 	channelIDs := map[string]bool{}

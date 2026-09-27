@@ -111,6 +111,7 @@
 	// template carries the flag at a time. Setting it true on
 	// save auto-clears any previously-flagged template.
 	let editIsCatchallDefault = $state(false);
+	let editIsRouteDefault = $state(false);
 	// Sparse Pages map ; codes absent fall back to template-side
 	// default at serve time. Active tab governs which buffer is
 	// shown in the CodeMirror editor.
@@ -152,6 +153,7 @@
 		editName = '';
 		editDescription = '';
 		editIsCatchallDefault = false;
+		editIsRouteDefault = false;
 		editPages = {};
 		activeCode = 403;
 		activeBuffer = '';
@@ -165,6 +167,7 @@
 		editName = t.name;
 		editDescription = t.description ?? '';
 		editIsCatchallDefault = t.isCatchallDefault === true;
+		editIsRouteDefault = t.isRouteDefault === true;
 		// Cast key strings back to numbers (server returns
 		// Record<string, string> by JSON convention).
 		const pages: Record<number, string> = {};
@@ -267,7 +270,8 @@
 				pages: Object.fromEntries(
 					Object.entries(cleanPages).map(([k, v]) => [String(k), v])
 				),
-				isCatchallDefault: editIsCatchallDefault
+				isCatchallDefault: editIsCatchallDefault,
+				isRouteDefault: editIsRouteDefault
 			};
 			if (editingId === null) {
 				await errorTemplatesApi.create(req);
@@ -881,10 +885,31 @@
 				template-only concern).
 			-->
 			{#if !editingBuiltin}
+				<!-- v2.51 — TWO independent roles, and they are listed
+				     together so the difference is visible at the moment
+				     of choosing. An operator flagged the catch-all one
+				     expecting it to cover their routes: "default" read as
+				     global. It never did — a route with no template gets
+				     Arenet's built-in pages. The route default below is
+				     what they wanted. -->
+				<label class="catchall-toggle">
+					<input
+						type="checkbox"
+						bind:checked={editIsRouteDefault}
+						data-testid="tmpl-route-default"
+					/>
+					<span>
+						<span class="meta-label">{language.current && t('errorPages.routeDefaultToggleLabel')}</span>
+						<span class="catchall-hint">
+							{language.current && t('errorPages.routeDefaultHint')}
+						</span>
+					</span>
+				</label>
 				<label class="catchall-toggle">
 					<input
 						type="checkbox"
 						bind:checked={editIsCatchallDefault}
+						data-testid="tmpl-catchall-default"
 					/>
 					<span>
 						<span class="meta-label">{language.current && t('errorPages.catchallToggleLabel')}</span>

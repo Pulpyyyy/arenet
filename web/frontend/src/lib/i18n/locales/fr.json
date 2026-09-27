@@ -1472,8 +1472,8 @@
 		"metaNamePlaceholder": "ex: WGW Branding",
 		"metaDescriptionLabel": "Description (optionnel)",
 		"metaDescriptionPlaceholder": "Pages d'erreur brandées pour example.com",
-		"catchallToggleLabel": "Utiliser comme page catch-all par défaut",
-		"catchallHint": "La page 404 de ce template sera servie pour toute requête arrivant sur un host non configuré dans Arenet. Un seul template peut être catch-all à la fois.",
+		"catchallToggleLabel": "Utiliser pour les hôtes non configurés dans Arenet",
+		"catchallHint": "La page 404 de ce gabarit sera servie pour une requête arrivant sur un hôte qui ne correspond à aucune route. Cela n'affecte pas vos routes — pour ça, utilisez l'option ci-dessus. Un seul gabarit peut porter cette option à la fois.",
 		"tabsAriaLabel": "Codes de statut",
 		"editorPaneLabel": "Éditeur HTML — code {code}",
 		"editorAriaLabel": "Corps HTML pour le code de statut {code}",
@@ -1531,7 +1531,9 @@
 				"uri": "URI complète de la requête",
 				"uuid": "ID par requête (pratique pour le support)"
 			}
-		}
+		},
+		"routeDefaultToggleLabel": "Utiliser pour toute route sans gabarit",
+		"routeDefaultHint": "Les routes qui restent sur « None (Arenet branded default) » serviront les pages de CE gabarit au lieu de celles intégrées à Arenet. Une route qui choisit son propre gabarit garde la priorité, et les codes que ce gabarit laisse vides retombent sur ceux d'Arenet. Un seul gabarit peut porter cette option à la fois."
 	},
 	"settingsSubcards": {
 		"automationReset": "Réinitialiser",

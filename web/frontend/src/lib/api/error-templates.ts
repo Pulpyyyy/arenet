@@ -62,6 +62,15 @@ export interface ErrorTemplate {
 	 * false.
 	 */
 	isCatchallDefault?: boolean;
+	/**
+	 * Default for every ROUTE that has not chosen a template (v2.51).
+	 *
+	 * Separate from isCatchallDefault, which only governs the body for a
+	 * host matching no route at all — an operator read that flag as
+	 * meaning this one and was surprised. It sits below the route's own
+	 * template in the resolution order, so an explicit choice still wins.
+	 */
+	isRouteDefault?: boolean;
 }
 
 /**
@@ -86,6 +95,15 @@ export interface ErrorTemplateRequest {
 	 * template in the same write transaction when set true.
 	 */
 	isCatchallDefault?: boolean;
+	/**
+	 * Default for every ROUTE that has not chosen a template (v2.51).
+	 *
+	 * Separate from isCatchallDefault, which only governs the body for a
+	 * host matching no route at all — an operator read that flag as
+	 * meaning this one and was surprised. It sits below the route's own
+	 * template in the resolution order, so an explicit choice still wins.
+	 */
+	isRouteDefault?: boolean;
 }
 
 /**

@@ -100,6 +100,11 @@ type errorTemplateRequest struct {
 	// one template carries the flag at once. Setting it true
 	// auto-clears the flag on any previously-flagged template.
 	IsCatchallDefault bool `json:"isCatchallDefault,omitempty"`
+	// IsRouteDefault (v2.51) — opt-in flag making this template the
+	// default for every ROUTE that has not chosen one. Separate from
+	// the flag above, which only governs the body served for a host
+	// matching no route at all.
+	IsRouteDefault bool `json:"isRouteDefault,omitempty"`
 }
 
 // errorTemplateResponse is the wire shape returned by GET / list.
@@ -119,6 +124,11 @@ type errorTemplateResponse struct {
 	// IsCatchallDefault (v2.9.10 Bug 1) — mirrored from storage
 	// so the frontend can render the checkbox state in the editor.
 	IsCatchallDefault bool `json:"isCatchallDefault,omitempty"`
+	// IsRouteDefault (v2.51) — opt-in flag making this template the
+	// default for every ROUTE that has not chosen one. Separate from
+	// the flag above, which only governs the body served for a host
+	// matching no route at all.
+	IsRouteDefault bool `json:"isRouteDefault,omitempty"`
 }
 
 func errorTemplateToResponse(t storage.ErrorPageTemplate) errorTemplateResponse {
@@ -134,6 +144,7 @@ func errorTemplateToResponse(t storage.ErrorPageTemplate) errorTemplateResponse 
 		CreatedAt:         t.CreatedAt,
 		UpdatedAt:         t.UpdatedAt,
 		IsCatchallDefault: t.IsCatchallDefault,
+		IsRouteDefault:    t.IsRouteDefault,
 	}
 }
 
@@ -191,6 +202,7 @@ func (h *Handler) createErrorTemplate(w http.ResponseWriter, r *http.Request) {
 		Description:       req.Description,
 		Pages:             req.Pages,
 		IsCatchallDefault: req.IsCatchallDefault,
+		IsRouteDefault:    req.IsRouteDefault,
 	}
 	created, err := h.store.CreateErrorPageTemplate(r.Context(), t)
 	if err != nil {
@@ -257,6 +269,7 @@ func (h *Handler) updateErrorTemplate(w http.ResponseWriter, r *http.Request) {
 		Description:       req.Description,
 		Pages:             req.Pages,
 		IsCatchallDefault: req.IsCatchallDefault,
+		IsRouteDefault:    req.IsRouteDefault,
 	}
 	updated, err := h.store.UpdateErrorPageTemplate(r.Context(), t)
 	if err != nil {
@@ -441,7 +454,7 @@ func previewSubstitute(body string, code int) string {
 		"{http.request.method}":    "GET",
 		"{http.request.host}":      "preview.example.com",
 		"{http.request.uri}":       "/preview/path",
-		"{http.request.uri.path}": "/preview/path",
+		"{http.request.uri.path}":  "/preview/path",
 		"{http.request.uuid}":      "00000000-0000-4000-8000-000000000000",
 	}
 	out := body
