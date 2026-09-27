@@ -261,6 +261,58 @@ describe('RuleModal', () => {
 		expect(req.sourceParams).not.toHaveProperty('host');
 	});
 
+	// v2.52 — cert_manual_expiring had NO form branch, so thresholdDays
+	// never left the backend default of 30 and the operator could not
+	// change it. Worse, the code comment claimed the value travelled in
+	// the threshold eval params; it does not — eval `value` is compared
+	// against the COUNT of matching certificates.
+	it('sends an editable thresholdDays for cert_manual_expiring', async () => {
+		createMock.mockResolvedValue(thresholdRule());
+		const Modal = (await import('./RuleModal.svelte')).default;
+		render(Modal, {
+			props: { open: true, rule: null, onClose: () => {}, onSaved: () => {} }
+		});
+		await waitFor(() => expect(screen.getByText('ops-webhook')).toBeTruthy());
+
+		const sourceSelect = screen.getByLabelText(/^Source$/i) as HTMLSelectElement;
+		await fireEvent.change(sourceSelect, { target: { value: 'cert_manual_expiring' } });
+
+		// The form must exist at all — it did not before.
+		const days = screen.getByTestId('cert-manual-days') as HTMLInputElement;
+		await fireEvent.input(days, { target: { value: '45' } });
+
+		await fireEvent.input(screen.getByLabelText(/^Name \(slug\)$/i), {
+			target: { value: 'manual-45' }
+		});
+		const opsWh = screen.getByText('ops-webhook').previousElementSibling as HTMLInputElement;
+		await fireEvent.click(opsWh);
+		await fireEvent.click(screen.getByText('Create'));
+
+		await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+		expect(createMock.mock.calls[0][0].sourceParams.thresholdDays).toBe(45);
+	});
+
+	// And the stored value must come back when editing, or the first save
+	// after opening the form would silently reset it to 30.
+	it('loads a stored thresholdDays when editing', async () => {
+		const Modal = (await import('./RuleModal.svelte')).default;
+		render(Modal, {
+			props: {
+				open: true,
+				rule: {
+					...thresholdRule(),
+					source: 'cert_manual_expiring',
+					sourceParams: { thresholdDays: 60 }
+				},
+				onClose: () => {},
+				onSaved: () => {}
+			}
+		});
+
+		const days = (await screen.findByTestId('cert-manual-days')) as HTMLInputElement;
+		expect(days.value).toBe('60');
+	});
+
 	it('swaps to State eval form when kind=state', async () => {
 		const Modal = (await import('./RuleModal.svelte')).default;
 		render(Modal, {

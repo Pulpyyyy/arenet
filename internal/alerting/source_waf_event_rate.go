@@ -64,15 +64,6 @@ const (
 	wafEventRateDefaultWindowSecs = 300
 	wafEventRateMinWindowSecs     = 60
 	wafEventRateMaxWindowSecs     = 86400
-	// wafEventRateQueryCap defensively bounds the rows
-	// pulled back from QueryWafEvents. A busy homelab on
-	// a 1h window may exceed the default cap; we raise it
-	// to 10k here. A real "DDoS" window producing > 10k
-	// rows in 1h is the threshold rule's point — the
-	// count saturates at 10k but the rule still fires.
-	// Surfacing this as a label on AlertEvent helps the
-	// operator interpret the saturated count.
-	wafEventRateQueryCap = 10000
 )
 
 // wafActions enumerates the allowed Action filter tokens.
@@ -84,7 +75,7 @@ var wafActions = []string{"", "BLOCK", "DETECT"}
 // doesn't take a structural dep on the store's broader
 // surface.
 type WafEventReader interface {
-	QueryWafEvents(ctx context.Context, filter observability.WafEventFilter) ([]observability.WafEvent, error)
+	CountWafEvents(ctx context.Context, filter observability.WafEventFilter) (int, error)
 }
 
 // WafEventRateSource counts waf_event rows.
@@ -143,28 +134,27 @@ func (s *WafEventRateSource) Read(ctx context.Context, raw json.RawMessage) (Sou
 	}
 
 	now := s.now()
+	// v2.52 — counted in SQL.
+	//
+	// This used to fetch rows and take len(), asking for 10 000. The
+	// store clamps any result-set limit to 100, so the count could never
+	// exceed 100 and EVERY threshold above that was unreachable — a rule
+	// asking for "more than 200 WAF events in 5 minutes" could not fire,
+	// ever. The saturation label meant to warn about it was equally
+	// unreachable, and is gone with the cap.
+	//
+	// The action filter also moved into SQL: filtering client-side after
+	// a capped fetch narrowed an already-truncated set.
 	filter := observability.WafEventFilter{
 		RouteID:  p.RouteID,
 		Category: p.Category,
+		Action:   strings.ToUpper(p.Action),
 		From:     now.Add(-time.Duration(p.WindowSecs) * time.Second),
 		To:       now,
-		Limit:    wafEventRateQueryCap,
 	}
-	events, err := s.reader.QueryWafEvents(ctx, filter)
+	count, err := s.reader.CountWafEvents(ctx, filter)
 	if err != nil {
-		return SourceValue{}, fmt.Errorf("waf_event_rate: query: %w", err)
-	}
-
-	// Action filter applied client-side (the observability
-	// filter has no Action column field). Empty Action =
-	// count everything.
-	count := 0
-	wantAction := strings.ToUpper(p.Action)
-	for _, e := range events {
-		if wantAction != "" && strings.ToUpper(e.Action) != wantAction {
-			continue
-		}
-		count++
+		return SourceValue{}, fmt.Errorf("waf_event_rate: count: %w", err)
 	}
 
 	labels := map[string]string{
@@ -179,12 +169,6 @@ func (s *WafEventRateSource) Read(ctx context.Context, raw json.RawMessage) (Sou
 	if p.Action != "" {
 		labels["action"] = p.Action
 	}
-	// Surface query-cap saturation so the operator knows
-	// the count is a lower bound when the cap was hit.
-	if len(events) >= wafEventRateQueryCap {
-		labels["query_capped"] = "true"
-	}
-
 	v := FloatValue(float64(count))
 	v.Labels = labels
 	return v, nil

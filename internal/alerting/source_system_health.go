@@ -43,7 +43,7 @@ import (
 // SystemHealthParams is the Source.Read params shape.
 type SystemHealthParams struct {
 	// Component is the per-check name to look up
-	// ("caddy", "boltdb", "metrics", "crowdsec",
+	// ("caddy", "db", "metrics", "crowdsec",
 	// "certmagic"). Empty = use the global Report.Status.
 	Component string `json:"component,omitempty"`
 }
@@ -109,8 +109,9 @@ func (s *SystemHealthSource) Read(ctx context.Context, raw json.RawMessage) (Sou
 	// in the wire shape; here we iterate it linearly —
 	// the slice length is ≤ 5 at the time of writing, so
 	// a map index buys nothing.
+	wanted := canonicalHealthComponent(p.Component)
 	for _, c := range report.Components {
-		if c.Name == p.Component {
+		if c.Name == wanted {
 			v := StringValue(string(c.Status))
 			v.Labels = map[string]string{
 				"scope":     "component",
@@ -126,4 +127,28 @@ func (s *SystemHealthSource) Read(ctx context.Context, raw json.RawMessage) (Sou
 		}
 	}
 	return SourceValue{}, fmt.Errorf("system_health: component %q not found in report", p.Component)
+}
+
+// legacyHealthComponentNames maps names the UI used to offer to the ones
+// the checks actually register.
+//
+// v2.52 — the rule editor offered "boltdb" while the check is named "db"
+// (systemhealth/check_db.go). A rule on the database therefore failed on
+// every evaluation with `component "boltdb" not found in report`, and the
+// error only ever reached the rule's LastError — nothing on screen said
+// the alert would never fire.
+//
+// The editor is fixed, but rules already stored carry the old name. This
+// alias makes them start working rather than keep failing silently: an
+// operator who set up a database alert months ago should not have to
+// discover it and re-create it.
+var legacyHealthComponentNames = map[string]string{
+	"boltdb": "db",
+}
+
+func canonicalHealthComponent(name string) string {
+	if canonical, ok := legacyHealthComponentNames[name]; ok {
+		return canonical
+	}
+	return name
 }

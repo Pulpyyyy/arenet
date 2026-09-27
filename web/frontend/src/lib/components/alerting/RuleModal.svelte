@@ -84,7 +84,7 @@
 			? [
 					{ value: '', label: t('alerting.ruleModal.healthGlobal') },
 					{ value: 'caddy', label: 'Caddy' },
-					{ value: 'boltdb', label: 'BoltDB' },
+					{ value: 'db', label: 'BoltDB' },
 					{ value: 'metrics', label: 'Metrics' },
 					{ value: 'crowdsec', label: 'CrowdSec' },
 					{ value: 'certmagic', label: 'Certmagic' }
@@ -92,7 +92,7 @@
 			: [
 					{ value: '', label: 'Global (all system health)' },
 					{ value: 'caddy', label: 'Caddy' },
-					{ value: 'boltdb', label: 'BoltDB' },
+					{ value: 'db', label: 'BoltDB' },
 					{ value: 'metrics', label: 'Metrics' },
 					{ value: 'crowdsec', label: 'CrowdSec' },
 					{ value: 'certmagic', label: 'Certmagic' }
@@ -147,6 +147,9 @@
 	// cert_renewal_failed
 	let certRenewalDomain = $state('');
 	let certRenewalWindowSecs = $state(86400);
+	// v2.52 — cert_manual_expiring had no form at all, so this never left
+	// the backend default of 30. See the payload builder.
+	let certManualThresholdDays = $state(30);
 
 	// system_health
 	let healthComponent = $state('');
@@ -219,6 +222,9 @@
 					typeof sp.windowSecs === 'number' ? sp.windowSecs : 86400;
 			} else if (source === 'system_health') {
 				healthComponent = typeof sp.component === 'string' ? sp.component : '';
+			} else if (source === 'cert_manual_expiring') {
+				certManualThresholdDays =
+					typeof sp.thresholdDays === 'number' ? sp.thresholdDays : 30;
 			}
 
 			// Decode eval-specific params.
@@ -247,6 +253,7 @@
 			certHost = '';
 			certRenewalDomain = '';
 			certRenewalWindowSecs = 86400;
+			certManualThresholdDays = 30;
 			healthComponent = '';
 			thresholdOp = '>';
 			thresholdValue = 50;
@@ -319,12 +326,18 @@
 				return {};
 			}
 			case 'cert_manual_expiring': {
-				// The backend param struct (CertManualExpiringParams) has
-				// only thresholdDays, which is carried in the threshold
-				// eval params (value), not source params. There is NO host
-				// filter for this source — the old p.host was silently
-				// ignored by the backend, so we send no source params.
-				return {};
+				// v2.52 — thresholdDays IS a source param, and it is sent.
+				//
+				// The comment here used to claim it travelled in the
+				// threshold eval params. It does not: the eval `value` is
+				// compared against the COUNT of matching certificates, so
+				// thresholdDays never reached the source and every rule
+				// silently used the backend default of 30 days.
+				//
+				// Reading the resulting rule: "how many manually uploaded
+				// certificates expire within thresholdDays", compared
+				// against your threshold — so `> 0` means "at least one".
+				return { thresholdDays: certManualThresholdDays };
 			}
 		}
 	}
@@ -603,6 +616,30 @@
 						<option value={c.value}>{c.label}</option>
 					{/each}
 				</select>
+			</div>
+		{:else if source === 'cert_manual_expiring'}
+			<!-- v2.52 — this source had no form branch at all, so its
+			     threshold was stuck on the backend default of 30 days and
+			     an operator could not change it. -->
+			<div>
+				<label
+					for="cert-manual-days"
+					class="text-sm font-medium text-secondary mb-1.5 block"
+				>
+					{language.current && t('alerting.ruleModal.labelManualCertDays')}
+				</label>
+				<input
+					id="cert-manual-days"
+					type="number"
+					min="1"
+					max="365"
+					bind:value={certManualThresholdDays}
+					data-testid="cert-manual-days"
+					class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary"
+				/>
+				<p class="text-xs text-muted mt-1">
+					{language.current && t('alerting.ruleModal.hintManualCertDays')}
+				</p>
 			</div>
 		{/if}
 
