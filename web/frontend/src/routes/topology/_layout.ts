@@ -71,6 +71,25 @@ const ROW_SPACING_Y = 150;
 // successive AliasNodes are tighter (8 px) so a long stack
 // (the operator's 21-alias traefik route) packs vertically
 // without dominating the canvas.
+// Paint order, made EXPLICIT (2026-09-27).
+//
+// It used to rely purely on the order nodes appear in the array — the
+// route-group container was pushed before its cards so SvelteFlow would
+// paint it behind. That holds on a first render, when every node is
+// created in one pass, and breaks on an update: SvelteFlow leaves already
+// mounted nodes where they are and appends new ones, so a card created
+// later lands on top of containers mounted earlier.
+//
+// Which is exactly what folding aliases by default (v2.48) turned from a
+// latent fragility into a visible bug: expanding a route creates its
+// alias cards at that moment, and they painted over the route-group
+// chrome, hiding the R/s figures underneath. Before the fold default,
+// routes started expanded and the cards were created on first mount.
+//
+// An explicit zIndex does not care when a node was created.
+const Z_ROUTE_GROUP = 0; // chrome, behind everything it surrounds
+const Z_CARD = 1; // FQDN + alias cards
+
 const FQDN_HEIGHT = 70;
 const ALIAS_HEIGHT = 44;
 const FQDN_TO_ALIAS_GAP = 16;
@@ -379,6 +398,7 @@ export function buildTopologyGraph(
                                 data: groupData,
                                 draggable: false,
                                 selectable: false,
+                                zIndex: Z_ROUTE_GROUP,
                         });
                 }
 
@@ -404,6 +424,7 @@ export function buildTopologyGraph(
                         type: 'fqdn',
                         position: { x: COL_X.FQDN, y: blockTop },
                         data: fqdnData,
+                        zIndex: Z_CARD,
                 });
 
                 // Phase 3.e: skip the entire alias sub-node loop
@@ -463,6 +484,7 @@ export function buildTopologyGraph(
                                 draggable: false,
                                 selectable: false,
                                 data: aliasData,
+                                zIndex: Z_CARD,
                         });
                 });
         });
