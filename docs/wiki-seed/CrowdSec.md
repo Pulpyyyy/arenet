@@ -103,6 +103,79 @@ Since **v2.26.0**, blocked visitors get Arenet's **branded error page** instead 
 
 ---
 
+## Three parts, and which one you have
+
+This is the question the settings screen does not answer on its own, because CrowdSec appears in Arenet in **three** places that do different things.
+
+| Part | Direction | Credentials | What it does |
+|---|---|---|---|
+| **Bouncer** (Settings → CrowdSec) | Arenet **reads** | `cscli bouncers add arenet` | Refuses IPs that LAPI says are bad. Enforcement. |
+| **Access log** (Settings → Security) | Arenet **writes a file** | none | Gives CrowdSec requests to parse, so *it* can detect things. |
+| **Security Automation** (Settings → Security) | Arenet **writes to LAPI** | `cscli machines add arenet-writer` | Arenet decides on its own and pushes bans. |
+
+**Why two sets of credentials for the same LAPI.** That is CrowdSec's auth model, not an Arenet quirk: a *bouncer* may only read decisions, while a *machine* (watcher) may create alerts. A bouncer key cannot write, so pushing a ban needs the second one.
+
+**With only the bouncer**, you get the community blocklist. That is a real layer — thousands of operators reporting IPs that are abusive right now — but nothing about *your* host is ever detected.
+
+**The access log** is what lets CrowdSec's own scenarios see your traffic: scanning, brute force against the apps behind Arenet, known exploit attempts. Arenet emitted no access log at all before **v2.50**, which is why an agent could sit next to it for months and never fire a scenario.
+
+**Security Automation** is the other detector, and it works from what Arenet already understands rather than from raw requests: WAF events, rate-limit events, and failed logins to Arenet's own admin. When one source IP crosses a threshold inside a window, Arenet pushes a ban to LAPI with `origin=arenet` and a scenario named `arenet/…`. It deduplicates, and if you lift a ban by hand it backs off instead of immediately re-pushing it.
+
+> **Every automation rule is disabled by default.** If you filled in the watcher credentials and never saw an `arenet/…` decision, that is almost certainly why — the credentials alone do nothing.
+
+The two detectors do not overlap: Security Automation sees what Arenet has already classified, CrowdSec sees what Arenet merely forwards.
+
+### A word on "watcher"
+
+It means two unrelated things in Arenet. A CrowdSec **watcher** is a machine allowed to write to LAPI. The **watcher** on the [Alerting](Alerting) page is the loop that evaluates your alert rules every 30 seconds. Same word, no relation.
+
+---
+
+## Turning detection on
+
+1. **Settings → Security → HTTP access log** → tick *Write an access log*.
+2. Read the **path the card prints**. Do not guess it: the default is `/var/log/arenet/access.log` on a systemd install and `/var/lib/arenet/logs/access.log` inside the container on Docker, and only the running process knows which applied.
+3. Save. Arenet reloads Caddy — the log is part of the emitted configuration, so nothing appears until it does.
+4. On the CrowdSec host:
+
+```bash
+sudo cscli collections install crowdsecurity/caddy
+```
+
+```yaml
+# /etc/crowdsec/acquis.d/arenet.yaml
+filenames:
+  - /var/log/arenet/access.log      # the path from step 2
+labels:
+  type: caddy
+```
+
+```bash
+sudo systemctl restart crowdsec
+```
+
+5. Check it is actually reading:
+
+```bash
+sudo cscli metrics | grep -A 5 Acquisition
+```
+
+The file must appear with a line count that **rises**. Zero means the agent cannot read it — see [Troubleshooting](Troubleshooting).
+
+**The log is off by default on purpose.** It records every visitor's IP address and the URLs they request. That is what a detection engine needs, and it is also personal data on your disk; which of the two matters more is your call, not a default. Rotation is not optional — 10 MB across 5 gzipped files by default, and the form prints the resulting ceiling.
+
+**Docker**: mount the volume read-only into the agent instead of using a host path —
+
+```yaml
+crowdsec:
+  volumes:
+    - arenet-data:/var/lib/arenet:ro
+```
+
+**Not in this log**: Arenet's own admin interface, which is served separately and never reaches Caddy. Failed admin logins are covered by Security Automation instead.
+
+---
+
 ## What gets blocked
 
 The bouncer enforces **whatever decisions the agent has**. Default scenarios (after `cscli scenarios install crowdsecurity/http-cve` etc.) include :

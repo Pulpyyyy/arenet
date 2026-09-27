@@ -128,6 +128,77 @@ LAPI URL to use: `http://crowdsec:8080` (Docker DNS resolves
 the `crowdsec` service name to the container IP within the
 shared network).
 
+## A.4 — Enable the access log (the detection half)
+
+Everything in §A gets the **bouncer** working: Arenet reads
+decisions from LAPI and refuses the IPs they name. That alone
+gives you the community blocklist.
+
+It does not make CrowdSec detect anything about *this* host.
+For that the agent needs requests to parse, and until v2.50
+Arenet emitted **no access log at all** — no `logs` on any
+server, no `logging` block. An agent installed beside it
+therefore enforced the community list and detected nothing
+local, with nothing saying so.
+
+Turn it on in **Settings → Security → HTTP access log**. It is
+off by default: the file records every visitor's IP address
+and the URLs they request, which is the operator's decision to
+make rather than a default to inherit.
+
+The card prints the **resolved path**, and that is the value to
+use below — the default depends on how Arenet is installed,
+and only the running process knows which applied:
+
+| Deployment | Access log | Owner / mode |
+|---|---|---|
+| A.1 — apt / systemd | `/var/log/arenet/access.log` | `arenet:arenet`, dir `0755`, file `0600` |
+| A.2 — Arenet on the host, CrowdSec in a container | `/var/log/arenet/access.log` | same; mount it into the agent read-only |
+| A.3 — both in containers | `/var/lib/arenet/logs/access.log` **inside** the Arenet container, i.e. in the `arenet-data` volume | uid `65532`, dir `0700`, file `0600` |
+
+Under systemd the directory comes from `LogsDirectory=arenet`
+in the unit, which creates it with the service's ownership and
+is implicitly exempt from `ProtectSystem=strict`. That is why
+the log can live in `/var/log` at all: without that directive
+the whole hierarchy is read-only to the service and the write
+would fail at runtime.
+
+In a container the log deliberately stays inside the volume.
+`/var/log` there belongs to the writable layer, so the file
+would be destroyed by the next container replacement — which
+is what an upgrade is.
+
+Rotation is not optional. The defaults are 10 MB across 5
+files, gzipped, and the form prints the resulting ceiling in
+megabytes. Caddy's own defaults would be 100 MB × 10, about a
+gigabyte, which is not a homelab default.
+
+Then install the collection and wire acquisition:
+
+```bash
+sudo cscli collections install crowdsecurity/caddy
+```
+
+```yaml
+# /etc/crowdsec/acquis.d/arenet.yaml — systemd (A.1, A.2)
+filenames:
+  - /var/log/arenet/access.log
+labels:
+  type: caddy
+```
+
+For A.3, mount the volume read-only into the agent
+(`arenet-data:/var/lib/arenet:ro`) and read
+`/var/lib/arenet/logs/access.log` instead.
+
+The format is Caddy's stock JSON, unmodified, because that is
+what `crowdsecurity/caddy` already parses — it reads
+`request.client_ip`, `status`, `request.uri`,
+`request.method`, `request.host` and the headers. Inventing an
+Arenet-shaped log would have meant shipping a parser too.
+
+Verify before trusting it — see §E "Acquisition wiring".
+
 ## B — Generate a bouncer API key
 
 The bouncer key is the credential Arenet uses to authenticate
@@ -372,9 +443,9 @@ invalidates on the first 401).
 ### Acquisition wiring
 
 To get scenario fires from Arenet traffic, CrowdSec needs to
-parse Arenet's logs. The minimal setup writes Arenet's HTTP
-logs to a file and points CrowdSec at it. Example
-`/etc/crowdsec/acquis.yaml` entry:
+parse Arenet's access log — which §A.4 turns on. Point the
+agent at the path that section resolves. Example
+`/etc/crowdsec/acquis.yaml` entry for a systemd install:
 
 ```yaml
 filenames:
@@ -391,11 +462,19 @@ to overflow its bucket, an alert is created and the
 Scenarios tab populates within 30 minutes (the next poll
 after `since=24h` shifts past it).
 
-Arenet itself does not bundle an acquisition shim — this is a
-**deliberate non-coupling**: CrowdSec's parser ecosystem is
-its own concern, and bundling a parser would pin Arenet to a
-specific log format we'd then have to maintain across format
-revisions.
+Arenet still bundles no parser and writes no acquisition file
+— CrowdSec's parser ecosystem is its own concern, and the
+agent may well live on another host. What changed in v2.50 is
+the other half: **Arenet now writes the log**, which until
+then it did not, so this section described a file the operator
+had to conjure themselves. See §A.4.
+
+If the acquisition reads zero lines, it is nearly always
+permissions rather than format: Caddy creates the file `0600`
+owned by the Arenet user, so the agent has to be root. Check
+with `systemctl show crowdsec -p User` and confirm with
+`sudo cscli metrics | grep -A 5 Acquisition` — a file listed
+with a count that stays at zero is the symptom.
 
 ## F — Settings precedence (env vs. UI)
 

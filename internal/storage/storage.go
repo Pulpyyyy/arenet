@@ -197,6 +197,7 @@ func NewStore(dbPath string) (*Store, error) {
 			[]byte(bucketMeta),                 // v2.30 — secrets key fingerprint
 			[]byte(bucketBackupSchedule),       // v2.33 — scheduled backups
 			[]byte(bucketRouteCheck),           // v2.35 — post-apply route check
+			[]byte(bucketAccessLog),            // v2.50 — HTTP access log for CrowdSec
 			[]byte(bucketTCPServices),          // v2.42 — layer-4 services
 		} {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {

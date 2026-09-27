@@ -250,6 +250,42 @@ Si tu t'es complètement lockout, tu peux temporairement désactiver l'intégrat
 
 ---
 
+## CrowdSec ne bannit rien qui vienne de chez vous
+
+### Symptôme
+CrowdSec est configuré, le bouncer est connecté, mais aucune décision n'apparaît jamais en dehors de celles importées de la liste communautaire. Rien de local n'est jamais détecté.
+
+### Diagnostic
+```bash
+# 1. Arenet écrit-il un journal d'accès ? (désactivé par défaut)
+#    Réglages → Sécurité → Journal d'accès HTTP — lisez le chemin affiché.
+sudo ls -l /var/log/arenet/access.log
+
+# 2. Grossit-il ? Chargez une de vos routes pendant que ceci tourne.
+sudo tail -f /var/log/arenet/access.log
+
+# 3. L'agent le lit-il ?
+sudo cscli metrics | grep -A 5 Acquisition
+
+# 4. L'agent peut-il le lire ? Caddy écrit le fichier en 0600.
+systemctl show crowdsec -p User
+sudo cscli explain --file /var/log/arenet/access.log --type caddy | head -20
+```
+
+### Fix
+Les quatre vérifications ci-dessus échouent de quatre façons différentes, chacune avec sa réponse.
+
+1. **Aucun fichier.** Le journal d'accès est désactivé par défaut — il enregistre l'IP et les URL de chaque visiteur, Arenet ne l'active donc pas à votre place. Activez-le dans Réglages → Sécurité, et notez que le chemin affiché là est celui à utiliser : il diffère entre une installation systemd (`/var/log/arenet/access.log`) et un conteneur (dans le volume de données).
+2. **Le fichier existe mais reste vide.** Les requêtes n'atteignent pas la destination. Vérifiez que l'enregistrement a bien rechargé Caddy — le journal fait partie de la configuration émise. Signalez ce cas : c'est un bug, pas un réglage.
+3. **Le compteur d'acquisition reste à zéro.** L'agent ne lit pas. Vérifiez que le chemin dans `/etc/crowdsec/acquis.d/` correspond exactement, et que `labels: type: caddy` est présent. Sous Docker, l'agent a besoin du volume monté en lecture seule (`arenet-data:/var/lib/arenet:ro`).
+4. **`cscli explain` signale un échec d'analyse.** Installez la collection : `sudo cscli collections install crowdsecurity/caddy`.
+
+La cause la plus fréquente de loin est celle des **permissions** : Caddy crée le fichier en `0600` appartenant à l'utilisateur Arenet, donc l'agent doit être root. Il l'est par défaut avec une installation par paquet, mais pas si vous l'avez changé.
+
+À savoir : les échecs de connexion à l'**administration d'Arenet** ne sont jamais dans ce journal — le plan d'administration est servi séparément et n'atteint jamais Caddy. Ils sont couverts par Security Automation, dont toutes les règles sont **désactivées par défaut**, ce qui est l'autre raison pour laquelle un opérateur ne voit aucune décision `arenet/…`. Voir [CrowdSec](CrowdSec-FR).
+
+---
+
 ## Le fichier de backup est énorme (> 10 MB)
 
 ### Symptôme

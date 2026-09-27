@@ -192,6 +192,7 @@ const (
 	// after = the restored route). CheckUpdated: the setting toggled.
 	ActionRouteUpdateRolledBack = "route_update_rolled_back"
 	ActionRouteCheckUpdated     = "route_check_updated"
+	ActionAccessLogUpdated      = "access_log_updated"
 
 	// Step O.3 — managed-domain CRUD (2). The Created event
 	// also carries the count of covered routes whose ACMEChallenge
@@ -344,6 +345,7 @@ var allActions = []string{
 	ActionBackupDeleted,
 	ActionRouteUpdateRolledBack,
 	ActionRouteCheckUpdated,
+	ActionAccessLogUpdated,
 	ActionManagedDomainCreated,
 	ActionManagedDomainDeleted,
 	ActionAutomationDecisionPushed,

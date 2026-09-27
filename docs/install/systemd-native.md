@@ -101,6 +101,34 @@ the service**. It's idempotent — safe to re-run.
 Pass `ARENET_NO_START=1` if you'd rather stage everything and
 start it yourself later.
 
+### Where files live
+
+| What | Path |
+|---|---|
+| Binary | `/usr/local/bin/arenet` |
+| State (database, certificates) | `/var/lib/arenet/` |
+| Env overrides | `/etc/arenet/arenet.env` |
+| HTTP access log, when enabled | `/var/log/arenet/access.log` |
+
+The unit declares `LogsDirectory=arenet`, so systemd creates
+`/var/log/arenet` owned by the `arenet` user. That directive is
+what makes the path writable at all: the unit also runs
+`ProtectSystem=strict`, under which the whole filesystem is
+read-only to the service except what is explicitly granted.
+
+The access log is **off by default** — it records every
+visitor's IP and the URLs they request. Enable it in
+Settings → Security when you want CrowdSec to detect attacks
+against this host; see [CrowdSec](../wiki-seed/CrowdSec.md).
+Override the location with `ARENET_ACCESS_LOG_PATH` in the env
+file, but keep in mind that a different directory under
+`/var/log` will not be writable unless you add it to the unit.
+
+Note that backups cover `/var/lib/arenet`, so the access log is
+deliberately outside them. It is observability data, not state:
+losing it costs nothing, and including request logs in a backup
+you might email yourself would be a poor trade.
+
 ## 3. Confirm it's running
 
 ```bash

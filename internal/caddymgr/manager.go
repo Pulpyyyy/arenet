@@ -188,6 +188,14 @@ type CaddyManager struct {
 	// via omitempty in that case.
 	normalTrafficExcludePaths []string
 
+	// accessLogConfiguredPath / accessLogDataDir (v2.50) are what the
+	// access-log file path is derived from when the operator has not
+	// typed one: ARENET_ACCESS_LOG_PATH (which the systemd installer
+	// sets to /var/log/arenet/access.log) and the data dir. Pushed by
+	// main.go before Start, same invariant as the exclude paths above.
+	accessLogConfiguredPath string
+	accessLogDataDir        string
+
 	// previousWAFModes (W.bugfix Fix #3) is the WAF mode per
 	// route observed at the END of the most recent successful
 	// applyLocked. Used to compute a diff against the routes
@@ -305,6 +313,23 @@ func New(store *storage.Store, logger *slog.Logger, registry *metrics.Registry, 
 // MUST be called BEFORE Start so the initial Caddy config
 // emits the exclusions from the first applyLocked. Same
 // invariant as SetCrowdSecConfig.
+// SetAccessLogDefaults supplies what the access-log path falls back to
+// when the operator has not chosen one: the configured path and the data
+// directory.
+//
+// The emitter does not read process configuration, so this is how the
+// per-topology default reaches it — /var/log/arenet under systemd, the
+// data dir (and so the Docker volume) everywhere else.
+//
+// MUST be called BEFORE Start, so the first applyLocked already writes
+// the log the operator enabled on a previous run.
+func (m *CaddyManager) SetAccessLogDefaults(configuredPath, dataDir string) {
+	m.mu.Lock()
+	m.accessLogConfiguredPath = configuredPath
+	m.accessLogDataDir = dataDir
+	m.mu.Unlock()
+}
+
 func (m *CaddyManager) SetNormalTrafficExcludePaths(paths []string) {
 	m.mu.Lock()
 	// Defensive copy so the caller can't mutate the slice
@@ -691,6 +716,16 @@ func (m *CaddyManager) applyLocked(ctx context.Context) error {
 	// install / never-customized page returns a zero value (empty
 	// HTML) with nil error; buildConfigJSON's maintenance branch
 	// falls back to the branded default in that case.
+	// v2.50 — the access-log setting, read before each apply like the
+	// error templates above. A read failure must not take the whole
+	// reload down over a log: treat it as off and say so.
+	accessLog, err := m.store.GetAccessLogConfig(ctx)
+	if err != nil {
+		m.logger.Warn("access log: read setting; leaving the log off for this apply", "err", err)
+		accessLog = storage.AccessLogConfig{}
+	}
+	accessLogPath := ResolveAccessLogPath(m.accessLogConfiguredPath, m.accessLogDataDir, accessLog.Path)
+
 	maintenancePage, err := m.store.GetMaintenancePageConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("get maintenance page config: %w", err)
@@ -751,6 +786,8 @@ func (m *CaddyManager) applyLocked(ctx context.Context) error {
 		MaintenanceMessage:        maintenancePage.Message,
 		ExternalCerts:             extCertsMap,
 		TCPServices:               tcpServices,
+		AccessLog:                 accessLog,
+		AccessLogPath:             accessLogPath,
 	})
 	if err != nil {
 		return fmt.Errorf("build config: %w", err)
@@ -1122,8 +1159,14 @@ type httpApp struct {
 }
 
 type httpServer struct {
-	Listen          []string              `json:"listen"`
-	Routes          []httpRoute           `json:"routes,omitempty"`
+	Listen []string    `json:"listen"`
+	Routes []httpRoute `json:"routes,omitempty"`
+	// Logs (v2.50) points this server's requests at the access-log
+	// sink. Caddy only enables access logging at all when this is
+	// non-nil (caddyhttp/app.go:234), so omitting it is how the log
+	// stays off — and how the emitted config stays byte-identical for
+	// an installation that never turns it on.
+	Logs            map[string]any        `json:"logs,omitempty"`
 	Errors          *httpErrors           `json:"errors,omitempty"`
 	AutomaticHTTPS  *automaticHTTPSConfig `json:"automatic_https,omitempty"`
 	TLSConnPolicies []tlsConnectionPolicy `json:"tls_connection_policies,omitempty"`
@@ -1315,6 +1358,13 @@ type buildOpts struct {
 	// "use the branded default" — resolveMaintenancePage in
 	// maintenance.go implements that fallback.
 	MaintenancePageHTML string
+	// AccessLog (v2.50) is the operator's access-log setting, and
+	// AccessLogPath the already-resolved absolute file. Resolution
+	// happens in the caller because it needs the process config (data
+	// dir, ARENET_ACCESS_LOG_PATH), which the emitter has no business
+	// reading.
+	AccessLog     storage.AccessLogConfig
+	AccessLogPath string
 	// MaintenanceMessage (v2.18.0) is the operator's global
 	// maintenance message (storage.MaintenancePageConfig.Message),
 	// read from BoltDB before each applyLocked alongside
@@ -2055,6 +2105,17 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 		servers["arenet_http"] = srv
 	}
 
+	// v2.50 — point both servers at the access-log sink. Caddy enables
+	// access logging only when a server carries `logs`
+	// (caddyhttp/app.go:234), so a sink with no server attached to it
+	// creates the file and receives nothing — which loads cleanly and
+	// looks entirely correct.
+	if logs := accessLogServerConfig(opts.AccessLog, opts.AccessLogPath); logs != nil {
+		srv := servers["arenet_http"]
+		srv.Logs = logs
+		servers["arenet_http"] = srv
+	}
+
 	if len(httpsRoutes) > 0 {
 		// v2.9.10 Bug 1: same branded-body resolution as the HTTP server.
 		httpsRoutes = append(httpsRoutes, catchAllRoute(opts.ErrorTemplates, opts.CrowdSec.apiKey != ""))
@@ -2079,6 +2140,9 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 		}
 		if errRoutes := buildErrorRoutesForServer(routes, opts.ErrorTemplates, true, nil); len(errRoutes) > 0 {
 			httpsServer.Errors = &httpErrors{Routes: errRoutes}
+		}
+		if logs := accessLogServerConfig(opts.AccessLog, opts.AccessLogPath); logs != nil {
+			httpsServer.Logs = logs
 		}
 		servers["arenet_https"] = httpsServer
 	}
@@ -2268,6 +2332,11 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 	}
 
 	full := map[string]any{"apps": apps, "admin": adminBlock()}
+	// `logging` is a TOP-LEVEL Caddy key, sibling of apps — not part of
+	// the http app. Absent when the access log is off.
+	if logging := buildAccessLogging(opts.AccessLog, opts.AccessLogPath); logging != nil {
+		full["logging"] = logging
+	}
 	return json.MarshalIndent(full, "", "  ")
 }
 

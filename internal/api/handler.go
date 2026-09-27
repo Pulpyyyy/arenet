@@ -256,6 +256,9 @@ type Handler struct {
 	// routeProber runs the post-apply route check (v2.35); nil =
 	// skipped.
 	routeProber RouteProber
+	// accessLogPaths (v2.50) resolves where the access log lands,
+	// applying the per-install default. nil answers the stored path.
+	accessLogPaths AccessLogPathResolver
 
 	// geoIPUpdater (Brick 3, Task 5) powers the
 	// /api/v1/system/geoip/{update,status} endpoints. nil-tolerant:

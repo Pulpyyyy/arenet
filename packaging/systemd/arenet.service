@@ -35,10 +35,21 @@ Group=arenet
 
 # Optional env-file. The "-" prefix means "ignore if missing"
 # (don't fail-start when the operator hasn't created one).
+# v2.50 — where the HTTP access log goes when the operator enables it
+# in Settings. /var/log is the right place for a packaged service, and
+# LogsDirectory= below is what makes it writable despite
+# ProtectSystem=strict.
+#
+# Declared BEFORE EnvironmentFile= on purpose: systemd applies these in
+# file order, so an operator who sets ARENET_ACCESS_LOG_PATH in
+# /etc/arenet/arenet.env still wins.
+Environment=ARENET_ACCESS_LOG_PATH=/var/log/arenet/access.log
+
 EnvironmentFile=-/etc/arenet/arenet.env
 
 # Default arguments. Operators override via the env file:
-#   ARENET_ADMIN_BIND, ARENET_DATA_DIR, ARENET_LOG_LEVEL
+#   ARENET_ADMIN_BIND, ARENET_DATA_DIR, ARENET_LOG_LEVEL,
+#   ARENET_ACCESS_LOG_PATH
 # All map to the binary's flags via D5 precedence.
 ExecStart=/usr/local/bin/arenet --data-dir=/var/lib/arenet
 
@@ -64,6 +75,16 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
 ReadWritePaths=/var/lib/arenet
+
+# /var/log/arenet for the access log (v2.50). LogsDirectory= creates it
+# owned by the service user and is IMPLICITLY excluded from
+# ProtectSystem=, so it needs no ReadWritePaths entry of its own — and it
+# survives stops and restarts, unlike RuntimeDirectory=.
+#
+# Created whether or not the log is enabled: an empty directory costs
+# nothing, and creating it lazily would mean the first save after
+# enabling failed on a read-only /var/log.
+LogsDirectory=arenet
 
 # Network hardening (allow only IPv4 + IPv6; no other address
 # families needed). RestrictAddressFamilies is intentionally

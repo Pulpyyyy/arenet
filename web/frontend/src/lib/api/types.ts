@@ -1693,6 +1693,40 @@ export interface UpdateUserRoleRequest {
  */
 export type ErrorKind = 'validation' | 'system' | 'auth' | 'forbidden' | 'rate_limited';
 
+/**
+ * The HTTP access log setting (v2.50).
+ *
+ * It exists so CrowdSec has something to parse: Arenet emitted no access
+ * log at all before this, so an agent beside it enforced the community
+ * blocklist and detected nothing local — with nothing saying so.
+ *
+ * Off by default, because the file records every visitor's IP and every
+ * URL they asked for.
+ */
+export interface AccessLogRequest {
+	enabled: boolean;
+	/** Absolute path, or empty for the per-install default. */
+	path?: string;
+	/** Size at which a file rotates. 0 means unset, not unlimited. */
+	rollSizeMB?: number;
+	/** Rotated files kept. 0 means unset, not unlimited. */
+	rollKeep?: number;
+	/** gzip rotated files. */
+	compress?: boolean;
+}
+
+export interface AccessLogSettings extends AccessLogRequest {
+	/**
+	 * The file that will actually be written, per-install default
+	 * applied — /var/log/arenet/access.log under systemd, inside the
+	 * data volume in a container. This is what CrowdSec acquisition
+	 * points at, NOT `path`.
+	 */
+	resolvedPath: string;
+	/** Worst case on disk before compression. */
+	ceilingMB: number;
+}
+
 export class ApiError extends Error {
 	status: number;
 	kind: ErrorKind;
