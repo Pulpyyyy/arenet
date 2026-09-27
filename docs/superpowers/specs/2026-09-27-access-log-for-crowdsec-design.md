@@ -70,7 +70,7 @@ Arenet-specific shape would mean maintaining a parser too.
 | # | Decision | Rationale |
 |---|---|---|
 | D1 | **Off by default, enabled by a settings toggle** | The log records every visitor's IP and every URL they asked for. That is personal data and a disk cost; both are the operator's call, not a default. The toggle's own text says what it is for, so enabling it is an informed act rather than a discovered one |
-| D2 | **Default path `<data-dir>/logs/access.log`**, operator-overridable | Not `/var/log/arenet/`, however conventional: the systemd unit runs `ProtectSystem=strict` with `ReadWritePaths=/var/lib/arenet` (arenet.service:60,66), so **everything under /var/log is read-only to the service** and a log configured there would fail at runtime with nothing on screen to explain it. The data dir is also the Docker volume, so the log survives a container being replaced |
+| D2 | **`/var/log/arenet/access.log` on systemd, `<data-dir>/logs/access.log` everywhere else** | `/var/log/arenet` is the right place for a packaged Linux service, and `LogsDirectory=arenet` in the unit is how systemd provides it: it creates the directory with the service's ownership and **implicitly excludes it from `ProtectSystem=strict`**, so no `ReadWritePaths` entry is needed and it survives stops and restarts. In a container `/var/log` is ephemeral — the log would vanish with the container — so there the default stays inside the volume. See §Where the file actually lands for how one binary produces both |
 | D3 | **Rotation is always on and not optional**, with a ceiling the UI computes and shows | Caddy's own defaults are 100 MB × 10 files ≈ **1 GB** (`modules/logging/filewriter.go:251-262`) — fine for a server, not for a homelab SSD. Arenet defaults to 10 MB × 5, gzipped, and the form prints the worst case in megabytes, because that is the number the operator actually wants to know |
 | D4 | **Encoder pinned to `json` explicitly** | Caddy picks console or JSON at runtime depending on whether stderr is a terminal (`logging.go:735-748`). The whole point here is machine parsing, so the format must not depend on how Arenet happens to be started |
 | D5 | **Both the HTTP and HTTPS servers log to it**, under one logger name | A scanner probes port 80 as readily as 443. One file keeps the CrowdSec acquisition to a single entry |
@@ -100,9 +100,22 @@ A new settings singleton, alongside the route-check config:
  "compress": true}
 ```
 
-`path` empty means the default under the data dir; the resolved absolute
-path is returned by the API so the UI can print exactly what to hand to
-CrowdSec.
+`path` empty means "use the configured default", which is **not**
+hard-coded to the data dir — it comes from `internal/config` and so
+follows the existing flag > env > file > default precedence:
+
+- a new `AccessLogPath` config field, default `<data-dir>/logs/access.log`;
+- a new `ARENET_ACCESS_LOG_PATH` environment variable;
+- the systemd install sets it to `/var/log/arenet/access.log` in
+  `/etc/arenet/arenet.env`, and the unit gains `LogsDirectory=arenet`.
+
+That is what lets one binary do the right thing in both worlds without
+guessing which one it is in. Sniffing for systemd (`INVOCATION_ID` and
+friends) would be magic that breaks the day someone runs the binary by
+hand, and the config layer already exists for exactly this.
+
+The resolved absolute path is returned by the API so the UI can print
+exactly what to hand to CrowdSec, whichever default applied.
 
 Emitted config, when enabled:
 
@@ -128,21 +141,30 @@ The operator asked this directly, and the answer differs per install
 method because the data dir does. Verified against the unit, the compose
 file and the config defaults rather than assumed.
 
-| Install | Data dir | Access log | Owner / mode |
+| Install | Access log | Directory comes from | Owner / mode |
 |---|---|---|---|
-| **systemd** | `/var/lib/arenet` (`arenet.service:43`) | `/var/lib/arenet/logs/access.log` | `arenet:arenet`, file `0600`, dir `0700` |
-| **Docker** | `/var/lib/arenet` in the container = named volume `arenet-data` (`docker-compose.yml:85,102`) | `/var/lib/arenet/logs/access.log` **inside** the container | uid `65532` (distroless nonroot), file `0600`, dir `0700` |
-| **dev** (`make run`) | `./data` (`internal/config/config.go:139`) | `./data/logs/access.log` | the developer's own user |
+| **systemd** | `/var/log/arenet/access.log` | `LogsDirectory=arenet` in the unit | `arenet:arenet`, dir `0755` (systemd), file `0600` (Caddy) |
+| **Docker** | `/var/lib/arenet/logs/access.log` inside the container, i.e. inside the `arenet-data` volume (`docker-compose.yml:85,102`) | Caddy's `MkdirAll` | uid `65532` (distroless nonroot), dir `0700`, file `0600` |
+| **dev** (`make run`) | `./data/logs/access.log` (`internal/config/config.go:139`) | Caddy's `MkdirAll` | the developer's own user |
 
-`0600` / `0700` are Caddy's, not a choice of ours
-(`modules/logging/filewriter.go:190,201`).
+**Why not `/var/log/arenet` in Docker too.** `/var/log` inside a
+container is part of the writable layer, not a volume: the log would be
+destroyed the moment the container is replaced — which is what an upgrade
+is. It would also not be reachable by a sibling CrowdSec container
+without a second mount. The volume is the only durable place in that
+topology.
+
+`0600` on the file is Caddy's, not a choice of ours
+(`modules/logging/filewriter.go:190`). On systemd the *directory* is
+`0755` because that is `LogsDirectoryMode=`'s default, which is fine:
+the directory being traversable does not make a `0600` file readable.
 
 ### What that means for the CrowdSec agent
 
 **systemd.** Acquisition reads the path directly:
 
 ```yaml
-filenames: [/var/lib/arenet/logs/access.log]
+filenames: [/var/log/arenet/access.log]
 labels: { type: caddy }
 ```
 
@@ -185,7 +207,14 @@ precisely because nobody checked).
   note. Both languages, in real French.
 - `docs/setup/crowdsec.md` — the same wiring at the level of detail that
   file already uses, including the Docker sibling-container case.
-- `docs/operations/env-vars.md` — any `ARENET_*` variable this adds.
+- `docs/operations/env-vars.md` — `ARENET_ACCESS_LOG_PATH`.
+- `packaging/systemd/arenet.service` — `LogsDirectory=arenet`, and
+  `install.sh` writing the path into `/etc/arenet/arenet.env`. An
+  existing install that only replaces the binary keeps the data-dir
+  default, which still works; the installer moving it is an improvement,
+  not a migration, so nothing breaks either way.
+- `docs/install/` — the systemd and Docker pages both state where the
+  file is, because it differs.
 - `docs/wiki-seed/Troubleshooting.md` + `-FR.md` — "CrowdSec bans
   nothing": check the toggle, check the file is growing, check
   `cscli metrics` shows the acquisition reading lines, check the agent
