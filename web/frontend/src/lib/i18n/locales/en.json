@@ -1371,7 +1371,9 @@
 			"summaryTestErrorsLine": "Failures: {count}",
 			"summaryTestSkippedLine": "Skipped: {count}",
 			"toastRuleResult": "Rule \"{name}\": {line}",
-			"toastRuleErr": "Rule \"{name}\": {err}"
+			"toastRuleErr": "Rule \"{name}\": {err}",
+			"labelManualCertDays": "Warn this many days before expiry",
+			"hintManualCertDays": "Counts your manually uploaded certificates expiring within that many days. The rule then compares that COUNT against your threshold — so “> 0” means “at least one”. ACME certificates are covered by the separate “certificate expiry” source, not this one."
 		},
 		"sources": {
 			"updateAvailable": "Update available"

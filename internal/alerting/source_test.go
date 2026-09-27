@@ -85,16 +85,32 @@ func TestSourceRegistry_Names_Sorted(t *testing.T) {
 
 // -- waf_event_rate ---------------------------------------
 
-// stubWafReader returns a canned slice for QueryWafEvents.
+// stubWafReader counts its canned events, applying the filter's Action in
+// the same place the real store now does.
+//
+// v2.52 — the source used to fetch rows and count them itself; it now
+// asks the store for a COUNT, because a result-set cap of 100 made every
+// threshold above that unreachable. The stub honours Action so the
+// action-filter tests keep testing the thing they were written for.
 type stubWafReader struct {
 	events []observability.WafEvent
 	err    error
 	called observability.WafEventFilter
 }
 
-func (s *stubWafReader) QueryWafEvents(_ context.Context, f observability.WafEventFilter) ([]observability.WafEvent, error) {
+func (s *stubWafReader) CountWafEvents(_ context.Context, f observability.WafEventFilter) (int, error) {
 	s.called = f
-	return s.events, s.err
+	if s.err != nil {
+		return 0, s.err
+	}
+	n := 0
+	for _, e := range s.events {
+		if f.Action != "" && e.Action != f.Action {
+			continue
+		}
+		n++
+	}
+	return n, nil
 }
 
 func TestWafEventRateSource_HappyCountsAll(t *testing.T) {

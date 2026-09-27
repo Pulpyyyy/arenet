@@ -1371,7 +1371,9 @@
 			"summaryTestErrorsLine": "Échecs : {count}",
 			"summaryTestSkippedLine": "Ignorés : {count}",
 			"toastRuleResult": "Règle \"{name}\" : {line}",
-			"toastRuleErr": "Règle \"{name}\" : {err}"
+			"toastRuleErr": "Règle \"{name}\" : {err}",
+			"labelManualCertDays": "Prévenir ce nombre de jours avant expiration",
+			"hintManualCertDays": "Compte vos certificats importés à la main qui expirent dans ce délai. La règle compare ensuite ce NOMBRE à votre seuil — « > 0 » signifie donc « au moins un ». Les certificats ACME sont couverts par la source « expiration de certificat », pas par celle-ci."
 		},
 		"sources": {
 			"updateAvailable": "Mise à jour disponible"

@@ -395,9 +395,13 @@ type WafEvent struct {
 type WafEventFilter struct {
 	RouteID  string
 	Category string
-	From     time.Time // inclusive
-	To       time.Time // exclusive; zero = open-ended (now)
-	Limit    int
+	// Action, when set ("BLOCK" / "DETECT"), narrows in SQL. Only
+	// CountWafEvents honours it: QueryWafEvents is the events-page
+	// reader and its callers filter presentation-side.
+	Action string
+	From   time.Time // inclusive
+	To     time.Time // exclusive; zero = open-ended (now)
+	Limit  int
 }
 
 // wafEventLimitCap bounds the result set defensively. The
@@ -464,6 +468,60 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	return nil
 }
 
+// wafEventPredicates renders the shared WHERE clause and its args.
+// Extracted (v2.52) so counting and listing cannot drift: they used to be
+// one function, and the count was derived by fetching rows and taking
+// len() — which silently inherited the row cap. See CountWafEvents.
+func wafEventPredicates(filter WafEventFilter) (string, []any) {
+	q := ` WHERE 1=1`
+	args := []any{}
+	if filter.RouteID != "" {
+		q += ` AND route_id = ?`
+		args = append(args, filter.RouteID)
+	}
+	if filter.Category != "" {
+		q += ` AND category = ?`
+		args = append(args, filter.Category)
+	}
+	if filter.Action != "" {
+		q += ` AND action = ?`
+		args = append(args, filter.Action)
+	}
+	if !filter.From.IsZero() {
+		q += ` AND ts >= ?`
+		args = append(args, filter.From.UTC().Unix())
+	}
+	if !filter.To.IsZero() {
+		q += ` AND ts < ?`
+		args = append(args, filter.To.UTC().Unix())
+	}
+	return q, args
+}
+
+// CountWafEvents returns how many waf_event rows match filter, counted in
+// SQL.
+//
+// v2.52 — the alert source used to count by asking QueryWafEvents for
+// 10 000 rows and taking len(). That silently returned at most
+// wafEventLimitCap = 100, because the cap exists to bound a RESULT SET
+// and a count is not one. Every WAF alert threshold above 100 was
+// therefore unreachable, and the "query capped" label meant to warn about
+// it could never be set either.
+//
+// Filter.Limit is ignored here on purpose: a count has no result set to
+// bound, and honouring it would recreate the bug.
+func (s *Store) CountWafEvents(ctx context.Context, filter WafEventFilter) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("observability: store closed")
+	}
+	where, args := wafEventPredicates(filter)
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM waf_event`+where, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("observability: count waf_event: %w", err)
+	}
+	return n, nil
+}
+
 // QueryWafEvents returns the waf_event rows matching filter,
 // ts-descending (most recent first — the /security/events
 // endpoint's natural ordering). Empty filter returns the most
@@ -481,25 +539,9 @@ func (s *Store) QueryWafEvents(ctx context.Context, filter WafEventFilter) ([]Wa
 	if limit <= 0 || limit > wafEventLimitCap {
 		limit = wafEventLimitCap
 	}
+	where, args := wafEventPredicates(filter)
 	q := `SELECT id, ts, route_id, rule_id, category, severity, src_ip, request_method, request_path, payload_sample, action, status_code, matched_var
-	      FROM waf_event WHERE 1=1`
-	args := []any{}
-	if filter.RouteID != "" {
-		q += ` AND route_id = ?`
-		args = append(args, filter.RouteID)
-	}
-	if filter.Category != "" {
-		q += ` AND category = ?`
-		args = append(args, filter.Category)
-	}
-	if !filter.From.IsZero() {
-		q += ` AND ts >= ?`
-		args = append(args, filter.From.UTC().Unix())
-	}
-	if !filter.To.IsZero() {
-		q += ` AND ts < ?`
-		args = append(args, filter.To.UTC().Unix())
-	}
+	      FROM waf_event` + where
 	q += ` ORDER BY ts DESC, id DESC LIMIT ?`
 	args = append(args, limit)
 
@@ -582,7 +624,7 @@ type WafEventRuleAggregate struct {
 // << 100), so no client-driven cap is needed.
 type WafEventAggregateFilter struct {
 	RouteID  string
-	Category string // Phase Y — cross-route per-category drill-down filter
+	Category string    // Phase Y — cross-route per-category drill-down filter
 	From     time.Time // inclusive
 	To       time.Time // exclusive; zero = open-ended (now)
 }
@@ -1071,8 +1113,9 @@ type WafEventRouteCounts struct {
 // history.
 //
 // SQL: SELECT route_id, action, COUNT(*) FROM waf_event
-//      WHERE ts BETWEEN ? AND ?
-//      GROUP BY route_id, action
+//
+//	WHERE ts BETWEEN ? AND ?
+//	GROUP BY route_id, action
 //
 // Covered by idx_waf_event_route_ts (route_id, ts).
 // Empty window → empty map (graceful, no error).
