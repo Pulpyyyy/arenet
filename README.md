@@ -110,7 +110,7 @@ Docker secret). Details: [wiki → Updates](https://github.com/barto95100/arenet
 - 🎫 **Cert lifecycle observability** — track every `cert_obtained`, `cert_failed`, `cert_ocsp_revoked` event with 90d retention, and **delete an orphan certificate** from the dashboard
 
 ### Alerting (Step AL)
-- 🔔 **Multi-channel routing** — Discord webhook, generic webhook, SMTP email
+- 🔔 **Multi-channel routing** — Discord, generic webhook, SMTP email
 - 📐 **Threshold + state rules** — `waf_event_rate > 10`, `cert_expiry < 14d`, `system_health == degraded`, `cert_renewal_failed > 0`
 - ⏱️ **30s polling watcher** with per-rule cooldown to prevent alert storms
 - 📜 **Alert history** with rule pinpointing + channel delivery status

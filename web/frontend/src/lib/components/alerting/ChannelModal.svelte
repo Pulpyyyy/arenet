@@ -31,6 +31,7 @@
 		type AlertChannel,
 		type AlertChannelRequest,
 		type ChannelKind,
+		type DiscordConfig,
 		type EmailConfig,
 		type WebhookConfig
 	} from '$lib/api/alerting';
@@ -60,6 +61,13 @@
 	let name = $state('');
 	let enabled = $state(true);
 	let kind = $state<ChannelKind>('webhook');
+	// v2.53 — Discord fields. The URL is a secret (it is the credential),
+	// so it comes back redacted and an untouched edit must not overwrite
+	// the stored one — the backend inherits it when we send the
+	// placeholder back, same contract as the webhook URL.
+	let discordUrl = $state('');
+	let discordUsername = $state('');
+	let discordTimeout = $state(10);
 	let minSeverity = $state(0);
 
 	// Webhook fields.
@@ -100,6 +108,12 @@
 			enabled = channel.enabled;
 			kind = channel.kind;
 			minSeverity = channel.minSeverity;
+			if (channel.kind === 'discord') {
+				const cfg = (channel.config ?? {}) as unknown as Record<string, unknown>;
+				discordUrl = typeof cfg.webhookUrl === 'string' ? cfg.webhookUrl : '';
+				discordUsername = typeof cfg.username === 'string' ? cfg.username : '';
+				discordTimeout = typeof cfg.timeoutSeconds === 'number' ? cfg.timeoutSeconds : 10;
+			}
 			if (channel.kind === 'webhook') {
 				const cfg = channel.config as WebhookConfig;
 				// v2.39 — a channel whose stored URL was overwritten by the
@@ -135,6 +149,9 @@
 			name = '';
 			enabled = true;
 			kind = 'webhook';
+			discordUrl = '';
+			discordUsername = '';
+			discordTimeout = 10;
 			minSeverity = 0;
 			webhookUrl = '';
 			webhookMethod = 'POST';
@@ -179,6 +196,28 @@
 		if (!name.trim()) {
 			validationError = t('alerting.channelModal.errNameRequired');
 			return null;
+		}
+		if (kind === 'discord') {
+			if (!discordUrl.trim()) {
+				validationError = t('alerting.channelModal.errDiscordUrlRequired');
+				return null;
+			}
+			// Mirrors the Go validator so the refusal arrives while the
+			// operator is looking at the field, not as a 400 afterwards.
+			if (!/^https:\/\/(discord|discordapp)\.com\//.test(discordUrl.trim())) {
+				validationError = t('alerting.channelModal.errDiscordUrlHost');
+				return null;
+			}
+			if (discordTimeout < 1 || discordTimeout > 60) {
+				validationError = t('alerting.channelModal.errTimeoutRange');
+				return null;
+			}
+			const cfg: DiscordConfig = {
+				webhookUrl: discordUrl.trim(),
+				username: discordUsername.trim() || undefined,
+				timeoutSeconds: discordTimeout
+			};
+			return { name: name.trim(), kind: 'discord', enabled, minSeverity, config: cfg };
 		}
 		if (kind === 'webhook') {
 			if (!webhookUrl.trim()) {
@@ -335,6 +374,7 @@
 				>
 					<option value="webhook">Webhook</option>
 					<option value="email">Email</option>
+					<option value="discord">Discord</option>
 				</select>
 				{#if isEdit}
 					<p class="text-xs text-secondary mt-1">
@@ -364,6 +404,59 @@
 		<hr class="border-border-subtle" />
 
 		<!-- Webhook fields -->
+		{#if kind === 'discord'}
+			<!-- v2.53 — one field is enough.
+			     Pointing the generic webhook at Discord required hand-writing
+			     its payload in a body template, with no JSON escaping: an
+			     alert whose subject carried a quote produced an opaque 400.
+			     Here the sender builds the payload, so the operator pastes a
+			     URL and nothing else. -->
+			<div>
+				<label for="discord-url" class="text-sm font-medium text-secondary mb-1.5 block">
+					{language.current && t('alerting.channelModal.labelDiscordUrl')}
+				</label>
+				<input
+					id="discord-url"
+					type="text"
+					bind:value={discordUrl}
+					placeholder="https://discord.com/api/webhooks/…"
+					data-testid="discord-url"
+					class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono"
+				/>
+				<p class="text-xs text-secondary mt-1">
+					{language.current && t('alerting.channelModal.hintDiscordUrl')}
+				</p>
+			</div>
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+				<div>
+					<label for="discord-username" class="text-sm font-medium text-secondary mb-1.5 block">
+						{language.current && t('alerting.channelModal.labelDiscordUsername')}
+					</label>
+					<input
+						id="discord-username"
+						type="text"
+						bind:value={discordUsername}
+						data-testid="discord-username"
+						class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary"
+					/>
+				</div>
+				<div>
+					<label for="discord-timeout" class="text-sm font-medium text-secondary mb-1.5 block">
+						{language.current && t('alerting.channelModal.labelTimeout')}
+					</label>
+					<input
+						id="discord-timeout"
+						type="number"
+						min="1"
+						max="60"
+						bind:value={discordTimeout}
+						data-testid="discord-timeout"
+						class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary"
+					/>
+				</div>
+			</div>
+		{/if}
+
 		{#if kind === 'webhook'}
 			{#if channel?.secretsLost}
 				<p class="text-xs text-status-warn" role="alert" data-testid="channel-secrets-lost">

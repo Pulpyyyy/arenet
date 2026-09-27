@@ -144,6 +144,21 @@ func alertChannelForAudit(c storage.Channel) storage.Channel {
 		}
 		c.Config = redacted
 		return c
+	case storage.ChannelKindDiscord:
+		var cfg alerting.DiscordConfig
+		if err := json.Unmarshal(c.Config, &cfg); err != nil {
+			return c
+		}
+		// A Discord webhook URL carries its credential in the path:
+		// anyone holding it can post to the channel. Redacted like any
+		// other secret, same treatment as the generic webhook URL.
+		cfg.WebhookURL = redactWebhookURL(cfg.WebhookURL)
+		redacted, err := json.Marshal(cfg)
+		if err != nil {
+			return c
+		}
+		c.Config = redacted
+		return c
 	}
 	return c
 }
@@ -152,6 +167,13 @@ func alertChannelForAudit(c storage.Channel) storage.Channel {
 // redaction placeholder — the channel is broken until the URL is
 // retyped (see mergeAlertChannelSecrets).
 func webhookURLLost(c storage.Channel) bool {
+	if c.Kind == storage.ChannelKindDiscord {
+		var cfg alerting.DiscordConfig
+		if err := json.Unmarshal(c.Config, &cfg); err != nil {
+			return false
+		}
+		return strings.Contains(cfg.WebhookURL, auditRedacted)
+	}
 	if c.Kind != storage.ChannelKindWebhook {
 		return false
 	}
@@ -228,6 +250,10 @@ func validateAlertChannelRequest(req alertChannelRequest) error {
 		if _, err := alerting.ParseEmailConfig(req.Config); err != nil {
 			return err
 		}
+	case storage.ChannelKindDiscord:
+		if _, err := alerting.ParseDiscordConfig(req.Config); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -268,6 +294,22 @@ func mergeAlertChannelSecrets(reqConfig json.RawMessage, kind string, previous s
 		// writing the OpenAPI doc, v2.39).
 		if incoming.URL == "" || incoming.URL == auditRedacted || incoming.URL == redactWebhookURL(stored.URL) {
 			incoming.URL = stored.URL
+		}
+		return json.Marshal(incoming)
+	case storage.ChannelKindDiscord:
+		var incoming alerting.DiscordConfig
+		if err := json.Unmarshal(reqConfig, &incoming); err != nil {
+			return nil, err
+		}
+		var storedDiscord alerting.DiscordConfig
+		_ = json.Unmarshal(previous.Config, &storedDiscord)
+		// Same trap as the webhook URL above: GET returns it redacted,
+		// the UI sends back what it was shown, and without this an edit
+		// that did not retype the URL would store the placeholder and
+		// silently stop the channel.
+		if incoming.WebhookURL == "" || incoming.WebhookURL == auditRedacted ||
+			incoming.WebhookURL == redactWebhookURL(storedDiscord.WebhookURL) {
+			incoming.WebhookURL = storedDiscord.WebhookURL
 		}
 		return json.Marshal(incoming)
 	case storage.ChannelKindEmail:

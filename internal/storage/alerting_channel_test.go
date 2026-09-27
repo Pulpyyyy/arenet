@@ -150,13 +150,22 @@ func TestAlertChannelKinds_StableOrder(t *testing.T) {
 	// AlertChannelKinds for the "valid kinds" wire response.
 	// A change here is operator-visible (the order may
 	// influence which kind the frontend selects by default).
-	if len(AlertChannelKinds) != 2 {
-		t.Fatalf("AlertChannelKinds len = %d; want 2 (webhook, email) for V1", len(AlertChannelKinds))
+	// v2.53 — discord APPENDED, deliberately third.
+	//
+	// The property this test protects is the order of the first entries,
+	// because the frontend selects the first as its default. Adding a
+	// kind at the end leaves that untouched; inserting one at the front
+	// would silently change which kind a new channel starts as.
+	if len(AlertChannelKinds) != 3 {
+		t.Fatalf("AlertChannelKinds len = %d; want 3 (webhook, email, discord)", len(AlertChannelKinds))
 	}
 	if AlertChannelKinds[0] != ChannelKindWebhook {
-		t.Errorf("AlertChannelKinds[0] = %q; want webhook", AlertChannelKinds[0])
+		t.Errorf("AlertChannelKinds[0] = %q; want webhook — the frontend's default", AlertChannelKinds[0])
 	}
 	if AlertChannelKinds[1] != ChannelKindEmail {
 		t.Errorf("AlertChannelKinds[1] = %q; want email", AlertChannelKinds[1])
+	}
+	if AlertChannelKinds[2] != ChannelKindDiscord {
+		t.Errorf("AlertChannelKinds[2] = %q; want discord", AlertChannelKinds[2])
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -93,9 +94,33 @@ func (s *WebhookSender) Send(ctx context.Context, evt AlertEvent) error {
 	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("webhook: upstream returned HTTP %d", resp.StatusCode)
+		return fmt.Errorf("webhook: upstream returned HTTP %d: %s",
+			resp.StatusCode, readErrorSnippet(resp.Body))
 	}
 	return nil
+}
+
+// errorSnippetLimit bounds how much of a refusal we quote. Enough for a
+// provider's explanation, short enough for a log line and for the error
+// the UI shows.
+const errorSnippetLimit = 400
+
+// readErrorSnippet quotes the start of a failed response body.
+//
+// v2.53 — it used to be discarded. An operator pointed a webhook channel
+// at a Discord URL and got `upstream returned HTTP 400` with nothing
+// else, while Discord's own body said exactly what was wrong. The cause
+// was one field name, and the answer was already in the response we threw
+// away.
+//
+// Whitespace is collapsed so a multi-line JSON error stays one log line.
+// A body that reads empty says so rather than producing a dangling colon.
+func readErrorSnippet(body io.Reader) string {
+	raw, err := io.ReadAll(io.LimitReader(body, errorSnippetLimit))
+	if err != nil || len(raw) == 0 {
+		return "(no response body)"
+	}
+	return strings.Join(strings.Fields(string(raw)), " ")
 }
 
 // buildBody renders the request body. When BodyTemplate

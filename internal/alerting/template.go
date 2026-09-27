@@ -18,6 +18,8 @@ package alerting
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"text/template"
 )
 
@@ -54,7 +56,40 @@ import (
 func compileBodyTemplate(tmpl string) (*template.Template, error) {
 	// Name is operator-facing only when an error mentions
 	// it — give it a friendly handle.
-	return template.New("alerting").Option("missingkey=zero").Parse(tmpl)
+	return template.New("alerting").
+		Funcs(bodyTemplateFuncs()).
+		Option("missingkey=zero").
+		Parse(tmpl)
+}
+
+// bodyTemplateFuncs are the helpers a body template may call.
+//
+// v2.53 — `json` was added because a template writing a JSON body had no
+// way to escape a value, so an alert whose subject contained a quote or a
+// newline produced a body the receiver rejected. Discord answered an
+// opaque HTTP 400, intermittently — only for the alerts whose text
+// happened to be hostile, which is the hardest kind of failure to
+// diagnose.
+//
+// Discord now has its own channel kind and needs no template at all; this
+// exists for every other receiver (Slack, ntfy, Gotify) still driven by
+// one.
+//
+//	{"text": {{ json .Subject }}}
+//
+// Note that `json` emits the surrounding quotes, so the template must NOT
+// add its own — that is the one thing to get right, and the doc comment
+// on the field says so too.
+func bodyTemplateFuncs() template.FuncMap {
+	return template.FuncMap{
+		"json": func(v any) (string, error) {
+			b, err := json.Marshal(v)
+			if err != nil {
+				return "", fmt.Errorf("json: %w", err)
+			}
+			return string(b), nil
+		},
+	}
 }
 
 // renderTemplate executes a pre-compiled template against
