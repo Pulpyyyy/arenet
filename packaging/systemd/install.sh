@@ -210,6 +210,10 @@ if [[ ! -f "$ENV_FILE" ]]; then
 # ARENET_ADMIN_BIND=127.0.0.1:8001
 # ARENET_DATA_DIR=/var/lib/arenet
 # ARENET_LOG_LEVEL=info
+
+# Where the HTTP access log goes when enabled in Settings. The unit
+# already sets /var/log/arenet/access.log; uncomment to move it.
+# ARENET_ACCESS_LOG_PATH=/var/log/arenet/access.log
 EOF
 	chmod 0644 "$ENV_FILE"
 	log "wrote ${ENV_FILE} (sample, commented out)"

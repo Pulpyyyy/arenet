@@ -6,6 +6,80 @@
 # OIDC + allowlist, CrowdSec bouncer, MaxMind GeoIP credentials, security
 # automation) and alerting (channels, rules).
 paths:
+  /settings/access-log:
+    get:
+      summary: Get the HTTP access log setting
+      description: |
+        Whether Arenet writes an HTTP access log, and where.
+
+        **Why it exists.** Until v2.50 Arenet emitted no access log at
+        all, so a CrowdSec agent installed beside it had nothing to
+        parse: it enforced the community blocklist and detected nothing
+        about this host, with nothing saying so. The log is in Caddy's
+        stock JSON format, which the existing `crowdsecurity/caddy`
+        collection already parses.
+
+        **Off by default**, because the file records every visitor's IP
+        and every URL they asked for. Leaving it off is a supported
+        choice — it just means CrowdSec never detects anything local.
+
+        `resolvedPath` is the file that will actually be written, with
+        the per-install default applied: `/var/log/arenet/access.log`
+        under systemd (the unit's `LogsDirectory=` makes it writable),
+        and `<data-dir>/logs/access.log` otherwise — in a container
+        `/var/log` is the writable layer, so a log there dies with the
+        container. Point CrowdSec at `resolvedPath`, not at `path`.
+      tags: [Settings]
+      x-arenet-role: admin
+      responses:
+        '200':
+          description: Setting, with the resolved path and the disk ceiling.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettingsAccessLog' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/ServerError' }
+    put:
+      summary: Set the HTTP access log setting
+      description: |
+        Enables or disables the log and bounds it. Applying the change
+        reloads Caddy, because the log is part of the emitted config; a
+        failed reload restores the previous setting rather than leaving a
+        stored value the running config does not reflect.
+
+        Rotation is not optional. `rollSizeMB` and `rollKeep` default to
+        10 and 5 and are clamped to 1-1024 and 1-100; zero means "unset"
+        and takes the default rather than meaning unlimited, because
+        Caddy would otherwise substitute its own 100 MB x 10 files — the
+        1 GB ceiling this setting exists to avoid. `ceilingMB` in the
+        response is the worst case before compression.
+
+        `path` must be absolute, or empty to take the per-install
+        default. A relative path is refused: it would resolve against
+        Caddy's working directory, which is neither documented nor the
+        operator's shell.
+
+        Unknown fields are rejected.
+      tags: [Settings]
+      x-arenet-role: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettingsAccessLogInput' }
+            example: { enabled: true, rollSizeMB: 10, rollKeep: 5, compress: true }
+      responses:
+        '200':
+          description: Stored setting.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SettingsAccessLog' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
   # ---------------------------------------------------------------- DNS providers
   /settings/dns-providers:
     get:
@@ -1038,6 +1112,48 @@ components:
       schema: { type: string, format: uuid }
 
   schemas:
+    SettingsAccessLogInput:
+      type: object
+      additionalProperties: false
+      properties:
+        enabled: { type: boolean }
+        path:
+          type: string
+          description: |
+            Absolute file to write to. Empty takes the per-install
+            default — see `resolvedPath`.
+        rollSizeMB:
+          type: integer
+          minimum: 1
+          maximum: 1024
+          description: 'Size at which a file rotates. Default 10; 0 means unset, not unlimited.'
+        rollKeep:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: 'Rotated files kept. Default 5; 0 means unset, not unlimited.'
+        compress:
+          type: boolean
+          description: gzip rotated files. On by default — request logs compress very well.
+
+    SettingsAccessLog:
+      allOf:
+        - $ref: '#/components/schemas/SettingsAccessLogInput'
+        - type: object
+          required: [resolvedPath, ceilingMB]
+          properties:
+            resolvedPath:
+              type: string
+              description: |
+                The file that will actually be written, per-install
+                default applied. This is what CrowdSec acquisition must
+                point at.
+              example: /var/log/arenet/access.log
+            ceilingMB:
+              type: integer
+              description: 'Worst case on disk before compression: rollSizeMB x (rollKeep + 1).'
+              example: 60
+
     # ---------------------------------------------------------- DNS providers
     SettingsDNSProvider:
       type: object

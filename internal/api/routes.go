@@ -479,6 +479,9 @@ func NewRouter(h *Handler, dev bool, ipExtractor *auth.IPExtractor, ws *WSTopolo
 				r.Post("/admin/restore", h.postRestore)
 				r.Get("/settings/route-check", h.getRouteCheckConfig)
 				r.Put("/settings/route-check", h.putRouteCheckConfig)
+				// v2.50 — the HTTP access log CrowdSec parses.
+				r.Get("/settings/access-log", h.getAccessLogConfig)
+				r.Put("/settings/access-log", h.putAccessLogConfig)
 				r.Get("/settings/backup-schedule", h.getBackupSchedule)
 				r.Put("/settings/backup-schedule", h.putBackupSchedule)
 				r.Post("/admin/backups/run", h.runBackupNow)

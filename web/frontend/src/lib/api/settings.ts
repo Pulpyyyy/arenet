@@ -9,6 +9,8 @@
 
 import { request } from './client';
 import type {
+	AccessLogRequest,
+	AccessLogSettings,
 	AdminUser,
 	AutomationCredentialsRequest,
 	AutomationCredentialsView,
@@ -249,6 +251,13 @@ export const settingsApi = {
 	getRouteCheck: (): Promise<{ enabled: boolean }> => request<{ enabled: boolean }>('GET', '/settings/route-check'),
 	putRouteCheck: (enabled: boolean): Promise<{ enabled: boolean }> =>
 		request<{ enabled: boolean }>('PUT', '/settings/route-check', { enabled }),
+	// v2.50 — the HTTP access log CrowdSec parses. `resolvedPath` is
+	// what acquisition must point at: it carries the per-install default
+	// the operator cannot work out from the UI alone.
+	getAccessLog: (): Promise<AccessLogSettings> =>
+		request<AccessLogSettings>('GET', '/settings/access-log'),
+	putAccessLog: (r: AccessLogRequest): Promise<AccessLogSettings> =>
+		request<AccessLogSettings>('PUT', '/settings/access-log', r),
 	// v2.33 — scheduled backups.
 	getBackupSchedule: (): Promise<BackupSchedule> =>
 		request<BackupSchedule>('GET', '/settings/backup-schedule'),

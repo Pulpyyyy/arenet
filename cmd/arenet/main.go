@@ -573,6 +573,15 @@ func run(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config) (retEr
 	normalExcludePaths := parseNormalTrafficExcludePaths(os.Getenv("ARENET_NORMAL_TRAFFIC_EXCLUDE_PATHS"))
 	mgr.SetNormalTrafficExcludePaths(normalExcludePaths)
 
+	// v2.50 — what the access-log path falls back to when the operator
+	// has not typed one. cfg.AccessLogPath comes from the usual
+	// precedence (flag > ARENET_ACCESS_LOG_PATH > file > empty); the
+	// systemd installer sets it to /var/log/arenet/access.log, which the
+	// unit makes writable with LogsDirectory=. Empty derives
+	// <data-dir>/logs/access.log, which is the only durable place in a
+	// container.
+	mgr.SetAccessLogDefaults(cfg.AccessLogPath, cfg.DataDir)
+
 	// Step W.3 — install the country-block globals BEFORE
 	// mgr.Start so the first applyLocked → caddy.Load doesn't
 	// hit countryblock.Handler.Provision's
@@ -1877,6 +1886,16 @@ func run(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config) (retEr
 	// v2.35 — post-apply route check: probes go to Caddy's own
 	// listeners on the loopback.
 	apiHandler.SetRouteProber(routecheck.New(mgr.HTTPListen, mgr.HTTPSListen))
+
+	// v2.50 — so the settings panel can print the file CrowdSec must be
+	// pointed at, with the per-install default already applied. Without
+	// this the UI would show an empty path for the common case where the
+	// operator typed none, which is precisely the silence this feature
+	// exists to remove.
+	apiHandler.SetAccessLogPathResolver(accessLogPaths{
+		configured: cfg.AccessLogPath,
+		dataDir:    cfg.DataDir,
+	})
 	if bc, bcErr := store.GetBackupSchedule(ctx); bcErr != nil {
 		logger.Warn("scheduled backups: read config failed; leaving disabled", "err", bcErr)
 	} else {

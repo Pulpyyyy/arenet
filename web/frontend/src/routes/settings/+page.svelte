@@ -42,7 +42,8 @@
 		type ForwardAuthProvider,
 		type ForwardAuthProviderKind
 	} from '$lib/api/types';
-	import { ApiError } from '$lib/api/types';
+	import { ApiError, type AccessLogSettings } from '$lib/api/types';
+	import { serverErrorMessage } from '$lib/api/server-errors';
 	import { relativeTime } from '$lib/utils/audit-format';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
@@ -551,6 +552,7 @@
 		void loadForwardAuthProviders();
 		// loadManagedDomains() moved to /certs in #R-6 Pack A.
 		void loadAutomation();
+		void loadAccessLog();
 		void loadVersion();
 	});
 
@@ -578,6 +580,78 @@
 	// from the CrowdSec Decisions panel and the BanIPModal CTA point
 	// at card anchors and predate the tabs.
 	type SettingsTab = 'account' | 'security' | 'network' | 'backups' | 'system';
+	// tl reads language.current so the new v2.50 strings re-render on a
+	// language switch, like the `language.current && t(...)` guards used
+	// throughout this page.
+	function tl(key: string, params?: Record<string, string | number>): string {
+		void language.current;
+		return t(key, params);
+	}
+
+	// --- v2.50 access log ------------------------------------------
+	//
+	// Off by default and that is the point: the file records every
+	// visitor's IP and every URL they asked for. What it buys is that
+	// CrowdSec can finally detect something about THIS host — before
+	// this, Arenet emitted no access log at all, so an agent beside it
+	// only ever enforced the community blocklist.
+	let accessLog = $state<AccessLogSettings | null>(null);
+	let accessLogLoading = $state(true);
+	let accessLogSaving = $state(false);
+	let accessLogError = $state<string | null>(null);
+	// Draft fields, so a failed save does not leave the form showing
+	// values the server rejected.
+	let alEnabled = $state(false);
+	let alPath = $state('');
+	let alRollSizeMB = $state(10);
+	let alRollKeep = $state(5);
+	let alCompress = $state(true);
+
+	// The number the operator actually wants: how big can this get.
+	const alCeilingMB = $derived(alRollSizeMB * (alRollKeep + 1));
+
+	async function loadAccessLog(): Promise<void> {
+		accessLogLoading = true;
+		accessLogError = null;
+		try {
+			const cfg = await settingsApi.getAccessLog();
+			accessLog = cfg;
+			alEnabled = cfg.enabled;
+			alPath = cfg.path ?? '';
+			alRollSizeMB = cfg.rollSizeMB ?? 10;
+			alRollKeep = cfg.rollKeep ?? 5;
+			alCompress = cfg.compress ?? true;
+		} catch (err) {
+			accessLogError = serverErrorMessage(err);
+		} finally {
+			accessLogLoading = false;
+		}
+	}
+
+	async function saveAccessLog(): Promise<void> {
+		accessLogSaving = true;
+		accessLogError = null;
+		try {
+			accessLog = await settingsApi.putAccessLog({
+				enabled: alEnabled,
+				path: alPath.trim() || undefined,
+				rollSizeMB: alRollSizeMB,
+				rollKeep: alRollKeep,
+				compress: alCompress
+			});
+			// Re-read what the server stored: it normalises zeros to the
+			// defaults, and resolvedPath only exists server-side.
+			alPath = accessLog.path ?? '';
+			alRollSizeMB = accessLog.rollSizeMB ?? 10;
+			alRollKeep = accessLog.rollKeep ?? 5;
+			pushToast(tl('settings.accessLog.saved'), 'success');
+		} catch (err) {
+			accessLogError = serverErrorMessage(err);
+		} finally {
+			accessLogSaving = false;
+		}
+	}
+
 	const TAB_IDS: SettingsTab[] = ['account', 'security', 'network', 'backups', 'system'];
 	const ANCHOR_TAB: Record<string, SettingsTab> = {
 		'security-automation': 'security',
@@ -838,6 +912,135 @@
 			     from the CrowdSec Decisions 412 state +
 			     BanIPModal CTA. Without it the operator landed
 			     at the top of /settings and had to scroll. -->
+			<!-- v2.50 — the HTTP access log.
+			     Sits above Security Automation on purpose: automation
+			     pushes bans from what Arenet already observes, while
+			     this is what lets CrowdSec observe anything at all.
+			     Without it an agent only ever enforces the community
+			     blocklist, and nothing on screen said so. -->
+			<div id="access-log" class="mb-6">
+				<Card padding="p-6">
+					<header class="flex items-center justify-between border-b border-border-subtle pb-3 mb-4">
+						<div>
+							<h2 class="text-xl font-semibold">{tl('settings.accessLog.title')}</h2>
+							<p class="text-xs text-muted mt-1">{tl('settings.accessLog.subtitle')}</p>
+						</div>
+						{#if accessLogLoading}
+							<Spinner size="sm" />
+						{:else if accessLog?.enabled}
+							<Badge variant="status-up">{tl('settings.accessLog.badgeOn')}</Badge>
+						{:else}
+							<Badge variant="neutral">{tl('settings.accessLog.badgeOff')}</Badge>
+						{/if}
+					</header>
+
+					{#if accessLogError}
+						<p class="text-sm text-down mb-3" role="alert" data-testid="access-log-error">
+							{accessLogError}
+						</p>
+					{/if}
+
+					<label class="flex items-start gap-3 mb-4">
+						<input
+							id="access-log-enabled"
+							type="checkbox"
+							bind:checked={alEnabled}
+							data-testid="access-log-enabled"
+							class="mt-1"
+						/>
+						<span>
+							<span class="text-sm font-medium text-secondary block"
+								>{tl('settings.accessLog.enableLabel')}</span
+							>
+							<span class="text-xs text-muted">{tl('settings.accessLog.enableHint')}</span>
+						</span>
+					</label>
+
+					{#if alEnabled}
+						<!-- The resolved path, not the typed one: the default
+						     differs between a systemd install and a container,
+						     and this is the value CrowdSec must be pointed at. -->
+						{#if accessLog?.resolvedPath}
+							<div class="mb-4">
+								<span class="text-sm font-medium text-secondary block mb-1"
+									>{tl('settings.accessLog.resolvedLabel')}</span
+								>
+								<code class="text-xs break-all" data-testid="access-log-resolved"
+									>{accessLog.resolvedPath}</code
+								>
+								<p class="text-xs text-muted mt-1">{tl('settings.accessLog.resolvedHint')}</p>
+							</div>
+						{/if}
+
+						<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+							<div class="md:col-span-3">
+								<label for="access-log-path" class="text-sm font-medium text-secondary block mb-1"
+									>{tl('settings.accessLog.pathLabel')}</label
+								>
+								<input
+									id="access-log-path"
+									type="text"
+									bind:value={alPath}
+									placeholder={accessLog?.resolvedPath ?? ''}
+									data-testid="access-log-path"
+									class="w-full h-9 rounded-md border border-border-subtle bg-surface px-2 text-sm text-primary font-mono"
+								/>
+								<p class="text-xs text-muted mt-1">{tl('settings.accessLog.pathHint')}</p>
+							</div>
+							<div>
+								<label for="access-log-size" class="text-sm font-medium text-secondary block mb-1"
+									>{tl('settings.accessLog.sizeLabel')}</label
+								>
+								<input
+									id="access-log-size"
+									type="number"
+									min="1"
+									max="1024"
+									bind:value={alRollSizeMB}
+									data-testid="access-log-size"
+									class="w-full h-9 rounded-md border border-border-subtle bg-surface px-2 text-sm text-primary"
+								/>
+							</div>
+							<div>
+								<label for="access-log-keep" class="text-sm font-medium text-secondary block mb-1"
+									>{tl('settings.accessLog.keepLabel')}</label
+								>
+								<input
+									id="access-log-keep"
+									type="number"
+									min="1"
+									max="100"
+									bind:value={alRollKeep}
+									data-testid="access-log-keep"
+									class="w-full h-9 rounded-md border border-border-subtle bg-surface px-2 text-sm text-primary"
+								/>
+							</div>
+							<div class="flex items-end">
+								<label class="flex items-center gap-2 text-sm text-secondary">
+									<input type="checkbox" bind:checked={alCompress} data-testid="access-log-compress" />
+									{tl('settings.accessLog.compressLabel')}
+								</label>
+							</div>
+						</div>
+
+						<!-- The ceiling, because "10 MB, 5 files" answers a
+						     question nobody asked. -->
+						<p class="text-xs text-muted mb-4" data-testid="access-log-ceiling">
+							{tl('settings.accessLog.ceiling', { mb: alCeilingMB })}
+						</p>
+					{/if}
+
+					<Button
+						variant="primary"
+						disabled={accessLogSaving || accessLogLoading}
+						onclick={() => void saveAccessLog()}
+						data-testid="access-log-save"
+					>
+						{accessLogSaving ? tl('settings.accessLog.saving') : tl('settings.accessLog.save')}
+					</Button>
+				</Card>
+			</div>
+
 			<div id="security-automation" class="mb-6">
 				<Card padding="p-6">
 					<header class="flex items-center justify-between border-b border-border-subtle pb-3 mb-4">

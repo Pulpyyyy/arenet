@@ -250,6 +250,25 @@
 			"lastErrorLabel": "Échec de la dernière vérification",
 			"viewRelease": "Voir la release sur GitHub",
 			"never": "jamais"
+		},
+		"accessLog": {
+			"title": "Journal d'accès HTTP",
+			"subtitle": "Écrit chaque requête dans un fichier pour que CrowdSec puisse détecter ce qui attaque cette machine. Désactivé, CrowdSec applique toujours la liste communautaire mais ne détecte rien de local.",
+			"badgeOn": "Actif",
+			"badgeOff": "Désactivé",
+			"enableLabel": "Écrire un journal d'accès",
+			"enableHint": "Enregistre l'adresse IP de chaque visiteur et les URL demandées. C'est ce dont un moteur de détection a besoin, et ce sont aussi des données personnelles sur votre disque — d'où le fait que ce soit désactivé jusqu'à ce que vous l'activiez.",
+			"resolvedLabel": "Fichier écrit",
+			"resolvedHint": "Faites pointer l'acquisition CrowdSec sur ce chemin, avec type: caddy, et installez la collection crowdsecurity/caddy.",
+			"pathLabel": "Chemin (facultatif)",
+			"pathHint": "Laissez vide pour le chemin par défaut affiché ci-dessus. Il doit être absolu. Sous systemd le défaut est /var/log/arenet ; en conteneur il reste dans le volume de données, où il survit au remplacement du conteneur.",
+			"sizeLabel": "Rotation à (Mo)",
+			"keepLabel": "Fichiers conservés",
+			"compressLabel": "Compresser les fichiers tournés",
+			"ceiling": "Au plus environ {mb} Mo sur le disque avant compression.",
+			"save": "Enregistrer",
+			"saving": "Enregistrement…",
+			"saved": "Réglage du journal d'accès enregistré"
 		}
 	},
 	"notifications": {

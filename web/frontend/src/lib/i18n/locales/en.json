@@ -250,6 +250,25 @@
 			"lastErrorLabel": "Last check failed",
 			"viewRelease": "View release on GitHub",
 			"never": "never"
+		},
+		"accessLog": {
+			"title": "HTTP access log",
+			"subtitle": "Writes every request to a file so CrowdSec can detect what is attacking this host. Off, CrowdSec still enforces the community blocklist but detects nothing local.",
+			"badgeOn": "Writing",
+			"badgeOff": "Off",
+			"enableLabel": "Write an access log",
+			"enableHint": "Records every visitor's IP address and the URLs they request. That is what a detection engine needs, and it is also personal data on your disk — which is why this is off until you turn it on.",
+			"resolvedLabel": "File being written",
+			"resolvedHint": "Point your CrowdSec acquisition at this path, with type: caddy, and install the crowdsecurity/caddy collection.",
+			"pathLabel": "Path (optional)",
+			"pathHint": "Leave empty for the default shown above. Must be absolute. Under systemd the default is /var/log/arenet; in a container it stays inside the data volume, where it survives the container being replaced.",
+			"sizeLabel": "Rotate at (MB)",
+			"keepLabel": "Files kept",
+			"compressLabel": "Compress rotated files",
+			"ceiling": "At most about {mb} MB on disk before compression.",
+			"save": "Save",
+			"saving": "Saving…",
+			"saved": "Access log setting saved"
 		}
 	},
 	"notifications": {

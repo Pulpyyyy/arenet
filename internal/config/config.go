@@ -63,6 +63,24 @@ type Config struct {
 	// override to "/var/lib/arenet" via env or systemd unit.
 	DataDir string `toml:"data-dir"`
 
+	// AccessLogPath is where the HTTP access log goes when the
+	// operator enables it (v2.50). Empty means the derived default
+	// "<DataDir>/logs/access.log", which is right everywhere except a
+	// systemd install — there /var/log/arenet is the conventional place
+	// and the unit's LogsDirectory= provides it, so install.sh sets
+	// ARENET_ACCESS_LOG_PATH=/var/log/arenet/access.log.
+	//
+	// It lives in the config layer rather than being chosen by the
+	// binary at runtime on purpose: sniffing for systemd would be magic
+	// that breaks the day someone runs the binary by hand, and the
+	// precedence flag > env > file > default already exists for exactly
+	// this kind of per-topology default.
+	//
+	// The log is written by Caddy, not by Arenet: /var/log is read-only
+	// under ProtectSystem=strict unless LogsDirectory= grants it, so a
+	// path under /var/log with no matching unit change fails at runtime.
+	AccessLogPath string `toml:"access-log-path"`
+
 	// Dev enables development mode: verbose logging, no TLS
 	// auto-issuance, dev-only landing page. Default false.
 	Dev bool `toml:"dev"`
@@ -173,6 +191,7 @@ func Load(args []string) (*Config, error) {
 	var (
 		fAdminPort      = flagSet.String("admin-port", "", "address:port for the admin API (e.g. :8001). Loopback default per spec D6; override with 0.0.0.0:8001 for LAN admin access.")
 		fDataDir        = flagSet.String("data-dir", "", "directory where Arenet stores its persistent state (arenet.db, metrics.db, audit.db, certmagic/).")
+		fAccessLogPath  = flagSet.String("access-log-path", "", "file the HTTP access log is written to when enabled in settings (default <data-dir>/logs/access.log).")
 		fDev            = flagSet.Bool("dev", false, "enable development mode (verbose logging, no TLS auto-issuance).")
 		fInsertTest     = flagSet.Bool("insert-test-route", false, "insert a fixture test route at boot (local smoke only).")
 		fExport         = flagSet.String("export", "", "Step K.3: export the configuration to PATH and exit (default redacts secrets).")
@@ -262,6 +281,9 @@ func Load(args []string) (*Config, error) {
 	if wasSet["topology-tick-ms"] {
 		cfg.TopologyTickMs = *fTopologyTickMs
 	}
+	if wasSet["access-log-path"] {
+		cfg.AccessLogPath = *fAccessLogPath
+	}
 
 	return cfg, nil
 }
@@ -295,6 +317,9 @@ func applyEnv(cfg *Config) {
 	}
 	if v, ok := os.LookupEnv("ARENET_DATA_DIR"); ok {
 		cfg.DataDir = v
+	}
+	if v, ok := os.LookupEnv("ARENET_ACCESS_LOG_PATH"); ok {
+		cfg.AccessLogPath = v
 	}
 	if v, ok := os.LookupEnv("ARENET_DEV"); ok {
 		if b, err := strconv.ParseBool(v); err == nil {

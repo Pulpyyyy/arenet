@@ -225,12 +225,18 @@ precisely because nobody checked).
 
 ## Empirical validation gates
 
-1. **G1 — the emitted config loads and actually routes.** `caddy.Validate`
-   on the config with the logger, plus a real request against a running
-   instance that must appear in the file. Validate alone would pass on a
-   logger nothing writes to; the wiring between a server's
-   `default_logger_name` and a `logging.logs` entry is exactly the kind
-   of thing that looks right and does nothing.
+1. **G1 — the emitted config loads, and the wiring is asserted.**
+   `caddy.Validate` on the config with the logger, plus assertions that
+   the sink exists, that BOTH servers carry `default_logger_name`, and
+   that the composed `include` is literally `http.log.access.<name>`.
+
+   Validate alone would pass on a logger nothing writes to, so it is not
+   the gate — the server wiring is. **Running a real Caddy inside the
+   unit suite was considered and rejected**: it would bind :8080/:8443 on
+   a developer's machine, fight `make run`, and leave global state behind
+   for the tests that follow. The end-to-end proof therefore lives in the
+   smoke procedure (G5), and this is stated rather than glossed: no unit
+   test in this change proves that a request reaches the file.
 2. **G2 — `request.client_ip` is present in a real line.** The whole
    feature rests on it: the CrowdSec parser reads that field and no
    other for the source address. Asserted against a line Arenet actually
