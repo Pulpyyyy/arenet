@@ -250,6 +250,39 @@ Si tu t'es complètement lockout, tu peux temporairement désactiver l'intégrat
 
 ---
 
+## Le test d'un canal échoue en HTTP 400 alors que les vraies alertes passeraient
+
+### Symptôme
+**Tester le canal** renvoie `upstream returned HTTP 400` sur un canal webhook dont le gabarit de corps écrit du JSON — un point d'arrivée Discord, Slack, ntfy ou Gotify. Le canal paraît cassé, sans que rien n'explique pourquoi.
+
+### Cause
+Deux choses, et la seconde est perverse.
+
+Le destinataire a refusé le corps. Avant la v2.53, Arenet jetait la réponse : l'explication du fournisseur — Discord dit `{"message":"Cannot send an empty message","code":50006}` — ne vous parvenait jamais. Elle est désormais citée dans l'erreur.
+
+Et jusqu'à la v2.53, le sujet de l'événement de test était construit avec des guillemets doubles autour du nom du canal (`channel "discord"`). Un gabarit interpolant `{{ .Subject }}` produisait donc **du JSON invalide à chaque fois**, alors que les vraies alertes de ce canal seraient passées — le sujet d'une règle ne contient pas de guillemets.
+
+Le seul moyen de valider le canal était donc aussi le seul cas garanti de le casser.
+
+### Fix
+En v2.53 ou plus récent, utilisez le type de canal **`discord`** : Arenet construit la charge utile, il n'y a aucun gabarit à écrire et aucun guillemet ne peut le casser.
+
+Sur une version antérieure, ou pour Slack / ntfy / Gotify, n'injectez pas le sujet :
+
+```
+{"content":"Arenet alert: {{.RuleName}} [{{.Severity}}]"}
+```
+
+Depuis la v2.53, un gabarit peut échapper la valeur, ce qui est préférable car le texte est conservé :
+
+```
+{"content": {{ json .Subject }}}
+```
+
+`json` émet les guillemets englobants — n'ajoutez pas les vôtres.
+
+---
+
 ## Changer l'adresse LAPI arrête silencieusement tout blocage
 
 ### Symptôme

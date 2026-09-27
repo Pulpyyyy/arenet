@@ -486,7 +486,12 @@ func syntheticTestAlertEventForRule(rule storage.AlertRule) alerting.AlertEvent 
 		RuleName:  rule.Name,
 		Severity:  alerting.Severity(rule.Severity),
 		Category:  rule.Category,
-		Subject:   fmt.Sprintf("[TEST] Arenet alerting rule %q force-fired by operator", rule.Name),
+		// %s, not %q — see syntheticTestAlertEvent in
+		// alerting_channels.go. Double quotes in a subject break any
+		// webhook body template that interpolates it, so the rule test
+		// carried exactly the same trap as the channel test: guaranteed
+		// invalid JSON, opaque 400, and a channel that actually worked.
+		Subject: fmt.Sprintf("[TEST] Arenet alerting rule %s force-fired by operator", rule.Name),
 		Body: "This is a synthetic test event sent by the Arenet alerting " +
 			"subsystem in response to the operator pressing the \"Test\" " +
 			"button on the rule settings page. The rule's evaluator and " +

@@ -597,7 +597,20 @@ func syntheticTestAlertEvent(channelName string) alerting.AlertEvent {
 		RuleName:  "synthetic-test",
 		Severity:  alerting.SeverityInfo,
 		Category:  "system",
-		Subject:   fmt.Sprintf("Arenet alerting test — channel %q", channelName),
+		// %s, not %q. %q wrapped the channel name in DOUBLE QUOTES, and
+		// the subject is the one field an operator is most likely to
+		// interpolate into a webhook body template — so the test event
+		// was guaranteed to produce invalid JSON and an opaque HTTP 400.
+		//
+		// Reported 2026-09-27: the only way to validate a Discord
+		// channel was also the only case certain to break it, while the
+		// real alerts it would have sent were fine (a rule's default
+		// subject carries no quotes). A test that cannot pass for a
+		// channel that works is worse than no test.
+		//
+		// The name is already slug-shaped ([a-z0-9-]{1,64}), so it needs
+		// no quoting to stay readable.
+		Subject: fmt.Sprintf("Arenet alerting test — channel %s", channelName),
 		Body: "This is a synthetic test event sent by the Arenet alerting subsystem " +
 			"in response to the operator pressing the \"Test\" button on the channel " +
 			"settings page. If you received this notification, the channel is wired " +
