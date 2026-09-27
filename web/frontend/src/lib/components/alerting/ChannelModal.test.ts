@@ -114,6 +114,68 @@ describe('ChannelModal', () => {
 		expect(screen.queryByLabelText(/^URL$/i)).toBeNull();
 	});
 
+	// v2.53 — a Discord kind, because pointing the generic webhook at
+	// Discord meant hand-writing its payload in a body template with no
+	// JSON escaping: an alert whose subject carried a quote produced an
+	// opaque HTTP 400, intermittently.
+	it('swaps to a single URL field when kind=discord', async () => {
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		render(Modal, {
+			props: { open: true, channel: null, onClose: () => {}, onSaved: () => {} }
+		});
+
+		const kindSelect = screen.getByLabelText(/^Type$/i) as HTMLSelectElement;
+		await fireEvent.change(kindSelect, { target: { value: 'discord' } });
+
+		expect(screen.getByTestId('discord-url')).toBeTruthy();
+		// No body template to write — that is the whole point.
+		expect(screen.queryByLabelText(/body template/i)).toBeNull();
+		expect(screen.queryByLabelText(/SMTP host/i)).toBeNull();
+	});
+
+	it('sends the discord config, and only what Discord needs', async () => {
+		createMock.mockResolvedValue({});
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		render(Modal, {
+			props: { open: true, channel: null, onClose: () => {}, onSaved: () => {} }
+		});
+
+		await fireEvent.change(screen.getByLabelText(/^Type$/i), { target: { value: 'discord' } });
+		await fireEvent.input(screen.getByLabelText(/^Name/i), { target: { value: 'discord-ops' } });
+		await fireEvent.input(screen.getByTestId('discord-url'), {
+			target: { value: 'https://discord.com/api/webhooks/123/abc' }
+		});
+		await fireEvent.input(screen.getByTestId('discord-username'), { target: { value: 'arenet' } });
+		await fireEvent.click(screen.getByText(/^(Create|Créer)$/));
+
+		await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+		const [req] = createMock.mock.calls[0];
+		expect(req.kind).toBe('discord');
+		expect(req.config.webhookUrl).toBe('https://discord.com/api/webhooks/123/abc');
+		expect(req.config.username).toBe('arenet');
+		// No url/method/bodyTemplate leaking in from the webhook branch.
+		expect(req.config).not.toHaveProperty('bodyTemplate');
+		expect(req.config).not.toHaveProperty('url');
+	});
+
+	// The host check mirrors the Go validator so the refusal lands while
+	// the operator is looking at the field, not as a 400 afterwards.
+	it('refuses a URL that is not a Discord webhook, before sending', async () => {
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		render(Modal, {
+			props: { open: true, channel: null, onClose: () => {}, onSaved: () => {} }
+		});
+
+		await fireEvent.change(screen.getByLabelText(/^Type$/i), { target: { value: 'discord' } });
+		await fireEvent.input(screen.getByLabelText(/^Name/i), { target: { value: 'oops' } });
+		await fireEvent.input(screen.getByTestId('discord-url'), {
+			target: { value: 'https://example.com/hook' }
+		});
+		await fireEvent.click(screen.getByText(/^(Create|Créer)$/));
+
+		expect(createMock).not.toHaveBeenCalled();
+	});
+
 	it('disables the kind selector in edit mode', async () => {
 		const Modal = (await import('./ChannelModal.svelte')).default;
 		render(Modal, {

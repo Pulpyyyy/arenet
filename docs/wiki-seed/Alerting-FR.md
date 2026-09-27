@@ -13,25 +13,43 @@ Un watcher polling 30-seconds évalue chaque rule et respecte les cooldowns par 
 ### 1. Câble un channel
 
 1. Sidebar → **Alerting** → onglet **Channels** → **+ Add channel**
-2. Choisis le kind : `discord_webhook` / `webhook_generic` / `email_smtp`
-3. Remplis la config kind-specific :
+2. Choisissez le type : **`webhook`**, **`email`** ou **`discord`**.
 
-**Discord webhook** :
-- Webhook URL : `https://discord.com/api/webhooks/<id>/<token>` (Server Settings → Integrations → Webhooks)
-- Username (optionnel) : le display name du bot dans le channel
-- Avatar URL (optionnel)
+   > Cette page les nommait auparavant `discord_webhook`, `webhook_generic`
+   > et `email_smtp`, et décrivait des champs qui n'ont jamais existé. Elle
+   > avait été écrite depuis une note de conception et jamais réconciliée
+   > avec le code ; corrigée en v2.53 d'après l'implémentation.
 
-**Generic webhook** :
-- URL : ton endpoint
-- Method : `POST` (défaut) / `PUT`
-- Headers : liste key-value (ex. `Authorization: Bearer xxx`)
-- Body template : template Go optionnel ; le défaut envoie une enveloppe JSON `{ ts, rule, value, message }`
+3. Remplissez la configuration propre au type :
 
-**Email SMTP** :
-- SMTP host + port (ex. `smtp.gmail.com:587`)
-- Username + password (app password si 2FA sur Gmail)
-- From + To addresses
-- TLS mode (`starttls` typique, `implicit` pour port 465)
+**Discord** (depuis la v2.53) :
+- URL du webhook : `https://discord.com/api/webhooks/<id>/<token>` — dans Discord, *Modifier le salon → Intégrations → Webhooks → Copier l'URL du webhook*. Elle doit être en https sur `discord.com` ou `discordapp.com` ; toute autre adresse est refusée pendant que vous êtes encore sur le formulaire.
+- Nom affiché (facultatif) : remplace le nom que montre Discord
+- Délai d'attente : 1 à 60 s, 10 par défaut
+
+C'est tout. Arenet construit lui-même la charge utile Discord — il n'y a aucun gabarit de corps à écrire, et c'est précisément la raison d'être de ce type (voir *Discord avant la v2.53* plus bas).
+
+**L'URL est le secret.** Quiconque la détient peut publier dans votre salon : Arenet la stocke comme tel, la réaffiche masquée, et conserve celle enregistrée si vous modifiez le canal sans la retaper.
+
+**Webhook générique** :
+- URL : votre point d'arrivée. Traitée comme un secret également, pour la même raison.
+- Méthode : `POST` uniquement
+- En-têtes : liste clé-valeur (ex. `Authorization: Bearer xxx`) ; les valeurs sont masquées dans le journal d'audit, les clés non
+- Gabarit de corps : gabarit Go facultatif. **Vide, l'événement d'alerte complet est envoyé en JSON** — pas une enveloppe réduite.
+
+  Si vous en écrivez un qui produit du JSON, entourez chaque valeur de `json` pour que guillemets et retours à la ligne ne le cassent pas :
+
+  ```
+  {"text": {{ json .Subject }}}
+  ```
+
+  `json` émet les guillemets englobants, n'ajoutez donc pas les vôtres. Champs disponibles : `.RuleName`, `.Severity`, `.Subject`, `.Body`, `.Category`, `.Timestamp`, `.RuleID`, `.ID`.
+
+**Email** :
+- Hôte et port SMTP (ex. `smtp.gmail.com:587`)
+- Identifiant et mot de passe (un mot de passe d'application si la double authentification est active)
+- Adresses d'expédition et de destination
+- TLS : TLS implicite (typiquement port 465) ou STARTTLS (typiquement 587)
 
 4. **Enabled** ✅
 5. Bouton **Test channel** : déclenche une alerte synthétique à travers le channel pour valider le câblage. Watch pour le message de test dans Discord / inbox.
@@ -253,29 +271,30 @@ Combiné avec `cert-expiry-7d`, tu as une couverture full : l'alerte fire imméd
 ## Référence API
 
 ```bash
-# Create a channel
+# Créer un canal. NOTEZ le segment /settings/ : le chemin est
+# /api/v1/settings/alerting/..., ce que cette page omettait.
 curl -b /tmp/jar -X POST -H "Content-Type: application/json" -d '{
-  "kind": "discord_webhook",
+  "kind": "discord",
   "name": "ops-discord",
   "enabled": true,
   "config": {
     "webhookUrl": "https://discord.com/api/webhooks/...",
     "username": "Arenet"
   }
-}' http://localhost:8001/api/v1/alerting/channels
+}' http://localhost:8001/api/v1/settings/alerting/channels
 
 # Create a rule
 curl -b /tmp/jar -X POST -H "Content-Type: application/json" -d '{
   "name": "cert-expiry-7d",
   "enabled": true,
   "kind": "threshold",
-  "severity": 4,
+  "severity": 2,
   "source": "cert_expiry",
   "sourceParams": {},
   "evalParams": {"operator": "<", "value": 7},
   "channels": ["<channel-id>"],
   "cooldownSecs": 86400
-}' http://localhost:8001/api/v1/alerting/rules
+}' http://localhost:8001/api/v1/settings/alerting/rules
 ```
 
 La spec Step AL complète vit dans `internal/alerting/`.

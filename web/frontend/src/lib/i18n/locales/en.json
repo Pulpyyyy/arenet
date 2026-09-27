@@ -1247,7 +1247,7 @@
 			"ariaRemoveHeader": "Remove header",
 			"redactedHeadersNote": "Header values are redacted by the API. Leave the displayed value \"[redacted]\" as-is to keep the existing secret.",
 			"labelBodyTemplate": "Body template (optional)",
-			"bodyTemplatePlaceholders": "Leave empty to send the full event as JSON. Placeholders:",
+			"bodyTemplatePlaceholders": "Leave empty to send the full event as JSON. Wrap any value in `json` so quotes and newlines cannot break the body — `{\"text\": {{ json .Subject }}}`, with no quotes of your own around it. Placeholders:",
 			"labelSmtpHost": "SMTP host",
 			"placeholderSmtpHost": "smtp.example.com",
 			"labelSmtpPort": "Port",
@@ -1294,7 +1294,12 @@
 			"toastTestedOk": "Channel \"{name}\" tested: send successful.",
 			"toastTestedFail": "Channel \"{name}\": failure — {err}",
 			"toastTestErr": "Channel \"{name}\": {err}",
-			"toastUnknownErr": "unknown error"
+			"toastUnknownErr": "unknown error",
+			"labelDiscordUrl": "Discord webhook URL",
+			"hintDiscordUrl": "From your Discord channel: Edit Channel → Integrations → Webhooks → Copy Webhook URL. This URL is the credential — anyone holding it can post to the channel — so it is stored as a secret and shown redacted afterwards.",
+			"labelDiscordUsername": "Display name (optional)",
+			"errDiscordUrlRequired": "A Discord webhook URL is required.",
+			"errDiscordUrlHost": "That does not look like a Discord webhook URL (it must start with https://discord.com/ or https://discordapp.com/)."
 		},
 		"ruleModal": {
 			"titleEdit": "Edit rule",

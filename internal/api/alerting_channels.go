@@ -144,6 +144,21 @@ func alertChannelForAudit(c storage.Channel) storage.Channel {
 		}
 		c.Config = redacted
 		return c
+	case storage.ChannelKindDiscord:
+		var cfg alerting.DiscordConfig
+		if err := json.Unmarshal(c.Config, &cfg); err != nil {
+			return c
+		}
+		// A Discord webhook URL carries its credential in the path:
+		// anyone holding it can post to the channel. Redacted like any
+		// other secret, same treatment as the generic webhook URL.
+		cfg.WebhookURL = redactWebhookURL(cfg.WebhookURL)
+		redacted, err := json.Marshal(cfg)
+		if err != nil {
+			return c
+		}
+		c.Config = redacted
+		return c
 	}
 	return c
 }
@@ -152,6 +167,13 @@ func alertChannelForAudit(c storage.Channel) storage.Channel {
 // redaction placeholder — the channel is broken until the URL is
 // retyped (see mergeAlertChannelSecrets).
 func webhookURLLost(c storage.Channel) bool {
+	if c.Kind == storage.ChannelKindDiscord {
+		var cfg alerting.DiscordConfig
+		if err := json.Unmarshal(c.Config, &cfg); err != nil {
+			return false
+		}
+		return strings.Contains(cfg.WebhookURL, auditRedacted)
+	}
 	if c.Kind != storage.ChannelKindWebhook {
 		return false
 	}
@@ -228,6 +250,10 @@ func validateAlertChannelRequest(req alertChannelRequest) error {
 		if _, err := alerting.ParseEmailConfig(req.Config); err != nil {
 			return err
 		}
+	case storage.ChannelKindDiscord:
+		if _, err := alerting.ParseDiscordConfig(req.Config); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -268,6 +294,22 @@ func mergeAlertChannelSecrets(reqConfig json.RawMessage, kind string, previous s
 		// writing the OpenAPI doc, v2.39).
 		if incoming.URL == "" || incoming.URL == auditRedacted || incoming.URL == redactWebhookURL(stored.URL) {
 			incoming.URL = stored.URL
+		}
+		return json.Marshal(incoming)
+	case storage.ChannelKindDiscord:
+		var incoming alerting.DiscordConfig
+		if err := json.Unmarshal(reqConfig, &incoming); err != nil {
+			return nil, err
+		}
+		var storedDiscord alerting.DiscordConfig
+		_ = json.Unmarshal(previous.Config, &storedDiscord)
+		// Same trap as the webhook URL above: GET returns it redacted,
+		// the UI sends back what it was shown, and without this an edit
+		// that did not retype the URL would store the placeholder and
+		// silently stop the channel.
+		if incoming.WebhookURL == "" || incoming.WebhookURL == auditRedacted ||
+			incoming.WebhookURL == redactWebhookURL(storedDiscord.WebhookURL) {
+			incoming.WebhookURL = storedDiscord.WebhookURL
 		}
 		return json.Marshal(incoming)
 	case storage.ChannelKindEmail:
@@ -555,7 +597,20 @@ func syntheticTestAlertEvent(channelName string) alerting.AlertEvent {
 		RuleName:  "synthetic-test",
 		Severity:  alerting.SeverityInfo,
 		Category:  "system",
-		Subject:   fmt.Sprintf("Arenet alerting test — channel %q", channelName),
+		// %s, not %q. %q wrapped the channel name in DOUBLE QUOTES, and
+		// the subject is the one field an operator is most likely to
+		// interpolate into a webhook body template — so the test event
+		// was guaranteed to produce invalid JSON and an opaque HTTP 400.
+		//
+		// Reported 2026-09-27: the only way to validate a Discord
+		// channel was also the only case certain to break it, while the
+		// real alerts it would have sent were fine (a rule's default
+		// subject carries no quotes). A test that cannot pass for a
+		// channel that works is worse than no test.
+		//
+		// The name is already slug-shaped ([a-z0-9-]{1,64}), so it needs
+		// no quoting to stay readable.
+		Subject: fmt.Sprintf("Arenet alerting test — channel %s", channelName),
 		Body: "This is a synthetic test event sent by the Arenet alerting subsystem " +
 			"in response to the operator pressing the \"Test\" button on the channel " +
 			"settings page. If you received this notification, the channel is wired " +

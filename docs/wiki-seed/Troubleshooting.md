@@ -247,6 +247,39 @@ If you locked yourself out completely, you can temporarily disable the CrowdSec 
 
 ---
 
+## A channel test fails with HTTP 400 but real alerts would work
+
+### Symptom
+**Test channel** reports `upstream returned HTTP 400` on a webhook channel whose body template writes JSON — a Discord, Slack, ntfy or Gotify endpoint. The channel looks broken; nothing says why.
+
+### Cause
+Two things, and the second is the cruel one.
+
+The receiver rejected the body. Before v2.53 Arenet discarded the response, so the provider's own explanation — Discord says `{"message":"Cannot send an empty message","code":50006}` — never reached you. It is quoted in the error now.
+
+And until v2.53 the synthetic test event's subject was built with double quotes around the channel name (`channel "discord"`). A template interpolating `{{ .Subject }}` therefore produced **invalid JSON every single time**, while the real alerts that channel would send were fine — a rule's subject carries no quotes.
+
+So the only way to validate the channel was also the only case guaranteed to break it.
+
+### Fix
+On v2.53 or later, use the **`discord`** channel kind: Arenet builds the payload, there is no template to write, and no quote can break it.
+
+On an older version, or for Slack / ntfy / Gotify, keep the subject out of the body:
+
+```
+{"content":"Arenet alert: {{.RuleName}} [{{.Severity}}]"}
+```
+
+From v2.53 a template can escape instead, which is better because it keeps the text:
+
+```
+{"content": {{ json .Subject }}}
+```
+
+`json` emits the surrounding quotes — do not add your own.
+
+---
+
 ## Moving the LAPI address silently stops all blocking
 
 ### Symptom

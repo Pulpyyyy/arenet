@@ -18,7 +18,28 @@ import { request } from './client';
 
 // -- Channels -----------------------------------------------
 
-export type ChannelKind = 'webhook' | 'email';
+export type ChannelKind = 'webhook' | 'email' | 'discord';
+
+/**
+ * Discord channel config (v2.53).
+ *
+ * A dedicated kind rather than a webhook body template, because the
+ * template is string interpolation with no JSON escaping: an alert whose
+ * subject carries a quote produced an invalid body and an opaque HTTP 400
+ * from Discord — intermittently, which is worse than always. The Go
+ * sender marshals a struct instead.
+ */
+export interface DiscordConfig {
+	/**
+	 * The Discord-provided endpoint. It carries the credential in its
+	 * path, so GET returns it redacted and an edit that does not retype
+	 * it inherits the stored value.
+	 */
+	webhookUrl: string;
+	/** Optional display-name override; empty keeps Discord's own. */
+	username?: string;
+	timeoutSeconds?: number;
+}
 
 export interface WebhookConfig {
 	url: string;
@@ -62,7 +83,7 @@ export interface AlertChannel {
 	// Per-kind blob; the per-kind config types above decode it.
 	// Backend returns it pre-redacted (header values blanked
 	// for webhook, smtpPassword empty for email).
-	config: WebhookConfig | EmailConfig;
+	config: WebhookConfig | EmailConfig | DiscordConfig;
 	lastSentAt?: string;
 	lastError?: string;
 	lastErrorAt?: string;
@@ -81,7 +102,7 @@ export interface AlertChannelRequest {
 	kind: ChannelKind;
 	enabled: boolean;
 	minSeverity: number;
-	config: WebhookConfig | EmailConfig;
+	config: WebhookConfig | EmailConfig | DiscordConfig;
 }
 
 export interface AlertChannelTestResponse {

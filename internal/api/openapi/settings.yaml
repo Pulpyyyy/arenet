@@ -1591,7 +1591,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
-        kind: { type: string, enum: [webhook, email] }
+        kind: { type: string, enum: [webhook, email, discord] }
         enabled: { type: boolean }
         minSeverity: { $ref: '#/components/schemas/AlertSeverity' }
         config:
@@ -1599,6 +1599,7 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AlertWebhookConfig'
             - $ref: '#/components/schemas/AlertEmailConfig'
+            - $ref: '#/components/schemas/AlertDiscordConfig'
         lastSentAt: { type: string, format: date-time }
         lastError: { type: string }
         lastErrorAt: { type: string, format: date-time }
@@ -1615,8 +1616,18 @@ components:
           description: Unique slug.
         kind:
           type: string
-          enum: [webhook, email]
-          description: Discord, Slack, ntfy, Gotify… are `webhook` channels with a `bodyTemplate`.
+          enum: [webhook, email, discord]
+          description: |
+            `discord` since v2.53 — use it rather than a `webhook` with a
+            `bodyTemplate`. Discord requires a body carrying `content` or
+            `embeds`, so the generic webhook's default payload is refused
+            with HTTP 400; and a template that supplies one is string
+            interpolation with no JSON escaping, so an alert whose subject
+            contains a quote breaks the body intermittently. The `discord`
+            sender marshals its payload instead.
+
+            Slack, ntfy and Gotify are still `webhook` channels with a
+            `bodyTemplate`, and carry the same escaping caveat.
         enabled: { type: boolean }
         minSeverity:
           $ref: '#/components/schemas/AlertSeverity'
@@ -1624,6 +1635,32 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AlertWebhookConfig'
             - $ref: '#/components/schemas/AlertEmailConfig'
+            - $ref: '#/components/schemas/AlertDiscordConfig'
+    AlertDiscordConfig:
+      type: object
+      title: discord
+      required: [webhookUrl]
+      properties:
+        webhookUrl:
+          type: string
+          description: |
+            The Discord-provided endpoint (Edit Channel → Integrations →
+            Webhooks). Must be https and on discord.com or discordapp.com;
+            anything else is refused with 400.
+
+            **It is the credential** — whoever holds it can post to the
+            channel — so GET returns `scheme://host/[redacted]` and a PUT
+            that sends the placeholder back inherits the stored value.
+            Retype it only to change it.
+          example: https://discord.com/api/webhooks/123/abc
+        username:
+          type: string
+          description: Overrides the display name Discord shows. Empty keeps the webhook's own.
+        timeoutSeconds:
+          type: integer
+          minimum: 1
+          maximum: 60
+          description: 'Bounds one send. Default 10.'
     AlertWebhookConfig:
       type: object
       title: webhook

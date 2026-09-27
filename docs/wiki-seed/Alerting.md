@@ -13,25 +13,43 @@ A 30-second polling watcher evaluates every rule and respects per-rule cooldowns
 ### 1. Wire a channel
 
 1. Sidebar → **Alerting** → **Channels** tab → **+ Add channel**
-2. Pick kind : `discord_webhook` / `webhook_generic` / `email_smtp`
+2. Pick the kind : **`webhook`**, **`email`** or **`discord`**.
+
+   > This page previously named them `discord_webhook`, `webhook_generic`
+   > and `email_smtp`, and described fields that never existed. It was
+   > written from a design note and never reconciled with the code;
+   > corrected in v2.53 against the implementation.
+
 3. Fill in the kind-specific config :
 
-**Discord webhook** :
-- Webhook URL : `https://discord.com/api/webhooks/<id>/<token>` (Server Settings → Integrations → Webhooks)
-- Username (optional) : the bot's display name in the channel
-- Avatar URL (optional)
+**Discord** (since v2.53) :
+- Webhook URL : `https://discord.com/api/webhooks/<id>/<token>` — in Discord, *Edit Channel → Integrations → Webhooks → Copy Webhook URL*. Must be https on `discord.com` or `discordapp.com`; anything else is refused while you are still looking at the form.
+- Display name (optional) : overrides the name Discord shows
+- Timeout : 1-60 s, default 10
+
+That is all. Arenet builds the Discord payload itself — there is no body template to write, which is the whole reason this kind exists (see *Discord before v2.53* below).
+
+**The URL is the credential.** Anyone holding it can post to your channel, so Arenet stores it as a secret, shows it redacted afterwards, and keeps the stored one if you edit the channel without retyping it.
 
 **Generic webhook** :
-- URL : your endpoint
-- Method : `POST` (default) / `PUT`
-- Headers : key-value list (e.g. `Authorization: Bearer xxx`)
-- Body template : optional Go template ; default sends a JSON envelope `{ ts, rule, value, message }`
+- URL : your endpoint. Also treated as a secret, for the same reason.
+- Method : `POST` only
+- Headers : key-value list (e.g. `Authorization: Bearer xxx`); values are redacted in the audit trail, keys are not
+- Body template : optional Go template. **Empty sends the whole alert event as JSON** — not a reduced envelope.
 
-**Email SMTP** :
+  If you write one and it produces JSON, wrap every value in `json` so quotes and newlines cannot break it:
+
+  ```
+  {"text": {{ json .Subject }}}
+  ```
+
+  `json` emits the surrounding quotes, so do not add your own. Available fields: `.RuleName`, `.Severity`, `.Subject`, `.Body`, `.Category`, `.Timestamp`, `.RuleID`, `.ID`.
+
+**Email** :
 - SMTP host + port (e.g. `smtp.gmail.com:587`)
-- Username + password (app password if 2FA on Gmail)
+- Username + password (an app password if 2FA is on)
 - From + To addresses
-- TLS mode (`starttls` typical, `implicit` for port 465)
+- TLS : implicit TLS (typically port 465) or STARTTLS (typically 587)
 
 4. **Enabled** ✅
 5. **Test channel** button : fires a synthetic alert through the channel to validate the wiring. Watch for the test message in Discord / inbox.
@@ -253,29 +271,30 @@ Combined with `cert-expiry-7d`, you have full coverage : the alert fires immedia
 ## API reference
 
 ```bash
-# Create a channel
+# Create a channel. NOTE the /settings/ segment: the path is
+# /api/v1/settings/alerting/..., which this page used to omit.
 curl -b /tmp/jar -X POST -H "Content-Type: application/json" -d '{
-  "kind": "discord_webhook",
+  "kind": "discord",
   "name": "ops-discord",
   "enabled": true,
   "config": {
     "webhookUrl": "https://discord.com/api/webhooks/...",
     "username": "Arenet"
   }
-}' http://localhost:8001/api/v1/alerting/channels
+}' http://localhost:8001/api/v1/settings/alerting/channels
 
 # Create a rule
 curl -b /tmp/jar -X POST -H "Content-Type: application/json" -d '{
   "name": "cert-expiry-7d",
   "enabled": true,
   "kind": "threshold",
-  "severity": 4,
+  "severity": 2,
   "source": "cert_expiry",
   "sourceParams": {},
   "evalParams": {"operator": "<", "value": 7},
   "channels": ["<channel-id>"],
   "cooldownSecs": 86400
-}' http://localhost:8001/api/v1/alerting/rules
+}' http://localhost:8001/api/v1/settings/alerting/rules
 ```
 
 The full Step AL spec lives in `internal/alerting/`.

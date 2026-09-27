@@ -336,6 +336,12 @@ func SenderFor(ch storage.Channel) (AlertSender, error) {
 			return nil, fmt.Errorf("email config parse: %w", err)
 		}
 		return NewEmailSender(cfg, nil), nil
+	case storage.ChannelKindDiscord:
+		cfg, err := ParseDiscordConfig(ch.Config)
+		if err != nil {
+			return nil, fmt.Errorf("discord config parse: %w", err)
+		}
+		return NewDiscordSender(cfg), nil
 	default:
 		return nil, fmt.Errorf("unsupported channel kind %q", ch.Kind)
 	}

@@ -56,10 +56,10 @@ import (
 // adapter. AL.1.c documents the redaction contract per
 // kind.
 //
-// V1 supports two kinds: "webhook" + "email". V2 may add
-// "slack" + "discord" — the storage schema already
-// supports them via the Config raw shape; only the kind
-// constant + the validator need to land.
+// Kinds: "webhook", "email" and "discord" (v2.53). "slack" may
+// follow — the storage schema supports it via the Config raw
+// shape; only the kind constant, a sender and the validator
+// entry need to land.
 
 // Channel is the persisted shape of one alerting
 // destination.
@@ -126,16 +126,15 @@ type Channel struct {
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
-// AlertChannelKinds enumerates the supported channel
-// kinds shipped in V1. V2 will append "slack" + "discord"
-// to this slice — the API layer reads from here as the
-// single source of truth, so widening propagates without
-// touching the validator. ChannelKindWebhook +
-// ChannelKindEmail are the typed constants the CRUD layer
-// uses for switch dispatches.
+// AlertChannelKinds enumerates the supported channel kinds. The
+// API layer reads from here as the single source of truth, so
+// widening propagates without touching the validator — but each
+// new kind still needs its own sender, its config parser and its
+// audit-redaction branch.
 var AlertChannelKinds = []string{
 	ChannelKindWebhook,
 	ChannelKindEmail,
+	ChannelKindDiscord,
 }
 
 // Channel kind constants. Exported so the CRUD layer +
@@ -144,6 +143,13 @@ var AlertChannelKinds = []string{
 const (
 	ChannelKindWebhook = "webhook"
 	ChannelKindEmail   = "email"
+	// ChannelKindDiscord (v2.53) posts a Discord embed. It exists as
+	// its own kind rather than a webhook body template because the
+	// template is string interpolation with no JSON escaping: an alert
+	// whose subject carries a quote produced an invalid body and an
+	// opaque HTTP 400, intermittently. A dedicated sender marshals a
+	// struct, so escaping cannot be got wrong.
+	ChannelKindDiscord = "discord"
 )
 
 // AlertChannelMinSeverityMin / Max bound the int range.

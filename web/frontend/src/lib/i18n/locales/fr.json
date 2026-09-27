@@ -1247,7 +1247,7 @@
 			"ariaRemoveHeader": "Supprimer l'en-tête",
 			"redactedHeadersNote": "Les valeurs d'en-tête sont redactées sur l'API. Laissez la valeur affichée \"[redacted]\" telle quelle pour conserver le secret existant.",
 			"labelBodyTemplate": "Template du corps (optionnel)",
-			"bodyTemplatePlaceholders": "Laissez vide pour envoyer l'événement complet en JSON. Placeholders :",
+			"bodyTemplatePlaceholders": "Laissez vide pour envoyer l'événement complet en JSON. Entourez toute valeur de `json` pour que guillemets et retours à la ligne ne cassent pas le corps — `{\"text\": {{ json .Subject }}}`, sans ajouter vos propres guillemets autour. Variables :",
 			"labelSmtpHost": "Hôte SMTP",
 			"placeholderSmtpHost": "smtp.example.com",
 			"labelSmtpPort": "Port",
@@ -1294,7 +1294,12 @@
 			"toastTestedOk": "Canal \"{name}\" testé : envoi réussi.",
 			"toastTestedFail": "Canal \"{name}\" : échec — {err}",
 			"toastTestErr": "Canal \"{name}\" : {err}",
-			"toastUnknownErr": "erreur inconnue"
+			"toastUnknownErr": "erreur inconnue",
+			"labelDiscordUrl": "URL du webhook Discord",
+			"hintDiscordUrl": "Depuis votre salon Discord : Modifier le salon → Intégrations → Webhooks → Copier l'URL du webhook. Cette URL est le secret — quiconque la détient peut publier dans le salon — elle est donc stockée comme tel et réaffichée masquée.",
+			"labelDiscordUsername": "Nom affiché (facultatif)",
+			"errDiscordUrlRequired": "Une URL de webhook Discord est requise.",
+			"errDiscordUrlHost": "Cela ne ressemble pas à une URL de webhook Discord (elle doit commencer par https://discord.com/ ou https://discordapp.com/)."
 		},
 		"ruleModal": {
 			"titleEdit": "Modifier la règle",
