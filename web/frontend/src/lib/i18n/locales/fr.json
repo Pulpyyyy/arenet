@@ -1299,6 +1299,11 @@
 			"hintDiscordUrl": "Depuis votre salon Discord : Modifier le salon → Intégrations → Webhooks → Copier l'URL du webhook. Cette URL est le secret — quiconque la détient peut publier dans le salon — elle est donc stockée comme tel et réaffichée masquée.",
 			"labelDiscordUsername": "Nom affiché (facultatif)",
 			"errDiscordUrlRequired": "Une URL de webhook Discord est requise.",
+			"labelDiscordMentionUsers": "Mentionner des utilisateurs (facultatif)",
+			"labelDiscordMentionRoles": "Mentionner des rôles (facultatif)",
+			"hintDiscordMentions": "Identifiants Discord, séparés par des virgules ou des espaces — pas des pseudos. Dans Discord, activez Paramètres → Avancés → Mode développeur, puis clic droit sur un membre ou un rôle et Copier l'identifiant. Les personnes mentionnées sont notifiées à chaque alerte envoyée par ce canal : pour être sollicité moins souvent, réservez un canal à une gravité minimale plus élevée.",
+			"errDiscordMentionUser": "« {value} » n'est pas un identifiant d'utilisateur. Discord ne notifie que sur des identifiants numériques : activez le mode développeur, puis clic droit sur le membre et Copier l'identifiant utilisateur.",
+			"errDiscordMentionRole": "« {value} » n'est pas un identifiant de rôle. Discord ne notifie que sur des identifiants numériques : activez le mode développeur, puis clic droit sur le rôle et Copier l'identifiant du rôle.",
 			"errDiscordUrlHost": "Cela ne ressemble pas à une URL de webhook Discord (elle doit commencer par https://discord.com/ ou https://discordapp.com/)."
 		},
 		"ruleModal": {

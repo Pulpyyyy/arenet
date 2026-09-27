@@ -158,6 +158,98 @@ describe('ChannelModal', () => {
 		expect(req.config).not.toHaveProperty('url');
 	});
 
+	// v2.54 — mentions. The operator asked to be pinged like an @name.
+	// Discord only resolves numeric IDs, and only notifies for a mention in
+	// the message content, so the UI's job is to collect IDs and refuse
+	// names before a save that would silently notify nobody.
+	it('sends the mention IDs it was given, split on commas or spaces', async () => {
+		createMock.mockResolvedValue({});
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		render(Modal, {
+			props: { open: true, channel: null, onClose: () => {}, onSaved: () => {} }
+		});
+
+		await fireEvent.change(screen.getByLabelText(/^Type$/i), { target: { value: 'discord' } });
+		await fireEvent.input(screen.getByLabelText(/^Name/i), { target: { value: 'ops' } });
+		await fireEvent.input(screen.getByTestId('discord-url'), {
+			target: { value: 'https://discord.com/api/webhooks/123/abc' }
+		});
+		await fireEvent.input(screen.getByTestId('discord-mention-users'), {
+			target: { value: '306162232765874176, 847291046728394112' }
+		});
+		await fireEvent.input(screen.getByTestId('discord-mention-roles'), {
+			target: { value: '1180422398765432100' }
+		});
+		await fireEvent.click(screen.getByText(/^(Create|Créer)$/));
+
+		await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+		const [req] = createMock.mock.calls[0];
+		expect(req.config.mentionUserIds).toEqual(['306162232765874176', '847291046728394112']);
+		expect(req.config.mentionRoleIds).toEqual(['1180422398765432100']);
+	});
+
+	it('omits the mention fields entirely when both are left blank', async () => {
+		createMock.mockResolvedValue({});
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		render(Modal, {
+			props: { open: true, channel: null, onClose: () => {}, onSaved: () => {} }
+		});
+
+		await fireEvent.change(screen.getByLabelText(/^Type$/i), { target: { value: 'discord' } });
+		await fireEvent.input(screen.getByLabelText(/^Name/i), { target: { value: 'ops' } });
+		await fireEvent.input(screen.getByTestId('discord-url'), {
+			target: { value: 'https://discord.com/api/webhooks/123/abc' }
+		});
+		await fireEvent.click(screen.getByText(/^(Create|Créer)$/));
+
+		await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+		const [req] = createMock.mock.calls[0];
+		expect(req.config.mentionUserIds).toBeUndefined();
+		expect(req.config.mentionRoleIds).toBeUndefined();
+	});
+
+	// A pseudo saves cleanly and then notifies nobody — the failure has no
+	// error anywhere, so it has to be refused at the form.
+	it('refuses a username in the mention field, before sending', async () => {
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		render(Modal, {
+			props: { open: true, channel: null, onClose: () => {}, onSaved: () => {} }
+		});
+
+		await fireEvent.change(screen.getByLabelText(/^Type$/i), { target: { value: 'discord' } });
+		await fireEvent.input(screen.getByLabelText(/^Name/i), { target: { value: 'ops' } });
+		await fireEvent.input(screen.getByTestId('discord-url'), {
+			target: { value: 'https://discord.com/api/webhooks/123/abc' }
+		});
+		await fireEvent.input(screen.getByTestId('discord-mention-users'), {
+			target: { value: '@someone' }
+		});
+		await fireEvent.click(screen.getByText(/^(Create|Créer)$/));
+
+		expect(createMock).not.toHaveBeenCalled();
+		// And it must say what to do instead, not just refuse.
+		expect(screen.getByText(/Copy User ID|identifiant utilisateur/i)).toBeTruthy();
+	});
+
+	it('refuses a role name too', async () => {
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		render(Modal, {
+			props: { open: true, channel: null, onClose: () => {}, onSaved: () => {} }
+		});
+
+		await fireEvent.change(screen.getByLabelText(/^Type$/i), { target: { value: 'discord' } });
+		await fireEvent.input(screen.getByLabelText(/^Name/i), { target: { value: 'ops' } });
+		await fireEvent.input(screen.getByTestId('discord-url'), {
+			target: { value: 'https://discord.com/api/webhooks/123/abc' }
+		});
+		await fireEvent.input(screen.getByTestId('discord-mention-roles'), {
+			target: { value: 'admins' }
+		});
+		await fireEvent.click(screen.getByText(/^(Create|Créer)$/));
+
+		expect(createMock).not.toHaveBeenCalled();
+	});
+
 	// The host check mirrors the Go validator so the refusal lands while
 	// the operator is looking at the field, not as a 400 afterwards.
 	it('refuses a URL that is not a Discord webhook, before sending', async () => {

@@ -25,7 +25,12 @@ A 30-second polling watcher evaluates every rule and respects per-rule cooldowns
 **Discord** (since v2.53) :
 - Webhook URL : `https://discord.com/api/webhooks/<id>/<token>` — in Discord, *Edit Channel → Integrations → Webhooks → Copy Webhook URL*. Must be https on `discord.com` or `discordapp.com`; anything else is refused while you are still looking at the form.
 - Display name (optional) : overrides the name Discord shows
+- Mention users / Mention roles (optional, since v2.54) : Discord **IDs**, separated by commas or spaces. In Discord, turn on *Settings → Advanced → Developer Mode*, then right-click a member or a role and *Copy ID*. A pseudo does not work here and Arenet refuses it: Discord only resolves numeric IDs, so `@someone` typed as text would post as plain text and notify nobody.
 - Timeout : 1-60 s, default 10
+
+**How mentions behave.** Discord raises a notification only for a mention in a message's *content*, never for one inside an embed. Arenet's alert is an embed, so the mentions are posted as a short line above it — that line is the only thing Arenet ever puts in `content`. Everyone listed is pinged on **every** alert this channel sends; if you want to be pinged less often, give a channel a higher *minimum severity* and put the mentions on that one.
+
+Arenet also sends an allow-list naming exactly the IDs you configured. A consequence worth knowing: an alert whose text happens to contain `@everyone` cannot ping your server.
 
 That is all. Arenet builds the Discord payload itself — there is no body template to write, which is the whole reason this kind exists (see *Discord before v2.53* below).
 
