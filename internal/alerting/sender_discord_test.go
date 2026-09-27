@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -179,5 +180,203 @@ func TestDiscordConfig_Validate(t *testing.T) {
 				t.Errorf("Validate() error = %v, wantErr %v", err, c.wantErr)
 			}
 		})
+	}
+}
+
+// v2.54 — mentions.
+//
+// The operator asked to be pinged "like an @pseudo". Two upstream facts
+// shape every test below:
+//
+//  1. Discord scopes mention notifications to the message content. A
+//     mention written into an embed renders as a blue name and notifies
+//     nobody — so the mention CANNOT live in the embed Arenet already
+//     sends, and a test that only checked the rendered text would pass
+//     while the feature did nothing.
+//  2. `allowed_mentions.parse` is mutually exclusive with `users` and
+//     `roles`; sending both is a validation error, i.e. a 400.
+
+// discordBody is the payload shape the mention tests read back.
+type discordBody struct {
+	Content string `json:"content"`
+	Embeds  []struct {
+		Description string `json:"description"`
+	} `json:"embeds"`
+	AllowedMentions *struct {
+		Parse []string `json:"parse"`
+		Users []string `json:"users"`
+		Roles []string `json:"roles"`
+	} `json:"allowed_mentions"`
+}
+
+func sendAndDecode(t *testing.T, cfg DiscordConfig) ([]byte, discordBody) {
+	t.Helper()
+	srv, got := captureDiscord(t, 204, "")
+	cfg.WebhookURL = srv.URL
+	if err := NewDiscordSender(cfg).Send(context.Background(), discordEvent()); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	var body discordBody
+	if err := json.Unmarshal(*got, &body); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, *got)
+	}
+	return *got, body
+}
+
+// The load-bearing one: the mention must be in `content`, because that is
+// the only place Discord raises a notification from.
+func TestDiscordSender_MentionsGoInContentNotTheEmbed(t *testing.T) {
+	raw, body := sendAndDecode(t, DiscordConfig{
+		MentionUserIDs: []string{"306162232765874176"},
+		MentionRoleIDs: []string{"847291046728394112"},
+	})
+
+	if body.Content != "<@306162232765874176> <@&847291046728394112>" {
+		t.Errorf("content = %q; want the user token then the role token", body.Content)
+	}
+	// A mention inside the embed would look right in the channel and
+	// notify no one. Guard against a future "tidy-up" that moves it there.
+	if len(body.Embeds) != 1 {
+		t.Fatalf("want one embed, got %d", len(body.Embeds))
+	}
+	if strings.Contains(body.Embeds[0].Description, "306162232765874176") {
+		t.Error("the mention leaked into the embed description, where Discord raises no notification")
+	}
+	if !strings.Contains(string(raw), `"content"`) {
+		t.Error("no content field at all — nobody would be notified")
+	}
+}
+
+// parse must be ABSENT, not empty: Discord documents it as mutually
+// exclusive with users/roles and answers 400 when both are sent.
+func TestDiscordSender_AllowedMentionsNamesExactlyThoseIDsAndOmitsParse(t *testing.T) {
+	raw, body := sendAndDecode(t, DiscordConfig{
+		MentionUserIDs: []string{"306162232765874176"},
+		MentionRoleIDs: []string{"847291046728394112"},
+	})
+
+	if body.AllowedMentions == nil {
+		t.Fatal("no allowed_mentions: a role mention would not notify, since a webhook parses only users by default")
+	}
+	if strings.Contains(string(raw), `"parse"`) {
+		t.Errorf("parse was sent alongside users/roles — Discord rejects that combination: %s", raw)
+	}
+	if len(body.AllowedMentions.Users) != 1 || body.AllowedMentions.Users[0] != "306162232765874176" {
+		t.Errorf("allowed users = %v", body.AllowedMentions.Users)
+	}
+	if len(body.AllowedMentions.Roles) != 1 || body.AllowedMentions.Roles[0] != "847291046728394112" {
+		t.Errorf("allowed roles = %v", body.AllowedMentions.Roles)
+	}
+}
+
+// An allow-list naming only the configured IDs also means an alert body
+// carrying @everyone cannot ping a server. Worth a test of its own: it is
+// a property of the payload, not a side effect anyone would look for.
+func TestDiscordSender_AlertBodyCannotPingEveryone(t *testing.T) {
+	srv, got := captureDiscord(t, 204, "")
+	evt := discordEvent()
+	evt.Body = "@everyone @here the certificate expired"
+	cfg := DiscordConfig{WebhookURL: srv.URL, MentionUserIDs: []string{"306162232765874176"}}
+
+	if err := NewDiscordSender(cfg).Send(context.Background(), evt); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	var body discordBody
+	if err := json.Unmarshal(*got, &body); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	// The text is still shown — it is the alert. It just cannot notify.
+	if !strings.Contains(body.Embeds[0].Description, "@everyone") {
+		t.Error("the alert body was altered; it should be delivered verbatim")
+	}
+	if body.AllowedMentions == nil || len(body.AllowedMentions.Parse) != 0 {
+		t.Errorf("parse = %v; an empty/absent parse is what stops @everyone in the body from firing",
+			body.AllowedMentions)
+	}
+}
+
+// Non-regression: a channel configured before v2.54 must post the body it
+// posted before. Both new keys have to be absent, not empty.
+func TestDiscordSender_NoMentionsLeavesThePayloadUnchanged(t *testing.T) {
+	raw, body := sendAndDecode(t, DiscordConfig{Username: "arenet"})
+
+	if strings.Contains(string(raw), `"content"`) {
+		t.Errorf("content present with no mention configured: %s", raw)
+	}
+	if strings.Contains(string(raw), `"allowed_mentions"`) {
+		t.Errorf("allowed_mentions present with no mention configured: %s", raw)
+	}
+	if body.Content != "" || body.AllowedMentions != nil {
+		t.Error("decoded payload carries mention fields it should not")
+	}
+}
+
+func TestDiscordConfig_MentionValidation(t *testing.T) {
+	base := func() DiscordConfig {
+		return DiscordConfig{WebhookURL: "https://discord.com/api/webhooks/1/abc"}
+	}
+	tooMany := make([]string, discordMaxMentionsPerList+1)
+	for i := range tooMany {
+		tooMany[i] = strconv.Itoa(100000000000000000 + i)
+	}
+
+	tests := []struct {
+		name    string
+		mutate  func(*DiscordConfig)
+		wantErr string
+	}{
+		{"a username is refused, with the fix in the message", func(c *DiscordConfig) {
+			c.MentionUserIDs = []string{"@ludovic"}
+		}, "numeric ID"},
+		{"a bare name is refused too", func(c *DiscordConfig) {
+			c.MentionUserIDs = []string{"ludovic"}
+		}, "numeric ID"},
+		{"a role name is refused", func(c *DiscordConfig) {
+			c.MentionRoleIDs = []string{"admins"}
+		}, "numeric ID"},
+		{"past Discord's per-list cap", func(c *DiscordConfig) {
+			c.MentionUserIDs = tooMany
+		}, "at most 100"},
+		{"a real user ID is accepted", func(c *DiscordConfig) {
+			c.MentionUserIDs = []string{"306162232765874176"}
+		}, ""},
+		{"both lists empty stays valid", func(c *DiscordConfig) {}, ""},
+		{"blank entries are ignored, not refused", func(c *DiscordConfig) {
+			c.MentionUserIDs = []string{"", "  ", "306162232765874176"}
+		}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := base()
+			tt.mutate(&cfg)
+			err := cfg.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate() = %v; want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Validate() = nil; want an error mentioning %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Validate() = %q; want it to mention %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// A pasted list often repeats someone. Rendering them twice is untidy and
+// says Arenet did not look at its input.
+func TestDiscordConfig_WithDefaults_DedupesMentions(t *testing.T) {
+	cfg := DiscordConfig{
+		MentionUserIDs: []string{"306162232765874176", " 306162232765874176 ", "847291046728394112"},
+	}.WithDefaults()
+
+	if len(cfg.MentionUserIDs) != 2 {
+		t.Fatalf("MentionUserIDs = %v; want the duplicate collapsed", cfg.MentionUserIDs)
+	}
+	if cfg.MentionUserIDs[0] != "306162232765874176" {
+		t.Errorf("order changed: %v", cfg.MentionUserIDs)
 	}
 }

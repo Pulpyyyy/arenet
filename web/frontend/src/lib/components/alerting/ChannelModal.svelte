@@ -67,6 +67,10 @@
 	// placeholder back, same contract as the webhook URL.
 	let discordUrl = $state('');
 	let discordUsername = $state('');
+	// v2.54 — mentions. Kept as free text so the operator can paste IDs
+	// separated however they like; split and validated on save.
+	let discordMentionUsers = $state('');
+	let discordMentionRoles = $state('');
 	let discordTimeout = $state(10);
 	let minSeverity = $state(0);
 
@@ -112,6 +116,8 @@
 				const cfg = (channel.config ?? {}) as unknown as Record<string, unknown>;
 				discordUrl = typeof cfg.webhookUrl === 'string' ? cfg.webhookUrl : '';
 				discordUsername = typeof cfg.username === 'string' ? cfg.username : '';
+				discordMentionUsers = Array.isArray(cfg.mentionUserIds) ? cfg.mentionUserIds.join(', ') : '';
+				discordMentionRoles = Array.isArray(cfg.mentionRoleIds) ? cfg.mentionRoleIds.join(', ') : '';
 				discordTimeout = typeof cfg.timeoutSeconds === 'number' ? cfg.timeoutSeconds : 10;
 			}
 			if (channel.kind === 'webhook') {
@@ -151,6 +157,8 @@
 			kind = 'webhook';
 			discordUrl = '';
 			discordUsername = '';
+			discordMentionUsers = '';
+			discordMentionRoles = '';
 			discordTimeout = 10;
 			minSeverity = 0;
 			webhookUrl = '';
@@ -192,6 +200,20 @@
 
 	// --- validation --------------------------------------------
 
+	/**
+	 * Splits a pasted list of Discord IDs on commas or whitespace.
+	 *
+	 * Operators paste from Discord's "Copy ID" one at a time, so the
+	 * separator they end up with is whichever key they happened to press.
+	 * Accepting both costs nothing and removes a pointless refusal.
+	 */
+	function parseMentionIds(raw: string): string[] {
+		return raw
+			.split(/[\s,;]+/)
+			.map((s) => s.trim())
+			.filter((s) => s.length > 0);
+	}
+
 	function buildRequest(): AlertChannelRequest | null {
 		if (!name.trim()) {
 			validationError = t('alerting.channelModal.errNameRequired');
@@ -212,9 +234,26 @@
 				validationError = t('alerting.channelModal.errTimeoutRange');
 				return null;
 			}
+			const users = parseMentionIds(discordMentionUsers);
+			const roles = parseMentionIds(discordMentionRoles);
+			// A name instead of an ID is the mistake worth catching here: it
+			// would save cleanly and then notify nobody, with no error
+			// anywhere. Mirrors the Go validator.
+			const badUser = users.find((id) => !/^\d+$/.test(id));
+			if (badUser !== undefined) {
+				validationError = t('alerting.channelModal.errDiscordMentionUser', { value: badUser });
+				return null;
+			}
+			const badRole = roles.find((id) => !/^\d+$/.test(id));
+			if (badRole !== undefined) {
+				validationError = t('alerting.channelModal.errDiscordMentionRole', { value: badRole });
+				return null;
+			}
 			const cfg: DiscordConfig = {
 				webhookUrl: discordUrl.trim(),
 				username: discordUsername.trim() || undefined,
+				mentionUserIds: users.length > 0 ? users : undefined,
+				mentionRoleIds: roles.length > 0 ? roles : undefined,
 				timeoutSeconds: discordTimeout
 			};
 			return { name: name.trim(), kind: 'discord', enabled, minSeverity, config: cfg };
@@ -455,6 +494,43 @@
 					/>
 				</div>
 			</div>
+			<!-- v2.54 — mentions.
+			     Discord raises a notification only for a mention in the
+			     message content, never one inside an embed, so Arenet posts
+			     these as a line above the alert. They are IDs because that
+			     is all Discord resolves: a name posts as plain text and
+			     notifies no one. -->
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+				<div>
+					<label for="discord-mention-users" class="text-sm font-medium text-secondary mb-1.5 block">
+						{language.current && t('alerting.channelModal.labelDiscordMentionUsers')}
+					</label>
+					<input
+						id="discord-mention-users"
+						type="text"
+						bind:value={discordMentionUsers}
+						placeholder="306162232765874176, 847291046728394112"
+						data-testid="discord-mention-users"
+						class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono"
+					/>
+				</div>
+				<div>
+					<label for="discord-mention-roles" class="text-sm font-medium text-secondary mb-1.5 block">
+						{language.current && t('alerting.channelModal.labelDiscordMentionRoles')}
+					</label>
+					<input
+						id="discord-mention-roles"
+						type="text"
+						bind:value={discordMentionRoles}
+						placeholder="1180422398765432100"
+						data-testid="discord-mention-roles"
+						class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono"
+					/>
+				</div>
+			</div>
+			<p class="text-xs text-secondary">
+				{language.current && t('alerting.channelModal.hintDiscordMentions')}
+			</p>
 		{/if}
 
 		{#if kind === 'webhook'}

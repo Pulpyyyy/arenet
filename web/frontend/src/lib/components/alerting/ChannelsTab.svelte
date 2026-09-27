@@ -25,6 +25,7 @@
 	import Spinner from '$lib/components/Spinner.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import ChannelModal from './ChannelModal.svelte';
+	import ChannelKindIcon from './ChannelKindIcon.svelte';
 	import { relativeTime } from '$lib/utils/audit-format';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
@@ -125,25 +126,19 @@
 		}
 	}
 
+	// v2.54 — Discord was missing from both switches, so it showed as a
+	// bullet next to a lowercase "discord" while Email had an envelope
+	// and a capital. The icon now lives in ChannelKindIcon.
 	function kindLabel(kind: string): string {
 		switch (kind) {
 			case 'webhook':
 				return 'Webhook';
 			case 'email':
 				return 'Email';
+			case 'discord':
+				return 'Discord';
 			default:
 				return kind;
-		}
-	}
-
-	function kindIcon(kind: string): string {
-		switch (kind) {
-			case 'webhook':
-				return '🔗';
-			case 'email':
-				return '✉️';
-			default:
-				return '•';
 		}
 	}
 
@@ -206,8 +201,10 @@
 {#snippet channelRow(c: AlertChannel)}
 	<td class="px-4 py-3 text-sm text-primary truncate" title={c.name}>{c.name}</td>
 	<td class="px-4 py-3 text-sm text-primary">
-		<span aria-hidden="true" class="mr-1">{kindIcon(c.kind)}</span>
-		{kindLabel(c.kind)}
+		<span class="inline-flex items-center gap-1.5">
+			<ChannelKindIcon kind={c.kind} />
+			{kindLabel(c.kind)}
+		</span>
 	</td>
 	<td class="px-4 py-3 text-sm">
 		{#if c.enabled}

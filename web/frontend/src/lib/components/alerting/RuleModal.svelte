@@ -99,6 +99,26 @@
 				]
 	);
 
+	/**
+	 * Maps a component name this editor used to offer onto the one the
+	 * health report actually publishes.
+	 *
+	 * v2.54 — the list above once offered `boltdb` while the check is named
+	 * `db`. The evaluator was taught to accept both in v2.52, so those
+	 * rules fire again, but the editor was not: it binds the stored string
+	 * to a <select> that has no option with that value, so reopening such a
+	 * rule shows the wrong component. The rule works and its own editor
+	 * misreports it — worth the three lines to keep the two in step.
+	 *
+	 * Mirrors legacyHealthComponentNames in
+	 * internal/alerting/source_system_health.go.
+	 */
+	const LEGACY_HEALTH_COMPONENTS: Record<string, string> = { boltdb: 'db' };
+
+	function canonicalHealthComponent(name: string): string {
+		return LEGACY_HEALTH_COMPONENTS[name] ?? name;
+	}
+
 	const OPERATORS = ['>', '>=', '<', '<=', '==', '!='] as const;
 	type Operator = (typeof OPERATORS)[number];
 
@@ -221,7 +241,8 @@
 				certRenewalWindowSecs =
 					typeof sp.windowSecs === 'number' ? sp.windowSecs : 86400;
 			} else if (source === 'system_health') {
-				healthComponent = typeof sp.component === 'string' ? sp.component : '';
+				healthComponent =
+					typeof sp.component === 'string' ? canonicalHealthComponent(sp.component) : '';
 			} else if (source === 'cert_manual_expiring') {
 				certManualThresholdDays =
 					typeof sp.thresholdDays === 'number' ? sp.thresholdDays : 30;

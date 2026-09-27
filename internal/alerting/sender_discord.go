@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -54,6 +55,15 @@ type DiscordConfig struct {
 	// Username optionally overrides the display name Discord shows.
 	// Empty leaves Discord's own webhook name.
 	Username string `json:"username,omitempty"`
+	// MentionUserIDs are Discord user IDs to ping on every alert this
+	// channel sends. They are IDs, not usernames: Discord resolves
+	// `<@306...>`, never `@someone`. Empty means no mention, which is the
+	// behaviour before v2.54 and produces a byte-identical payload.
+	MentionUserIDs []string `json:"mentionUserIds,omitempty"`
+	// MentionRoleIDs are Discord role IDs to ping, same mechanism. A role
+	// is usually the better answer than a list of people, because it
+	// survives someone leaving the server.
+	MentionRoleIDs []string `json:"mentionRoleIds,omitempty"`
 	// TimeoutSeconds bounds one send. Same range as the webhook sender.
 	TimeoutSeconds int `json:"timeoutSeconds"`
 }
@@ -71,7 +81,63 @@ const (
 	// limit is 4096; past it the API answers 400, so the sender truncates
 	// rather than letting a long body cost an alert.
 	discordMaxDescription = 4000
+	// discordMaxMentionsPerList is Discord's documented cap on each
+	// allowed_mentions allow-list (100 users, 100 roles).
+	discordMaxMentionsPerList = 100
+	// discordMaxContent is Discord's limit on the `content` field. The
+	// mention line is the only thing Arenet puts there, and 100 user IDs
+	// would render past 2000 characters, so the rendered line is measured
+	// at validation time instead of trusting the per-list cap alone.
+	discordMaxContent = 2000
 )
+
+// cleanSnowflakes trims, drops empties and de-duplicates a list of
+// Discord IDs, preserving the operator's order.
+//
+// A duplicate is not an error — it is a copy-paste — but it would render
+// the same person twice on the mention line, so it is removed rather
+// than refused.
+func cleanSnowflakes(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// validateSnowflakes checks that every entry could be a Discord ID.
+//
+// The only mistake worth catching here is the one an operator is most
+// likely to make: pasting a username. Discord mentions resolve numeric
+// snowflakes and nothing else, so `@someone` would post as literal text
+// and silently notify no one — a failure with no error anywhere. The
+// check is therefore "is this a number", which is the real constraint,
+// rather than a guess at the current ID length, which grows over time.
+func validateSnowflakes(kind string, ids []string) error {
+	if len(ids) > discordMaxMentionsPerList {
+		return fmt.Errorf("discord: at most %d %s mentions, got %d",
+			discordMaxMentionsPerList, kind, len(ids))
+	}
+	for _, id := range ids {
+		if _, err := strconv.ParseUint(id, 10, 64); err != nil {
+			return fmt.Errorf("discord: %q is not a %s ID — Discord mentions need the numeric ID "+
+				"(enable Developer Mode, then right-click → Copy %s ID), not a name", id, kind, kind)
+		}
+	}
+	return nil
+}
 
 // Validate checks the shape.
 func (c DiscordConfig) Validate() error {
@@ -90,6 +156,18 @@ func (c DiscordConfig) Validate() error {
 		return fmt.Errorf("discord: timeoutSeconds %d out of range %d-%d",
 			c.TimeoutSeconds, discordMinTimeoutSeconds, discordMaxTimeoutSeconds)
 	}
+	users := cleanSnowflakes(c.MentionUserIDs)
+	roles := cleanSnowflakes(c.MentionRoleIDs)
+	if err := validateSnowflakes("user", users); err != nil {
+		return err
+	}
+	if err := validateSnowflakes("role", roles); err != nil {
+		return err
+	}
+	if line := mentionLine(users, roles); len(line) > discordMaxContent {
+		return fmt.Errorf("discord: the mention line renders to %d characters, over Discord's limit of %d",
+			len(line), discordMaxContent)
+	}
 	return nil
 }
 
@@ -97,6 +175,8 @@ func (c DiscordConfig) Validate() error {
 func (c DiscordConfig) WithDefaults() DiscordConfig {
 	c.WebhookURL = strings.TrimSpace(c.WebhookURL)
 	c.Username = strings.TrimSpace(c.Username)
+	c.MentionUserIDs = cleanSnowflakes(c.MentionUserIDs)
+	c.MentionRoleIDs = cleanSnowflakes(c.MentionRoleIDs)
 	if c.TimeoutSeconds == 0 {
 		c.TimeoutSeconds = discordDefaultTimeoutSeconds
 	}
@@ -123,10 +203,49 @@ type discordEmbed struct {
 	Timestamp   string `json:"timestamp,omitempty"`
 }
 
+// discordAllowedMentions is the allow-list Discord applies to `content`.
+//
+// `parse` is deliberately absent, not empty: Discord documents it as
+// mutually exclusive with these two fields, and sending both is a
+// validation error. Omitting it while naming the IDs means exactly those
+// IDs notify and nothing else in the text does — so an alert body that
+// happens to contain `@everyone` can never ping a whole server.
+type discordAllowedMentions struct {
+	Users []string `json:"users,omitempty"`
+	Roles []string `json:"roles,omitempty"`
+}
+
 // discordPayload is the request body.
 type discordPayload struct {
-	Username string         `json:"username,omitempty"`
-	Embeds   []discordEmbed `json:"embeds"`
+	Username string `json:"username,omitempty"`
+	// Content carries the mention line, and only ever that.
+	//
+	// It cannot be folded into the embed. Discord scopes mention
+	// notifications to "the message content, or the content of components
+	// attached to that message" — a mention written inside an embed
+	// renders as a blue name and notifies no one. So a channel with
+	// mentions configured posts content + embed; a channel without them
+	// posts the embed alone, exactly as before.
+	Content         string                  `json:"content,omitempty"`
+	Embeds          []discordEmbed          `json:"embeds"`
+	AllowedMentions *discordAllowedMentions `json:"allowed_mentions,omitempty"`
+}
+
+// mentionLine renders the IDs as Discord's mention tokens: `<@id>` for a
+// user, `<@&id>` for a role. Users first, because a named person reads
+// as more urgent than a group.
+func mentionLine(users, roles []string) string {
+	if len(users) == 0 && len(roles) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(users)+len(roles))
+	for _, id := range users {
+		parts = append(parts, "<@"+id+">")
+	}
+	for _, id := range roles {
+		parts = append(parts, "<@&"+id+">")
+	}
+	return strings.Join(parts, " ")
 }
 
 // discordSeverityColours maps a severity to Discord's decimal colour,
@@ -207,6 +326,15 @@ func (s *DiscordSender) Send(ctx context.Context, evt AlertEvent) error {
 			Color:       colour,
 			Timestamp:   evt.Timestamp.UTC().Format(time.RFC3339),
 		}},
+	}
+	// Both stay absent when no mention is configured, so an existing
+	// channel keeps posting the body it posted before v2.54.
+	if line := mentionLine(s.cfg.MentionUserIDs, s.cfg.MentionRoleIDs); line != "" {
+		payload.Content = line
+		payload.AllowedMentions = &discordAllowedMentions{
+			Users: s.cfg.MentionUserIDs,
+			Roles: s.cfg.MentionRoleIDs,
+		}
 	}
 
 	// Marshalled, never templated: this is the whole reason the kind

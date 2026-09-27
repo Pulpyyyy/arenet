@@ -18,7 +18,17 @@ import { request } from './client';
 
 // -- Channels -----------------------------------------------
 
-export type ChannelKind = 'webhook' | 'email' | 'discord';
+/**
+ * Every channel kind, as one runtime list.
+ *
+ * v2.54 — this used to be a bare union type, so nothing could iterate the
+ * kinds and nothing noticed that Discord had been left out of the table's
+ * icon and label switches. The type is derived from the list, so adding a
+ * kind here is what makes the per-kind tests cover it.
+ */
+export const ALERT_CHANNEL_KINDS = ['webhook', 'email', 'discord'] as const;
+
+export type ChannelKind = (typeof ALERT_CHANNEL_KINDS)[number];
 
 /**
  * Discord channel config (v2.53).
@@ -38,6 +48,15 @@ export interface DiscordConfig {
 	webhookUrl: string;
 	/** Optional display-name override; empty keeps Discord's own. */
 	username?: string;
+	/**
+	 * v2.54 — Discord user IDs to ping on every alert this channel
+	 * sends. Numeric IDs, not usernames: Discord resolves `<@306…>` and
+	 * never `@someone`, so a name would post as plain text and notify
+	 * nobody. The server refuses anything non-numeric.
+	 */
+	mentionUserIds?: string[];
+	/** Role IDs to ping, same mechanism as mentionUserIds. */
+	mentionRoleIds?: string[];
 	timeoutSeconds?: number;
 }
 

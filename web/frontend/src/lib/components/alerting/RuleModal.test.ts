@@ -156,6 +156,50 @@ describe('RuleModal', () => {
 		expect(screen.queryByLabelText(/Host/i)).toBeNull();
 	});
 
+	// v2.54 — asked by the operator: "BoltDB is still in the list, didn't
+	// you say you'd put db?". The label IS "BoltDB" and the value IS "db",
+	// so that part is right. What was not: the editor once offered the
+	// value "boltdb", the evaluator was taught to accept both in v2.52, but
+	// the editor was not — so reopening one of those older rules bound
+	// "boltdb" to a <select> with no such option and showed the wrong
+	// component for a rule that works.
+	it('shows BoltDB as the label for the db component', async () => {
+		const Modal = (await import('./RuleModal.svelte')).default;
+		render(Modal, {
+			props: { open: true, rule: null, onClose: () => {}, onSaved: () => {} }
+		});
+
+		await fireEvent.change(screen.getByLabelText(/^Source$/i), {
+			target: { value: 'system_health' }
+		});
+
+		const select = screen.getByLabelText(/Component/i) as HTMLSelectElement;
+		const db = Array.from(select.options).find((o) => o.value === 'db');
+		expect(db, 'no option carries the value the health report publishes').toBeTruthy();
+		expect(db?.textContent?.trim()).toBe('BoltDB');
+		// And the name that never matched the report must not be offered.
+		expect(Array.from(select.options).map((o) => o.value)).not.toContain('boltdb');
+	});
+
+	it('resolves a legacy boltdb component to db when editing an older rule', async () => {
+		const Modal = (await import('./RuleModal.svelte')).default;
+		render(Modal, {
+			props: {
+				open: true,
+				rule: {
+					...thresholdRule(),
+					source: 'system_health',
+					sourceParams: { component: 'boltdb' }
+				},
+				onClose: () => {},
+				onSaved: () => {}
+			}
+		});
+
+		const select = screen.getByLabelText(/Component/i) as HTMLSelectElement;
+		expect(select.value, 'an older rule shows no component at all').toBe('db');
+	});
+
 	it('lists cert_renewal_failed as a selectable Source option (hotfix Cert.A.2)', async () => {
 		// Regression guard for the Cert.A backend ship that
 		// left the frontend dropdown hardcoded — operators saw

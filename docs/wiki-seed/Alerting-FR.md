@@ -25,7 +25,12 @@ Un watcher polling 30-seconds évalue chaque rule et respecte les cooldowns par 
 **Discord** (depuis la v2.53) :
 - URL du webhook : `https://discord.com/api/webhooks/<id>/<token>` — dans Discord, *Modifier le salon → Intégrations → Webhooks → Copier l'URL du webhook*. Elle doit être en https sur `discord.com` ou `discordapp.com` ; toute autre adresse est refusée pendant que vous êtes encore sur le formulaire.
 - Nom affiché (facultatif) : remplace le nom que montre Discord
+- Mentionner des utilisateurs / des rôles (facultatif, depuis la v2.54) : des **identifiants** Discord, séparés par des virgules ou des espaces. Dans Discord, activez *Paramètres → Avancés → Mode développeur*, puis faites un clic droit sur un membre ou un rôle et *Copier l'identifiant*. Un pseudo ne fonctionne pas ici, et Arenet le refuse : Discord ne résout que des identifiants numériques, donc `@quelquun` saisi tel quel serait publié comme du texte ordinaire et ne notifierait personne.
 - Délai d'attente : 1 à 60 s, 10 par défaut
+
+**Comment se comportent les mentions.** Discord ne déclenche une notification que pour une mention placée dans le *contenu* du message, jamais pour une mention située dans un embed. L'alerte d'Arenet est un embed : les mentions sont donc publiées sur une courte ligne au-dessus, et cette ligne est la seule chose qu'Arenet place dans le `content`. Toutes les personnes listées sont notifiées à **chaque** alerte envoyée par ce canal ; pour l'être moins souvent, attribuez à un canal une *gravité minimale* plus élevée et placez les mentions sur celui-là.
+
+Arenet envoie également une liste d'autorisation qui nomme exactement les identifiants que vous avez configurés. Conséquence utile à connaître : une alerte dont le texte contiendrait `@everyone` ne peut pas notifier tout votre serveur.
 
 C'est tout. Arenet construit lui-même la charge utile Discord — il n'y a aucun gabarit de corps à écrire, et c'est précisément la raison d'être de ce type (voir *Discord avant la v2.53* plus bas).
 
