@@ -29,6 +29,50 @@
 	const selected = $derived(ops.find((o) => o.key === selectedKey) ?? null);
 	const intro = $derived<string>(doc?.info?.description ?? '');
 
+	// v2.55 — the tag groups fold.
+	//
+	// Every group used to render expanded, so the sidebar was 15 headings
+	// and 159 operations in one column — the operator's words were that all
+	// the requests sat one behind the other and it looked odd. Folded, the
+	// same list opens as 15 rows you can aim at.
+	//
+	// Deliberately a button plus `hidden` rather than <details open={…}>:
+	// RouteSection documents what happens when a reactive value drives the
+	// native open attribute — the element snaps shut under the cursor on any
+	// parent re-render. Here the state below is the only source of truth.
+	//
+	// `hidden` rather than {#if} so the operations stay in the document:
+	// nothing has to be rebuilt when a group opens, and the attribute already
+	// takes them out of both the accessibility tree and the tab order.
+	let openTags = $state<Record<string, boolean>>({});
+
+	const searching = $derived(query.trim() !== '');
+	const selectedTag = $derived(selected?.tag ?? null);
+
+	/**
+	 * Whether a tag group shows its operations.
+	 *
+	 * A search opens every group that still has matches — filtering to
+	 * results nobody can see would be worse than not filtering. Otherwise
+	 * an explicit toggle wins, and with none, the group holding the current
+	 * operation is the one open.
+	 */
+	function groupOpen(tag: string): boolean {
+		if (searching) return true;
+		const explicit = openTags[tag];
+		if (explicit !== undefined) return explicit;
+		return tag === selectedTag;
+	}
+
+	function toggleTag(tag: string): void {
+		openTags = { ...openTags, [tag]: !groupOpen(tag) };
+	}
+
+	/** Stable DOM id for a tag, so the toggle can own aria-controls. */
+	function tagId(tag: string): string {
+		return 'api-tag-' + tag.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+	}
+
 	onMount(async () => {
 		try {
 			doc = await getOpenAPI();
@@ -72,8 +116,19 @@
 				{language.current && t('apiDocs.download')}
 			</button>
 			{#each groups as g (g.tag)}
-				<p class="tag">{g.tag}</p>
-				<ul>
+				<button
+					type="button"
+					class="tag"
+					aria-expanded={groupOpen(g.tag)}
+					aria-controls={tagId(g.tag)}
+					onclick={() => toggleTag(g.tag)}
+					data-testid="api-tag-toggle"
+				>
+					<span class="caret" class:open={groupOpen(g.tag)} aria-hidden="true">▸</span>
+					<span class="tag-name">{g.tag}</span>
+					<span class="tag-count">{g.ops.length}</span>
+				</button>
+				<ul id={tagId(g.tag)} hidden={!groupOpen(g.tag)}>
 					{#each g.ops as o (o.key)}
 						<li>
 							<button
@@ -137,12 +192,54 @@
 		padding: 0;
 	}
 	.tag {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		width: 100%;
 		margin: 8px 0 2px 0;
+		padding: 3px 6px;
+		border: none;
+		border-radius: 4px;
+		background: none;
+		text-align: left;
+		cursor: pointer;
 		font-size: 11px;
 		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.06em;
 		color: var(--text-muted);
+	}
+	.tag:hover {
+		background: var(--bg-hover);
+		color: var(--text-secondary);
+	}
+	.tag:focus-visible {
+		outline: 2px solid var(--accent-cyan);
+		outline-offset: -2px;
+	}
+	.caret {
+		flex: none;
+		font-size: 9px;
+		transition: transform 0.15s ease;
+	}
+	.caret.open {
+		transform: rotate(90deg);
+	}
+	.tag-name {
+		flex: 1;
+		min-width: 0;
+	}
+	.tag-count {
+		flex: none;
+		font-variant-numeric: tabular-nums;
+		font-weight: 500;
+		letter-spacing: 0;
+		color: var(--text-muted);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.caret {
+			transition: none;
+		}
 	}
 	.op-link {
 		display: flex;
