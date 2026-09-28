@@ -65,6 +65,14 @@ beforeEach(() => {
 	clientMock.getOpenAPI.mockResolvedValue(DOC);
 });
 
+// v2.55 — the tag groups fold, so an operation link is hidden until its
+// group is opened. getAllByTestId still finds hidden nodes, which is why
+// the tests below open the group first: clicking a node a real user cannot
+// see would pass while proving nothing.
+async function openGroup(index = 0): Promise<void> {
+	await fireEvent.click(screen.getAllByTestId('api-tag-toggle')[index]);
+}
+
 describe('openapi helpers', () => {
 	it('lists operations by tag with full paths', () => {
 		const ops = listOperations(DOC);
@@ -99,6 +107,7 @@ describe('/api-docs page', () => {
 		expect(screen.getAllByTestId('api-op-link')).toHaveLength(1);
 		await fireEvent.input(screen.getByTestId('api-search'), { target: { value: '' } });
 
+		await openGroup();
 		await fireEvent.click(screen.getAllByTestId('api-op-link')[1]);
 		const op = screen.getByTestId('api-op');
 		expect(op.textContent).toContain('/api/v1/routes');
@@ -111,6 +120,7 @@ describe('/api-docs page', () => {
 		clientMock.rawRequest.mockResolvedValue({ status: 201, body: '{"id":"r1"}', contentType: 'application/json' });
 		render(Page);
 		await waitFor(() => expect(screen.getAllByTestId('api-op-link')).toHaveLength(4));
+		await openGroup();
 		await fireEvent.click(screen.getAllByTestId('api-op-link')[1]);
 		await fireEvent.click(screen.getByTestId('api-try-open'));
 		expect((screen.getByTestId('api-body') as HTMLTextAreaElement).value).toContain('app.example.com');
@@ -125,10 +135,81 @@ describe('/api-docs page', () => {
 		expect(screen.getByTestId('api-result').textContent).toContain('201');
 	});
 
+	// v2.55 — the fold.
+	//
+	// The sidebar rendered all 15 tag groups expanded, so the real document
+	// put 159 operations in one column. The operator's report was that every
+	// request sat one behind the other and read as odd.
+	it('folds every group until one is asked for', async () => {
+		render(Page);
+		await waitFor(() => expect(screen.getAllByTestId('api-tag-toggle')).toHaveLength(2));
+
+		// In the document, but not something anyone can see or tab to.
+		for (const link of screen.getAllByTestId('api-op-link')) {
+			expect(link).not.toBeVisible();
+		}
+		for (const toggle of screen.getAllByTestId('api-tag-toggle')) {
+			expect(toggle.getAttribute('aria-expanded')).toBe('false');
+		}
+	});
+
+	it('opens and closes the group that was clicked, and only that one', async () => {
+		render(Page);
+		await waitFor(() => expect(screen.getAllByTestId('api-tag-toggle')).toHaveLength(2));
+		const [routes, system] = screen.getAllByTestId('api-tag-toggle');
+
+		await fireEvent.click(routes);
+		expect(routes.getAttribute('aria-expanded')).toBe('true');
+		expect(system.getAttribute('aria-expanded')).toBe('false');
+		// Routes owns the first three operations, System the fourth.
+		expect(screen.getAllByTestId('api-op-link')[0]).toBeVisible();
+		expect(screen.getAllByTestId('api-op-link')[3]).not.toBeVisible();
+
+		await fireEvent.click(routes);
+		expect(routes.getAttribute('aria-expanded')).toBe('false');
+		expect(screen.getAllByTestId('api-op-link')[0]).not.toBeVisible();
+	});
+
+	// Filtering to results nobody can see would be worse than not filtering.
+	it('shows the matches of a search without being asked', async () => {
+		render(Page);
+		await waitFor(() => expect(screen.getAllByTestId('api-tag-toggle')).toHaveLength(2));
+
+		await fireEvent.input(screen.getByTestId('api-search'), { target: { value: 'health' } });
+		const links = screen.getAllByTestId('api-op-link');
+		expect(links).toHaveLength(1);
+		expect(links[0], 'a search that hides its own results').toBeVisible();
+	});
+
+	// After a search is cleared, the operation on screen must still be
+	// reachable in the list — otherwise the sidebar disagrees with the panel.
+	it('keeps the selected operation visible once the search is cleared', async () => {
+		render(Page);
+		await waitFor(() => expect(screen.getAllByTestId('api-tag-toggle')).toHaveLength(2));
+
+		await fireEvent.input(screen.getByTestId('api-search'), { target: { value: 'health' } });
+		await fireEvent.click(screen.getAllByTestId('api-op-link')[0]);
+		await fireEvent.input(screen.getByTestId('api-search'), { target: { value: '' } });
+
+		const toggles = screen.getAllByTestId('api-tag-toggle');
+		expect(toggles[1].getAttribute('aria-expanded'), 'System holds the selection').toBe('true');
+		expect(toggles[0].getAttribute('aria-expanded')).toBe('false');
+		expect(screen.getAllByTestId('api-op-link')[3]).toBeVisible();
+	});
+
+	it('counts the operations in each group', async () => {
+		render(Page);
+		await waitFor(() => expect(screen.getAllByTestId('api-tag-toggle')).toHaveLength(2));
+		const [routes, system] = screen.getAllByTestId('api-tag-toggle');
+		expect(routes.textContent).toContain('3');
+		expect(system.textContent).toContain('1');
+	});
+
 	it('sends a GET directly once the path parameters are filled', async () => {
 		clientMock.rawRequest.mockResolvedValue({ status: 404, body: '{"error":"route not found"}', contentType: 'application/json' });
 		render(Page);
 		await waitFor(() => expect(screen.getAllByTestId('api-op-link')).toHaveLength(4));
+		await openGroup();
 		await fireEvent.click(screen.getAllByTestId('api-op-link')[2]);
 		await fireEvent.click(screen.getByTestId('api-try-open'));
 		expect((screen.getByTestId('api-send') as HTMLButtonElement).disabled).toBe(true);
