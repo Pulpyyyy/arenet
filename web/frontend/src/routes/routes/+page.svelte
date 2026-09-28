@@ -5490,9 +5490,25 @@
 		.split.split-open {
 			grid-template-columns: var(--split-open-cols, 1.3fr 1fr);
 		}
+		/* v2.55 — overflow-x, NOT the shorthand.
+
+		   The animation needs the collapsed track to clip HORIZONTALLY.
+		   The shorthand also clipped vertically, and Svelte's scoping
+		   makes this selector (0,2,0) — two classes — so it beat the
+		   edit panel's own `overflow-auto` utility at (0,1,0).
+
+		   The panel therefore had `max-height: calc(100vh - …)` with
+		   `overflow: hidden`: everything past the cap was cut off with
+		   no scrollbar. Opening a form section pushed the footer past
+		   the cap and Save became unreachable — collapsing the section
+		   brought it back, which is how the operator found it.
+
+		   Leaving overflow-y alone lets it resolve to auto (a box with
+		   one axis hidden and the other visible computes to auto), so
+		   the panel scrolls again while the track still clips sideways. */
 		.split > * {
 			min-width: 0;
-			overflow: hidden;
+			overflow-x: hidden;
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {
