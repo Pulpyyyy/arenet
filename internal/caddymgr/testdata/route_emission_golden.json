@@ -974,6 +974,11 @@
                           "health_checks": {
                             "active": {
                               "fails": 1,
+                              "headers": {
+                                "Host": [
+                                  "hc.example.com"
+                                ]
+                              },
                               "interval": "10s",
                               "method": "GET",
                               "passes": 1,

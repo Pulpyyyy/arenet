@@ -1306,6 +1306,8 @@ func mapPathRuleReqs(reqs []pathRuleReq, existing []storage.PathRule) ([]storage
 					ExpectBody:   hc.ExpectBody,
 					Passes:       hc.Passes,
 					Fails:        hc.Fails,
+					HostHeader:   hc.HostHeader,
+					Headers:      hc.Headers,
 				}
 			}
 			pr.InsecureSkipVerify = r.InsecureSkipVerify
@@ -1692,6 +1694,10 @@ type healthCheckReq struct {
 	ExpectBody   string `json:"expectBody"`
 	Passes       int    `json:"passes"`
 	Fails        int    `json:"fails"`
+	// HostHeader / Headers (v2.55) — see storage.HealthCheck. Empty
+	// HostHeader means the probe carries the route's own host.
+	HostHeader string            `json:"hostHeader,omitempty"`
+	Headers    map[string]string `json:"headers,omitempty"`
 }
 
 // healthCheckResp is the per-route active health check on the API
@@ -1699,15 +1705,17 @@ type healthCheckReq struct {
 // guarantees a HealthCheck field always exists on a stored Route)
 // and the camelCase tags mirror healthCheckReq.
 type healthCheckResp struct {
-	Enabled      bool   `json:"enabled"`
-	URI          string `json:"uri"`
-	Method       string `json:"method"`
-	Interval     string `json:"interval"`
-	Timeout      string `json:"timeout"`
-	ExpectStatus int    `json:"expectStatus"`
-	ExpectBody   string `json:"expectBody"`
-	Passes       int    `json:"passes"`
-	Fails        int    `json:"fails"`
+	Enabled      bool              `json:"enabled"`
+	URI          string            `json:"uri"`
+	Method       string            `json:"method"`
+	Interval     string            `json:"interval"`
+	Timeout      string            `json:"timeout"`
+	ExpectStatus int               `json:"expectStatus"`
+	ExpectBody   string            `json:"expectBody"`
+	Passes       int               `json:"passes"`
+	Fails        int               `json:"fails"`
+	HostHeader   string            `json:"hostHeader,omitempty"`
+	Headers      map[string]string `json:"headers,omitempty"`
 }
 
 // basicAuthResp is the Step K.1 wire shape for per-route Basic
@@ -1985,6 +1993,8 @@ func toResponse(r storage.Route) routeResponse {
 			ExpectBody:   r.HealthCheck.ExpectBody,
 			Passes:       r.HealthCheck.Passes,
 			Fails:        r.HealthCheck.Fails,
+			HostHeader:   r.HealthCheck.HostHeader,
+			Headers:      r.HealthCheck.Headers,
 		},
 		CountryBlock:          toCountryBlockResp(r.CountryBlock),
 		InsecureSkipVerify:    r.InsecureSkipVerify,
@@ -2073,6 +2083,8 @@ func toPathRulesResp(rules []storage.PathRule) []pathRuleReq {
 					ExpectBody:   pr.HealthCheck.ExpectBody,
 					Passes:       pr.HealthCheck.Passes,
 					Fails:        pr.HealthCheck.Fails,
+					HostHeader:   pr.HealthCheck.HostHeader,
+					Headers:      pr.HealthCheck.Headers,
 				}
 			}
 			out[i].InsecureSkipVerify = pr.InsecureSkipVerify

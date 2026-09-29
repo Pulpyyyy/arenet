@@ -298,6 +298,49 @@
 	);
 	let healthCheckTouched = $state(false);
 
+	// v2.55 — the probe's extra headers, edited as rows so the operator can
+	// add and remove them; collapsed back to an object on submit. Host is
+	// NOT one of these: it has its own field, and the server refuses it
+	// here so there is one place to look for it.
+	let healthCheckHeaderRows = $state<{ name: string; value: string }[]>([]);
+
+	/**
+	 * Whether an upstream probe's status deserves the green tick.
+	 *
+	 * The probe reaching the upstream and the upstream answering usefully
+	 * are two different facts. 2xx and 3xx mean the backend served the
+	 * request; 4xx and 5xx mean it refused it, and showing that with a
+	 * tick read as "all good" for a 404.
+	 */
+	function probeStatusOk(status: number | undefined): boolean {
+		return status !== undefined && status >= 200 && status < 400;
+	}
+
+	function headerRowsFrom(headers: Record<string, string> | undefined) {
+		if (!headers) return [];
+		return Object.entries(headers).map(([name, value]) => ({ name, value }));
+	}
+
+	/** Collapses the rows, dropping any with an empty name. */
+	function headersFromRows(rows: { name: string; value: string }[]): Record<string, string> {
+		const out: Record<string, string> = {};
+		for (const row of rows) {
+			const name = row.name.trim();
+			if (name !== '') out[name] = row.value;
+		}
+		return out;
+	}
+
+	function addHealthCheckHeader() {
+		healthCheckHeaderRows = [...healthCheckHeaderRows, { name: '', value: '' }];
+		markHealthCheckTouched();
+	}
+
+	function removeHealthCheckHeader(index: number) {
+		healthCheckHeaderRows = healthCheckHeaderRows.filter((_, i) => i !== index);
+		markHealthCheckTouched();
+	}
+
 	function emptyFormData(): FormData {
 		return {
 			host: '',
@@ -428,7 +471,9 @@
 				expectStatus: 0,
 				expectBody: '',
 				passes: 0,
-				fails: 0
+				fails: 0,
+				hostHeader: '',
+				headers: {}
 			}
 		};
 	}
@@ -522,7 +567,14 @@
 				// signal. Storage-layer alignment with the
 				// route's saved posture.
 				insecureSkipVerify:
-					poolScheme === 'https' ? formData.insecureSkipVerify : false
+					poolScheme === 'https' ? formData.insecureSkipVerify : false,
+				// v2.55 — probe with the Host a visitor sends, not the
+				// upstream's address. Behind a backend that routes on Host
+				// the old probe got a 404 for a service that serves this
+				// route perfectly. Same resolution as the health check:
+				// the check's override if set, otherwise the route's host.
+				hostHeader:
+					formData.healthCheck.hostHeader?.trim() || formData.host?.trim() || undefined
 			});
 			upstreamTests = {
 				...upstreamTests,
@@ -1261,6 +1313,7 @@
 		formData = emptyFormData();
 		basicAuthPasswordSet = false;
 		healthCheckTouched = false;
+		healthCheckHeaderRows = [];
 		requestHeaderRows = [];
 		responseHeaderRows = [];
 		// Step X Option (c) — clear the exclude-rules textarea
@@ -1541,9 +1594,12 @@
 				expectStatus: r.healthCheck.expectStatus,
 				expectBody: r.healthCheck.expectBody,
 				passes: r.healthCheck.passes,
-				fails: r.healthCheck.fails
+				fails: r.healthCheck.fails,
+				hostHeader: r.healthCheck.hostHeader ?? '',
+				headers: r.healthCheck.headers ?? {}
 			}
 		};
+		healthCheckHeaderRows = headerRowsFrom(r.healthCheck.headers);
 		basicAuthPasswordSet = r.basicAuth?.passwordSet ?? false;
 		// Step X Option (c) — seed the textarea string view from
 		// the loaded canonical list so the operator sees what's
@@ -2493,8 +2549,21 @@
 			) {
 				next['healthCheck.timeout'] = 'Timeout must be less than interval';
 			}
-			if (hc.expectStatus !== 0 && (hc.expectStatus < 100 || hc.expectStatus > 599)) {
-				next['healthCheck.expectStatus'] = 'Expected status must be 0 or in 100..599';
+			// v2.55 — 1-5 is Caddy's status-class shorthand (3 = any 3xx), so
+			// an app that answers 302 on / is not pinned to one code it may
+			// stop using. Mirrors storage.ValidateExpectStatus.
+			if (
+				hc.expectStatus !== 0 &&
+				!(hc.expectStatus >= 1 && hc.expectStatus <= 5) &&
+				(hc.expectStatus < 100 || hc.expectStatus > 599)
+			) {
+				next['healthCheck.expectStatus'] = t('routes.form.healthCheckExpectStatusError');
+			}
+			const badHeader = healthCheckHeaderRows.find(
+				(row) => row.name.trim() !== '' && row.name.trim().toLowerCase() === 'host'
+			);
+			if (badHeader) {
+				next['healthCheck.headers'] = t('routes.form.healthCheckHeaderHostError');
 			}
 			if (hc.expectBody !== '') {
 				try {
@@ -2878,7 +2947,12 @@
 					expectStatus: formData.healthCheck.expectStatus,
 					expectBody: formData.healthCheck.expectBody,
 					passes: formData.healthCheck.passes,
-					fails: formData.healthCheck.fails
+					fails: formData.healthCheck.fails,
+					hostHeader: formData.healthCheck.hostHeader?.trim() || undefined,
+					headers: (() => {
+						const h = headersFromRows(healthCheckHeaderRows);
+						return Object.keys(h).length > 0 ? h : undefined;
+					})()
 				};
 			}
 			// v2.19.0 external-certs SOCLE — cert source is always
@@ -3929,8 +4003,13 @@
 													<span class="text-down">✗ {ts.error}</span>
 												{:else if ts.result}
 													{#if ts.result.reachable}
-														<span class="text-up">
-															✓ HTTP {ts.result.statusCode} ({ts.result.latencyMs}ms)
+														<!-- v2.55 — reachable is a network fact, not a verdict on
+														     the answer. A 404 used to show a green tick, which read
+														     as "all good" for a backend that had just refused the
+														     request. The status class decides the mark now. -->
+														<span class={probeStatusOk(ts.result.statusCode) ? 'text-up' : 'text-warn'}>
+															{probeStatusOk(ts.result.statusCode) ? '✓' : '⚠'} HTTP {ts.result.statusCode}
+															({ts.result.latencyMs}ms)
 														</span>
 														{#if ts.result.serverHeader}
 															<span class="text-muted font-mono">
@@ -5147,6 +5226,80 @@
 									{#if errors['healthCheck.expectStatus']}
 										<p class="text-xs text-down">{errors['healthCheck.expectStatus']}</p>
 									{/if}
+									<p class="text-xs text-secondary">
+										{language.current && t('routes.form.healthCheckExpectStatusHint')}
+									</p>
+								</div>
+								<!-- v2.55 — the probe's Host.
+								     Caddy builds the probe from the upstream's dial
+								     address, so it used to ask for `Host: 10.0.0.2:80`.
+								     A backend that routes on Host answered 404 and every
+								     upstream went down while serving its route fine. -->
+								<div class="flex flex-col gap-1.5">
+									<label for="hc-host-header" class="text-sm font-medium text-secondary">
+										{language.current && t('routes.form.healthCheckHostHeaderLabel')}
+									</label>
+									<input
+										id="hc-host-header"
+										type="text"
+										bind:value={formData.healthCheck.hostHeader}
+										placeholder={formData.host || 'app.example.com'}
+										disabled={!formData.healthCheck.enabled}
+										oninput={markHealthCheckTouched}
+										data-testid="hc-host-header"
+										class="bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary disabled:opacity-50 disabled:cursor-not-allowed"
+									/>
+									<p class="text-xs text-secondary">
+										{language.current && t('routes.form.healthCheckHostHeaderHint')}
+									</p>
+								</div>
+								<div class="flex flex-col gap-1.5">
+									<span class="text-sm font-medium text-secondary">
+										{language.current && t('routes.form.healthCheckHeadersLabel')}
+									</span>
+									{#each healthCheckHeaderRows as row, i (i)}
+										<div class="flex gap-2 items-start">
+											<input
+												type="text"
+												bind:value={row.name}
+												placeholder="Authorization"
+												disabled={!formData.healthCheck.enabled}
+												oninput={markHealthCheckTouched}
+												aria-label={language.current && t('routes.form.healthCheckHeaderNameLabel')}
+												data-testid="hc-header-name"
+												class="flex-1 min-w-0 bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono disabled:opacity-50"
+											/>
+											<input
+												type="text"
+												bind:value={row.value}
+												placeholder="Bearer …"
+												disabled={!formData.healthCheck.enabled}
+												oninput={markHealthCheckTouched}
+												aria-label={language.current && t('routes.form.healthCheckHeaderValueLabel')}
+												data-testid="hc-header-value"
+												class="flex-1 min-w-0 bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono disabled:opacity-50"
+											/>
+											<Button
+												variant="ghost"
+												size="sm"
+												onclick={() => removeHealthCheckHeader(i)}
+												disabled={!formData.healthCheck.enabled}
+											>
+												{#snippet children()}{language.current && t('routes.form.healthCheckHeaderRemove')}{/snippet}
+											</Button>
+										</div>
+									{/each}
+									{#if errors['healthCheck.headers']}
+										<p class="text-xs text-down">{errors['healthCheck.headers']}</p>
+									{/if}
+									<Button
+										variant="secondary"
+										size="sm"
+										onclick={addHealthCheckHeader}
+										disabled={!formData.healthCheck.enabled}
+									>
+										{#snippet children()}{language.current && t('routes.form.healthCheckHeaderAdd')}{/snippet}
+									</Button>
 								</div>
 								<Input
 									label={language.current && t('routes.form.healthCheckExpectBodyLabel')}

@@ -154,12 +154,24 @@ Active health checks monitor each upstream and remove unhealthy ones from the po
 4. **Method** : default `GET`
 5. **Interval** : default `30s`
 6. **Timeout** : default `5s` (must be `<` interval)
-7. **Expected status** : default `0` = "any 2xx is OK", or pin to e.g. `200`
+7. **Expected status** : default `0` = "any 2xx is OK". Since **v2.55** you may also give a **class**, `1` to `5` — `3` accepts every 3xx, which is what an app that redirects to a login page needs. Any other value is a single code, e.g. `200`.
 8. **Expected body** (regex) : optional, e.g. `^\\{"status":"ok"\\}` for JSON healthz
 9. **Passes** : consecutive checks needed to mark healthy (default `1`)
 10. **Fails** : consecutive checks needed to mark unhealthy (default `1`)
+11. **Probe Host** (optional, v2.55) : the `Host` the probe sends. Empty means the route's own host.
+12. **Probe headers** (optional, v2.55) : extra headers, e.g. an `Authorization` the health endpoint requires. `Host` is not accepted here — it has its own field.
 
 Unhealthy upstreams are skipped by the load balancer ; the `/topology` dashboard shows them in dimmed state.
+
+### The Host the probe sends (changed in v2.55)
+
+Caddy builds the health-check request from the upstream's **dial address**, so before v2.55 the probe asked for `Host: 10.0.0.2:80`. A backend that dispatches on `Host` — a second reverse proxy, a vhost, a container router — has no such virtual host, answers **404**, and every upstream is marked down while serving its route perfectly.
+
+From v2.55 the probe carries the **route's own host** by default, so it looks to the backend like the traffic it stands in for. Set **Probe Host** when the backend expects a different name.
+
+> **This changes behaviour for health checks configured before v2.55.** Their probe now sends the route host instead of the dial address. A backend that was answering the old probe on its IP and does *not* serve the route's hostname would start failing — set **Probe Host** to the name it does serve.
+
+The **Test** button beside each upstream uses the same Host, so what it reports is what the health check will see. It marks a 2xx or 3xx answer with `✓` and a 4xx or 5xx with `⚠` : the probe reaching the upstream and the upstream answering usefully are two different facts.
 
 ---
 

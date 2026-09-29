@@ -116,6 +116,14 @@ const (
 type testUpstreamRequest struct {
 	URL                string `json:"url"`
 	InsecureSkipVerify bool   `json:"insecureSkipVerify,omitempty"`
+	// HostHeader (v2.55) is the Host the probe should send — the route's
+	// own host, or whatever the health check overrides it with.
+	//
+	// Without it the probe carried the upstream's address, so a backend
+	// that routes on Host answered 404 and the UI reported "HTTP 404"
+	// for a service that serves the route perfectly. The probe now asks
+	// the question a visitor asks.
+	HostHeader string `json:"hostHeader,omitempty"`
 }
 
 // testUpstreamCertInfo summarises the leaf TLS cert the
@@ -217,7 +225,7 @@ func (h *Handler) testUpstream(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), testUpstreamDeadline)
 	defer cancel()
 
-	resp := probeUpstream(ctx, parsed, req.InsecureSkipVerify)
+	resp := probeUpstream(ctx, parsed, req.InsecureSkipVerify, req.HostHeader)
 
 	h.logger.Info("test-upstream probed",
 		"url", parsed.Redacted(),
@@ -232,7 +240,7 @@ func (h *Handler) testUpstream(w http.ResponseWriter, r *http.Request) {
 // probeUpstream performs the actual outbound probe. Split
 // from the HTTP handler so tests can drive it directly
 // without a router.
-func probeUpstream(ctx context.Context, target *url.URL, insecureSkipVerify bool) testUpstreamResponse {
+func probeUpstream(ctx context.Context, target *url.URL, insecureSkipVerify bool, hostHeader string) testUpstreamResponse {
 	resp := testUpstreamResponse{}
 
 	// TLS handshake timing — captured via the
@@ -290,6 +298,11 @@ func probeUpstream(ctx context.Context, target *url.URL, insecureSkipVerify bool
 	// (otherwise stdlib defaults to "Go-http-client/1.1"
 	// which looks like generic traffic).
 	httpReq.Header.Set("User-Agent", "Arenet-Upstream-Probe/1.0")
+	// req.Host, not a "Host" header: net/http ignores the header and
+	// sends URL.Host unless this field is set.
+	if host := strings.TrimSpace(hostHeader); host != "" {
+		httpReq.Host = host
+	}
 
 	start := time.Now()
 	httpResp, err := client.Do(httpReq)

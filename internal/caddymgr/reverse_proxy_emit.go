@@ -37,12 +37,44 @@ type proxyPoolParams struct {
 	// HealthCheck, when non-nil AND Enabled, emits health_checks.active.
 	// nil (or a disabled check) omits the whole health_checks key.
 	HealthCheck *storage.HealthCheck
+	// ProbeHost is the route's primary host, used as the probe's Host
+	// header unless the check overrides it (v2.55).
+	//
+	// Caddy builds the probe URL from the DIAL address, so without this
+	// the request carries `Host: 10.0.0.2:80`. Any backend that routes
+	// on Host — a second reverse proxy, a vhost, a container router —
+	// answers 404 and every upstream is marked down while being
+	// perfectly healthy.
+	ProbeHost string
 	// UsesHTTPS drives the transport.tls emission (Caddy speaks TLS to
 	// the upstream). Mirrors Route.PoolUsesHTTPS().
 	UsesHTTPS bool
 	// InsecureSkipVerify sets transport.tls.insecure_skip_verify. Only
 	// consulted when UsesHTTPS is true.
 	InsecureSkipVerify bool
+}
+
+// probeHeaders builds health_checks.active.headers.
+//
+// The Host comes first in intent though not in the map: the operator's
+// override if there is one, otherwise the route's own host, so the probe
+// carries what the real traffic carries. An empty host (no route host
+// and no override) emits nothing for it, leaving Caddy's dial-address
+// behaviour exactly as it was.
+func probeHeaders(hc *storage.HealthCheck, routeHost string) map[string][]string {
+	out := make(map[string][]string, len(hc.Headers)+1)
+	if host := hc.ProbeHost(routeHost); host != "" {
+		out["Host"] = []string{host}
+	}
+	for name, value := range hc.Headers {
+		// Host is refused by storage validation, so it cannot land here
+		// and quietly outrank the field that owns it.
+		out[name] = []string{value}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // errorBrandingStatusCodes is the shared status-code list consumed by
@@ -280,6 +312,16 @@ func buildReverseProxyHandler(p proxyPoolParams, sharedHandleResponse []map[stri
 		}
 		if hc.ExpectBody != "" {
 			active["expect_body"] = hc.ExpectBody
+		}
+		// v2.55 — the probe's headers, Host first.
+		//
+		// Caddy's own special case: a `Host` key in this map sets
+		// req.Host rather than adding a header
+		// (caddy healthchecks.go:452-455). Everything else is added
+		// verbatim. Emitted as lists because that is Caddy's http.Header
+		// shape; json.Marshal sorts the keys, so the output stays stable.
+		if headers := probeHeaders(hc, p.ProbeHost); len(headers) > 0 {
+			active["headers"] = headers
 		}
 		proxyHandler["health_checks"] = map[string]any{
 			"active": active,

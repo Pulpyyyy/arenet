@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/textproto"
 	"net/url"
 	"regexp"
 	"sort"
@@ -376,15 +377,46 @@ type Upstream struct {
 // is true — there is no sensible default health-check path that fits
 // every backend.
 type HealthCheck struct {
-	Enabled      bool   `json:"enabled"`
-	URI          string `json:"uri"`
-	Method       string `json:"method"`
-	Interval     string `json:"interval"`
-	Timeout      string `json:"timeout"`
+	Enabled  bool   `json:"enabled"`
+	URI      string `json:"uri"`
+	Method   string `json:"method"`
+	Interval string `json:"interval"`
+	Timeout  string `json:"timeout"`
+	// ExpectStatus is the status the probe accepts. Zero means "any
+	// 2xx". A value of 1-5 is Caddy's class shorthand — 3 accepts every
+	// 3xx (caddyhttp.StatusCodeMatches, caddyhttp.go:230-240), which is
+	// what an app that answers 302 on / needs.
 	ExpectStatus int    `json:"expect_status"`
 	ExpectBody   string `json:"expect_body"`
 	Passes       int    `json:"passes"`
 	Fails        int    `json:"fails"`
+	// HostHeader overrides the Host the probe sends (v2.55). Empty means
+	// the route's own host, which is what the real traffic carries.
+	//
+	// Caddy builds the probe from the DIAL address, so before v2.55 it
+	// sent `Host: 10.0.0.2:80` — and a reverse proxy behind Arenet that
+	// routes on Host answered 404 and every upstream was marked down
+	// (caddy healthchecks.go:393-396; the header is only overridden when
+	// one is configured, :452-455).
+	HostHeader string `json:"host_header,omitempty"`
+	// Headers are extra probe headers, e.g. an Authorization a health
+	// endpoint requires. Host is NOT accepted here — it has its own
+	// field, so there is one place to look for it.
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// ProbeHost returns the Host the active health check should send for a
+// route whose primary host is routeHost.
+//
+// The operator's override wins; otherwise the probe carries the route's
+// own host, so it looks to the backend like the traffic it is standing
+// in for. An empty result means "send nothing", which leaves Caddy's
+// dial-address behaviour untouched.
+func (h HealthCheck) ProbeHost(routeHost string) string {
+	if h.HostHeader != "" {
+		return h.HostHeader
+	}
+	return routeHost
 }
 
 // MaintenanceConfig, when non-nil (and Disabled=false), puts the route
@@ -1340,19 +1372,72 @@ func (h *HealthCheck) validate() error {
 	if timeout >= interval {
 		return errors.New("route: health_check.timeout must be strictly less than interval")
 	}
-	if h.ExpectStatus != 0 && (h.ExpectStatus < 100 || h.ExpectStatus > 599) {
-		return fmt.Errorf("route: health_check.expect_status %d must be 0 or in 100..599", h.ExpectStatus)
+	if err := ValidateExpectStatus("health_check.expect_status", h.ExpectStatus); err != nil {
+		return fmt.Errorf("route: %w", err)
 	}
 	if h.ExpectBody != "" {
 		if _, err := regexp.Compile(h.ExpectBody); err != nil {
 			return fmt.Errorf("route: health_check.expect_body is not a valid regex: %v", err)
 		}
 	}
+	if err := validateProbeHeaders(h.Headers); err != nil {
+		return fmt.Errorf("route: health_check.%w", err)
+	}
 	if h.Passes < 1 {
 		return errors.New("route: health_check.passes must be >= 1")
 	}
 	if h.Fails < 1 {
 		return errors.New("route: health_check.fails must be >= 1")
+	}
+	return nil
+}
+
+// expectStatusClassMax is the largest of Caddy's status-class
+// shorthands: 1 means "any 1xx" through 5 meaning "any 5xx"
+// (caddyhttp.StatusCodeMatches, caddyhttp.go:234-238).
+const expectStatusClassMax = 5
+
+// ValidateExpectStatus accepts 0 (any 2xx), a status class 1-5, or a
+// full status code.
+//
+// v2.55 — the class shorthand used to be refused, so an app that
+// answers 302 on / had to be pinned to that exact code and silently
+// went unhealthy the day it answered 301 instead.
+// field is the caller's own name for the setting, because the two layers
+// spell it differently — expect_status in storage, expectStatus on the
+// wire — and an error should name the field the reader typed.
+func ValidateExpectStatus(field string, code int) error {
+	if code == 0 {
+		return nil
+	}
+	if code >= 1 && code <= expectStatusClassMax {
+		return nil
+	}
+	if code >= 100 && code <= 599 {
+		return nil
+	}
+	return fmt.Errorf("%s %d must be 0 (any 2xx), a class 1-%d, or a status in 100..599",
+		field, code, expectStatusClassMax)
+}
+
+// validateProbeHeaders checks the free-form probe headers.
+//
+// Host is refused on purpose: it has its own field, and accepting it in
+// both places would mean two sources of truth for the one header that
+// decides whether the probe reaches the right virtual host at all.
+func validateProbeHeaders(headers map[string]string) error {
+	for name := range headers {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			return errors.New("headers: a header name must not be empty")
+		}
+		if strings.EqualFold(trimmed, "Host") {
+			return errors.New("headers: set the Host through host_header, not as a free-form header")
+		}
+		if textproto.CanonicalMIMEHeaderKey(trimmed) != trimmed {
+			return fmt.Errorf("headers: %q is not a canonical header name (try %q)",
+				name, textproto.CanonicalMIMEHeaderKey(trimmed))
+		}
 	}
 	return nil
 }

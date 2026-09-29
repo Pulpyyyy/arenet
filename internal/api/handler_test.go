@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -1744,7 +1745,9 @@ func TestUpdateRoute_HealthCheckAbsentPreservesPrevious(t *testing.T) {
 		Passes:   3,
 		Fails:    5,
 	}
-	if got.HealthCheck != want {
+	// reflect.DeepEqual since v2.55: HealthCheck carries a Headers map,
+	// so the struct is no longer comparable with ==.
+	if !reflect.DeepEqual(got.HealthCheck, want) {
 		t.Errorf("HealthCheck silently mutated by PUT without HC block:\ngot:  %+v\nwant: %+v",
 			got.HealthCheck, want)
 	}

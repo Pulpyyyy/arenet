@@ -282,8 +282,14 @@ func validateHealthCheck(h healthCheckReq) error {
 	if timeout >= interval {
 		return errors.New("healthCheck.timeout must be strictly less than interval")
 	}
-	if h.ExpectStatus != 0 && (h.ExpectStatus < 100 || h.ExpectStatus > 599) {
-		return fmt.Errorf("healthCheck.expectStatus %d must be 0 or in 100..599", h.ExpectStatus)
+	// v2.55 — 1-5 is Caddy's status-class shorthand, so an app that
+	// answers 302 on / can be matched as "any 3xx" instead of being
+	// pinned to one code it may stop using.
+	if err := storage.ValidateExpectStatus("healthCheck.expectStatus", h.ExpectStatus); err != nil {
+		return err
+	}
+	if h.HostHeader != "" && strings.TrimSpace(h.HostHeader) == "" {
+		return errors.New("healthCheck.hostHeader must not be blank")
 	}
 	if h.ExpectBody != "" {
 		if _, err := regexp.Compile(h.ExpectBody); err != nil {
