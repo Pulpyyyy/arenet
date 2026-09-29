@@ -1430,6 +1430,8 @@ func (h *Handler) createRoute(w http.ResponseWriter, r *http.Request) {
 			ExpectBody:   req.HealthCheck.ExpectBody,
 			Passes:       req.HealthCheck.Passes,
 			Fails:        req.HealthCheck.Fails,
+			HostHeader:   req.HealthCheck.HostHeader,
+			Headers:      req.HealthCheck.Headers,
 		}
 	}
 	// Step #R-PROXMOX-HTTPS-LOOP commit 1b — InsecureSkipVerify
@@ -2003,6 +2005,8 @@ func (h *Handler) updateRoute(w http.ResponseWriter, r *http.Request) {
 			ExpectBody:   req.HealthCheck.ExpectBody,
 			Passes:       req.HealthCheck.Passes,
 			Fails:        req.HealthCheck.Fails,
+			HostHeader:   req.HealthCheck.HostHeader,
+			Headers:      req.HealthCheck.Headers,
 		}
 	}
 	// Step #R-PROXMOX-HTTPS-LOOP commit 1b — InsecureSkipVerify

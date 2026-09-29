@@ -670,7 +670,7 @@ describe('Routes page — validation rules (§5.2)', () => {
 		).toBeInTheDocument();
 	});
 
-	it('rejects HC expectStatus outside 100..599', async () => {
+	it('rejects HC expectStatus that is neither a class nor a code', async () => {
 		render(Page);
 		await openCreateForm();
 		await userEvent.type(hostInput(), 'h.test');
@@ -683,8 +683,29 @@ describe('Routes page — validation rules (§5.2)', () => {
 		await userEvent.type(expectStatusInput, '700');
 		await submitForm();
 		expect(
-			screen.getByText('Expected status must be 0 or in 100..599')
+			screen.getByText(/Expected status must be 0, a class from 1 to 5/)
 		).toBeInTheDocument();
+	});
+
+	// v2.55 — Caddy accepts a status CLASS (caddyhttp.StatusCodeMatches),
+	// and the form used to refuse it, so an app answering 302 on / had to
+	// be pinned to that one code and went unhealthy the day it sent 301.
+	it('accepts a status class in HC expectStatus', async () => {
+		render(Page);
+		await openCreateForm();
+		await userEvent.type(hostInput(), 'h.test');
+		await userEvent.type(upstreamURLInputs()[0], 'http://127.0.0.1:9000');
+		await userEvent.click(screen.getByLabelText('Enable active health checks'));
+		await tick();
+		await userEvent.type(document.getElementById('hc-uri') as HTMLInputElement, '/p');
+		const expectStatusInput = document.getElementById('hc-expect-status') as HTMLInputElement;
+		await userEvent.clear(expectStatusInput);
+		await userEvent.type(expectStatusInput, '3');
+		await submitForm();
+		expect(
+			screen.queryByText(/Expected status must be/),
+			'3 means "any 3xx" to Caddy and must not be refused'
+		).toBeNull();
 	});
 
 	it('rejects HC expectBody that is not a valid regex', async () => {
@@ -2009,6 +2030,74 @@ describe('Routes page — Test upstream button + chip (#R-PROXMOX-HTTPS-LOOP com
 		await userEvent.type(firstURL(), 'http://10.0.0.10:8080');
 		await tick();
 		expect(btn0.disabled).toBe(false);
+	});
+
+	// v2.55 — reported from a setup where every route proxies to one
+	// backend that dispatches on Host. The probe carried the upstream's
+	// address, so the backend had no such virtual host and answered 404 —
+	// "✓ HTTP 404" for a service serving that route perfectly.
+	it('probes with the route host, not the upstream address', async () => {
+		apiMock.testUpstream.mockResolvedValue({ reachable: true, statusCode: 200, latencyMs: 5 });
+		render(Page);
+		await openCreateForm();
+		await userEvent.type(hostInput(), 'vault.example.com');
+		await userEvent.type(firstURL(), 'http://10.66.0.2:80');
+		await tick();
+		await userEvent.click(screen.getByTestId('test-upstream-0'));
+		await tick();
+
+		const args = apiMock.testUpstream.mock.calls[0][0] as { hostHeader?: string };
+		expect(args.hostHeader, 'the probe must ask the question a visitor asks').toBe(
+			'vault.example.com'
+		);
+	});
+
+	it('probes with the health check Host override when one is set', async () => {
+		apiMock.testUpstream.mockResolvedValue({ reachable: true, statusCode: 200, latencyMs: 5 });
+		render(Page);
+		await openCreateForm();
+		await userEvent.type(hostInput(), 'vault.example.com');
+		await userEvent.type(firstURL(), 'http://10.66.0.2:80');
+		await userEvent.click(screen.getByLabelText('Enable active health checks'));
+		await tick();
+		await userEvent.type(screen.getByTestId('hc-host-header'), 'internal.example.com');
+		await tick();
+		await userEvent.click(screen.getByTestId('test-upstream-0'));
+		await tick();
+
+		const args = apiMock.testUpstream.mock.calls[0][0] as { hostHeader?: string };
+		expect(args.hostHeader, 'the test must agree with what the health check probes').toBe(
+			'internal.example.com'
+		);
+	});
+
+	// Reaching the upstream and the upstream answering usefully are two
+	// different facts. A tick on a 404 said "all good" about a refusal.
+	it('does not tick a 4xx answer', async () => {
+		apiMock.testUpstream.mockResolvedValue({ reachable: true, statusCode: 404, latencyMs: 7 });
+		render(Page);
+		await openCreateForm();
+		await userEvent.type(firstURL(), 'http://10.66.0.2:80');
+		await tick();
+		await userEvent.click(screen.getByTestId('test-upstream-0'));
+		await tick();
+
+		const chip = screen.getByTestId('upstream-test-chip-0');
+		expect(chip.textContent).toMatch(/HTTP 404/);
+		expect(chip.textContent, 'a 404 marked with a tick reads as "all good"').not.toContain('✓');
+		expect(chip.textContent).toContain('⚠');
+	});
+
+	it('still ticks a 3xx, which is a served answer', async () => {
+		apiMock.testUpstream.mockResolvedValue({ reachable: true, statusCode: 302, latencyMs: 7 });
+		render(Page);
+		await openCreateForm();
+		await userEvent.type(firstURL(), 'http://10.66.0.2:80');
+		await tick();
+		await userEvent.click(screen.getByTestId('test-upstream-0'));
+		await tick();
+
+		expect(screen.getByTestId('upstream-test-chip-0').textContent).toContain('✓');
 	});
 
 	it('sends the URL to the API and renders the reachable chip on success', async () => {

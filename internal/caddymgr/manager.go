@@ -1500,6 +1500,7 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 			Upstreams:          r.Upstreams,
 			LBPolicy:           r.LBPolicy,
 			HealthCheck:        hcPtr,
+			ProbeHost:          r.Host,
 			UsesHTTPS:          r.PoolUsesHTTPS(),
 			InsecureSkipVerify: r.InsecureSkipVerify,
 		}, sharedHandleResponse, r.UploadStreamingMode)
@@ -1861,6 +1862,7 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 					Upstreams:          pr.Upstreams,
 					LBPolicy:           pr.LBPolicy,
 					HealthCheck:        pr.HealthCheck, // already a pointer
+					ProbeHost:          r.Host,
 					UsesHTTPS:          poolUsesHTTPS(pr.Upstreams),
 					InsecureSkipVerify: pr.InsecureSkipVerify,
 				}, sharedHandleResponse, r.UploadStreamingMode)

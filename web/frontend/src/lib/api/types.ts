@@ -48,10 +48,27 @@ export interface HealthCheck {
 	method: 'GET' | 'HEAD' | '';
 	interval: string;
 	timeout: string;
+	/**
+	 * 0 accepts any 2xx. 1-5 is Caddy's status-class shorthand, so 3
+	 * accepts every 3xx — what an app that redirects to a login page
+	 * needs. Anything else is a literal status in 100..599.
+	 */
 	expectStatus: number;
 	expectBody: string;
 	passes: number;
 	fails: number;
+	/**
+	 * v2.55 — the Host the probe sends. Empty means the route's own
+	 * host, which is what the real traffic carries.
+	 *
+	 * Caddy builds the probe from the upstream's dial address, so
+	 * before v2.55 it asked `Host: 10.0.0.2:80`. A backend that routes
+	 * on Host answered 404 and every upstream went down while serving
+	 * its route perfectly.
+	 */
+	hostHeader?: string;
+	/** Extra probe headers, e.g. an Authorization the endpoint wants. */
+	headers?: Record<string, string>;
 }
 
 /** v2.35 — post-apply probe of a create / update / enable. */
@@ -891,6 +908,12 @@ export interface RouteRateLimit {
 export interface TestUpstreamRequest {
 	url: string;
 	insecureSkipVerify?: boolean;
+	/**
+	 * v2.55 — the Host to probe with, so the test asks the question a
+	 * visitor asks. Without it the probe carried the upstream address
+	 * and a Host-routing backend answered 404 for a healthy service.
+	 */
+	hostHeader?: string;
 }
 
 /**

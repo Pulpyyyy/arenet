@@ -156,12 +156,24 @@ Les health checks actifs surveillent chaque upstream et retirent les mauvais du 
 4. **Method** : défaut `GET`
 5. **Interval** : défaut `30s`
 6. **Timeout** : défaut `5s` (doit être `<` interval)
-7. **Expected status** : défaut `0` = "n'importe quel 2xx est OK", ou pin sur ex. `200`
+7. **Expected status** : défaut `0` = « n'importe quel 2xx convient ». Depuis la **v2.55**, vous pouvez aussi donner une **classe**, de `1` à `5` — `3` accepte tous les 3xx, ce qu'il faut pour une application qui redirige vers une page de connexion. Toute autre valeur est un code unique, par exemple `200`.
 8. **Expected body** (regex) : optionnel, ex. `^\\{"status":"ok"\\}` pour un healthz JSON
 9. **Passes** : checks consécutifs requis pour marquer healthy (défaut `1`)
 10. **Fails** : checks consécutifs requis pour marquer unhealthy (défaut `1`)
+11. **Host de la sonde** (facultatif, v2.55) : le `Host` qu'envoie la sonde. Vide, elle utilise l'hôte de la route.
+12. **En-têtes de la sonde** (facultatif, v2.55) : des en-têtes supplémentaires, par exemple l'`Authorization` qu'exige un point de santé. Le `Host` n'est pas accepté ici — il a son propre champ.
 
 Les upstreams unhealthy sont skippés par le load balancer ; le dashboard `/topology` les montre en état dimmed.
+
+### Le Host que la sonde envoie (changement en v2.55)
+
+Caddy construit la requête de health check à partir de l'**adresse de dial** de l'upstream. Avant la v2.55, la sonde demandait donc `Host: 10.0.0.2:80`. Un backend qui aiguille sur le `Host` — un second reverse proxy, un vhost, un routeur de conteneurs — n'a aucun hôte virtuel à ce nom : il répond **404**, et tous les upstreams sont marqués down alors qu'ils servent parfaitement leur route.
+
+Depuis la v2.55, la sonde porte par défaut **l'hôte de la route**, pour ressembler au trafic qu'elle représente. Renseignez **Host de la sonde** si le backend attend un autre nom.
+
+> **Ceci change le comportement des health checks configurés avant la v2.55.** Leur sonde envoie désormais l'hôte de la route au lieu de l'adresse de dial. Un backend qui répondait à l'ancienne sonde sur son IP et qui ne sert **pas** le nom d'hôte de la route se mettrait à échouer — renseignez alors **Host de la sonde** avec le nom qu'il sert.
+
+Le bouton **Test** à côté de chaque upstream utilise le même Host : ce qu'il affiche est donc ce que verra le health check. Il marque une réponse 2xx ou 3xx d'un `✓` et une 4xx ou 5xx d'un `⚠` — joindre l'upstream et obtenir une réponse utile sont deux faits distincts.
 
 ---
 

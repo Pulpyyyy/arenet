@@ -1215,10 +1215,27 @@ components:
         method: { type: string, enum: [GET, HEAD, ''], description: Case-insensitive on input. }
         interval: { type: string, description: 'Go duration, e.g. "30s".' }
         timeout: { type: string, description: 'Go duration, e.g. "5s".' }
-        expectStatus: { type: integer, description: 0 (any 2xx) or 100..599. }
+        expectStatus:
+          type: integer
+          description: >-
+            0 accepts any 2xx. 1-5 is Caddy's status-class shorthand, so 3
+            accepts every 3xx. Anything else is a literal status in 100..599.
         expectBody: { type: string, description: Regular expression the body must match. }
         passes: { type: integer, minimum: 0 }
         fails: { type: integer, minimum: 0 }
+        hostHeader:
+          type: string
+          description: >-
+            Host the probe sends (v2.55). Empty means the route's own host,
+            which is what real traffic carries. Caddy builds the probe from the
+            upstream's dial address, so without this a backend that routes on
+            Host answers 404 and every upstream is marked down while healthy.
+        headers:
+          type: object
+          additionalProperties: { type: string }
+          description: >-
+            Extra probe headers, e.g. an Authorization a health endpoint
+            requires. Host is refused here — it has its own field.
     RoutesCountryBlockExceptions:
       type: object
       properties:
