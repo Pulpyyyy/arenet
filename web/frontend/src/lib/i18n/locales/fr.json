@@ -771,6 +771,7 @@
 			"rateLimitWindow": "Par (durée)",
 			"rateLimitKey": "Clé (facultatif)",
 			"rateLimitHint": "Comptée séparément de la limite de la route, qui continue de s'appliquer — une limite stricte ici ne ralentit pas le reste de la route. S'applique avant l'authentification de ce chemin. Au-delà : 429.",
+			"emptyRuleError": "La règle sur « {path} » ne contient rien : ajoutez une limite de débit, une authentification, un filtrage IP, un upstream ou une redirection — ou supprimez la règle.",
 			"upstreamLabel": "Upstream spécifique (optionnel)",
 			"upstreamInheritHint": "Par défaut, ce path suit l'upstream de la route.",
 			"upstreamUrlPlaceholder": "http://backend:8080",

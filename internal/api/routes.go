@@ -1570,6 +1570,12 @@ func (h *Handler) createRoute(w http.ResponseWriter, r *http.Request) {
 	// path-rule password hash against.
 	pathRules, pathRulesErr := mapPathRuleReqs(req.PathRules, nil)
 	if pathRulesErr != nil {
+		// Operator input gets a 400 carrying the reason; only a genuine
+		// server failure (a password that would not hash) is a 500.
+		if errors.Is(pathRulesErr, errPathRuleInvalid) {
+			writeError(w, http.StatusBadRequest, pathRulesErr.Error())
+			return
+		}
 		h.logger.Error("hash path-rule basic auth password", "err", pathRulesErr)
 		writeError(w, http.StatusInternalServerError, "failed to hash path-rule password")
 		return
@@ -2189,6 +2195,12 @@ func (h *Handler) updateRoute(w http.ResponseWriter, r *http.Request) {
 	// value omits a password — see mapPathRuleReqs doc-comment.
 	pathRules, pathRulesErr := mapPathRuleReqs(req.PathRules, previous.PathRules)
 	if pathRulesErr != nil {
+		// Operator input gets a 400 carrying the reason; only a genuine
+		// server failure (a password that would not hash) is a 500.
+		if errors.Is(pathRulesErr, errPathRuleInvalid) {
+			writeError(w, http.StatusBadRequest, pathRulesErr.Error())
+			return
+		}
 		h.logger.Error("hash path-rule basic auth password", "err", pathRulesErr)
 		writeError(w, http.StatusInternalServerError, "failed to hash path-rule password")
 		return

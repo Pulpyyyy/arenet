@@ -1242,6 +1242,17 @@ type pathRedirectReq struct {
 // on PUT, the previously stored hash for that exact PathPrefix is
 // kept rather than wiped — mirrors the route-level BasicAuth
 // empty-password-preserves-hash UX (Step I.5 / K.1). existing is
+// errPathRuleInvalid marks an error in mapPathRuleReqs that came from the
+// OPERATOR'S input rather than from the server.
+//
+// v2.56.3 — the function used to fail for one reason only, a password that
+// would not hash, so both call sites answered 500 "failed to hash
+// path-rule password". Adding a validation path made an unusable rate
+// limit answer the same: a server error, blaming a password, for a number
+// the operator typed. The two kinds have to be told apart at the call
+// site, or the UI cannot show what is wrong.
+var errPathRuleInvalid = errors.New("path rule is not valid")
+
 // the previous route's PathRules (nil on create).
 func mapPathRuleReqs(reqs []pathRuleReq, existing []storage.PathRule) ([]storage.PathRule, error) {
 	if len(reqs) == 0 {
@@ -1287,7 +1298,8 @@ func mapPathRuleReqs(reqs []pathRuleReq, existing []storage.PathRule) ([]storage
 		if r.RateLimit != nil {
 			rl, rlErr := materialiseRateLimit(r.RateLimit)
 			if rlErr != nil {
-				return nil, fmt.Errorf("path_rule %q: %w", r.PathPrefix, rlErr)
+				return nil, fmt.Errorf("%w: path rule %q: %s",
+					errPathRuleInvalid, r.PathPrefix, rlErr.Error())
 			}
 			pr.RateLimit = rl
 		}

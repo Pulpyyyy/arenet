@@ -63,19 +63,47 @@ function hasActiveRedirect(rule: PathRule): boolean {
 	return (rule.redirect?.target ?? '').trim().length > 0;
 }
 
+/**
+ * A rule that throttles: a limit with a positive request count.
+ *
+ * v2.56.3 — without this a rate-limit-only rule was filtered out here and
+ * never reached the API, so saving it returned 200 and the rule was gone on
+ * the next read. Protecting one path with a strict limit and nothing else
+ * is the ordinary way to use the feature, not an edge case.
+ */
+function hasActiveRateLimit(rule: PathRule): boolean {
+	return (rule.rateLimit?.events ?? 0) > 0;
+}
+
+/**
+ * Every predicate that makes a rule worth keeping.
+ *
+ * Exported so a test can assert the list covers each content field of
+ * PathRule: the failure mode is not a crash but a silent drop with a
+ * success toast, which is invisible until an operator notices their rule
+ * disappeared.
+ */
+export const pathRuleContentChecks: ((rule: PathRule) => boolean)[] = [
+	hasActiveBasicAuth,
+	hasActiveIPFilter,
+	hasActiveUpstream,
+	hasActiveRedirect,
+	hasActiveRateLimit
+];
+
 export function sanitizePathRules(rules: PathRule[]): PathRule[] {
 	return rules
 		// v2.44 — a redirect is on its own enough to justify a rule:
 		// "/" going to "/admin/login" carries no auth, no filter and
 		// no pool, and dropping it here would silently discard exactly
 		// the rule the operator just wrote.
-		.filter(
-			(rule) =>
-				hasActiveBasicAuth(rule) ||
-				hasActiveIPFilter(rule) ||
-				hasActiveUpstream(rule) ||
-				hasActiveRedirect(rule)
-		)
+		// Every kind of content a rule can carry has to be listed here.
+		// The filter exists to drop a row the operator added and never
+		// filled, and anything missing from this list is silently treated
+		// as such — which is how a redirect was lost in v2.44 and a rate
+		// limit in v2.56.1. pathRuleContentChecks below is walked by a
+		// test so a new field cannot be added without landing here.
+		.filter((rule) => pathRuleContentChecks.some((has) => has(rule)))
 		.map((rule) => {
 			if (rule.ipFilter && rule.ipFilter.mode === 'off') {
 				return { ...rule, ipFilter: { ...rule.ipFilter, cidrs: [] } };
