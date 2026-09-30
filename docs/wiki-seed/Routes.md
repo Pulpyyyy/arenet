@@ -163,6 +163,18 @@ Active health checks monitor each upstream and remove unhealthy ones from the po
 
 Unhealthy upstreams are skipped by the load balancer ; the `/topology` dashboard shows them in dimmed state.
 
+### Test the check before saving it (v2.56)
+
+**Test the check** beside the health-check fields runs one probe per upstream with the settings currently on screen, before anything is saved. It writes nothing and reloads nothing.
+
+It reports, per upstream: the verdict and the precise reason it failed (an unexpected status, a body that did not match, a timeout, a refused connection, a DNS or TLS failure), the request that went out (method, URL, `Host`, headers), and what came back (status, duration, `Location` on a redirect, and the first 4 KiB of the body).
+
+Redirects are **not** followed, because the active check does not follow them either — a check meeting a 301 fails, and that is the case worth seeing. When the redirect points at the same URL over `https`, the result says so and names `X-Forwarded-Proto: https`, which is what an application deciding it was reached insecurely usually wants.
+
+Why it exists: a badly configured check used to surface only on save. The post-change verification saw the upstream leave the pool, got a 503 and undid the change — which protects the site and explains nothing. The case that prompted it was a probe against Ghost with no `X-Forwarded-Proto`: Ghost answered 301, the expected 200 never arrived, the upstream was removed and the route served 503.
+
+The timeout is capped at 10 s however long a value the form carries, an invalid body expression is refused before any probe goes out, and the probe cannot reach link-local or cloud metadata addresses. Every run is recorded in the audit log.
+
 ### The Host the probe sends (changed in v2.55)
 
 Caddy builds the health-check request from the upstream's **dial address**, so before v2.55 the probe asked for `Host: 10.0.0.2:80`. A backend that dispatches on `Host` — a second reverse proxy, a vhost, a container router — has no such virtual host, answers **404**, and every upstream is marked down while serving its route perfectly.

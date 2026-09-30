@@ -28,6 +28,8 @@ import type {
 	WafTestRequest,
 	WafTestResponse,
 	RouteRequest,
+	TestHealthCheckRequest,
+	TestHealthCheckResponse,
 	TestUpstreamRequest,
 	TestUpstreamResponse
 } from './types';
@@ -301,3 +303,13 @@ export const testRouteWaf = (id: string, body: WafTestRequest): Promise<WafTestR
 // sees all rows update concurrently.
 export const testUpstream = (req: TestUpstreamRequest): Promise<TestUpstreamResponse> =>
 	request<TestUpstreamResponse>('POST', '/routes/test-upstream', req);
+
+/**
+ * v2.56 — runs the active health check with the unsaved form settings.
+ * Writes nothing and reloads nothing; the point is to find out before
+ * committing.
+ */
+export const testHealthCheck = (
+	req: TestHealthCheckRequest
+): Promise<TestHealthCheckResponse> =>
+	request<TestHealthCheckResponse>('POST', '/routes/test-health-check', req);

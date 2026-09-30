@@ -905,6 +905,63 @@ export interface RouteRateLimit {
  * the probe runs with the same TLS posture the saved route
  * will use.
  */
+/**
+ * v2.56 — run the active health check with the settings currently in the
+ * form, before saving.
+ *
+ * A misconfigured check used to surface only as a post-save 503 and an
+ * undone change, which protected the site and explained nothing. The
+ * reported case: a probe against Ghost with no X-Forwarded-Proto, so Ghost
+ * answered 301 and the expected 200 never arrived.
+ */
+export interface TestHealthCheckRequest {
+	/** The pool as currently typed, not what is stored. */
+	upstreams: Upstream[];
+	healthCheck: HealthCheck;
+	/** The route's primary host, used as the probe Host unless overridden. */
+	routeHost?: string;
+	insecureSkipVerify?: boolean;
+}
+
+/** What the probe sent, so the operator sees the request rather than infers it. */
+export interface TestHealthCheckSent {
+	method: string;
+	url: string;
+	host: string;
+	headers?: Record<string, string>;
+}
+
+/** What came back. Absent when nothing did. */
+export interface TestHealthCheckGot {
+	statusCode: number;
+	durationMs: number;
+	/** Redirect target, when there is one. */
+	location?: string;
+	bodyExcerpt?: string;
+	bodyTruncated: boolean;
+	/**
+	 * Whether expectBody matched. Absent when no expression was configured,
+	 * so "no regex" is distinguishable from "did not match".
+	 */
+	bodyMatched?: boolean;
+}
+
+export interface TestHealthCheckResult {
+	/** The dial address probed. */
+	upstream: string;
+	healthy: boolean;
+	/** The precise cause when it failed. */
+	reason?: string;
+	sent: TestHealthCheckSent;
+	got?: TestHealthCheckGot;
+	/** Attached to an observed redirect; names X-Forwarded-Proto when relevant. */
+	hint?: string;
+}
+
+export interface TestHealthCheckResponse {
+	results: TestHealthCheckResult[];
+}
+
 export interface TestUpstreamRequest {
 	url: string;
 	insecureSkipVerify?: boolean;

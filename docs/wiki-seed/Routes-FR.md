@@ -165,6 +165,18 @@ Les health checks actifs surveillent chaque upstream et retirent les mauvais du 
 
 Les upstreams unhealthy sont skippés par le load balancer ; le dashboard `/topology` les montre en état dimmed.
 
+### Tester le contrôle avant de l'enregistrer (v2.56)
+
+**Tester le contrôle**, à côté des champs du health check, lance une sonde par upstream avec les réglages actuellement à l'écran, avant tout enregistrement. Rien n'est écrit, rien n'est rechargé.
+
+Le rapport donne, pour chaque upstream : le verdict et la cause précise de l'échec (code inattendu, corps ne correspondant pas, délai dépassé, connexion refusée, erreur DNS ou TLS), la requête réellement envoyée (méthode, URL, `Host`, en-têtes), et ce qui est revenu (code, durée, `Location` en cas de redirection, et les 4 premiers Kio du corps).
+
+Les redirections ne sont **pas** suivies, parce que le contrôle actif ne les suit pas non plus — un contrôle qui rencontre un 301 échoue, et c'est précisément ce qu'il faut voir. Quand la redirection pointe vers la même URL en `https`, le résultat le dit et nomme `X-Forwarded-Proto: https`, ce qu'attend généralement une application qui estime avoir été jointe sans chiffrement.
+
+Pourquoi c'est là : un contrôle mal réglé ne se manifestait qu'à l'enregistrement. La vérification post-modification voyait l'upstream quitter le pool, obtenait un 503 et annulait le changement — ce qui protège le site et n'explique rien. Le cas qui l'a motivé : une sonde sur Ghost sans `X-Forwarded-Proto`, Ghost répondant 301, le 200 attendu jamais atteint, l'upstream retiré et la route en 503.
+
+Le délai est plafonné à 10 s quelle que soit la valeur du formulaire, une expression de corps invalide est refusée avant tout envoi, et la sonde ne peut atteindre ni le lien-local ni les adresses de métadonnées cloud. Chaque exécution est enregistrée dans le journal d'audit.
+
 ### Le Host que la sonde envoie (changement en v2.55)
 
 Caddy construit la requête de health check à partir de l'**adresse de dial** de l'upstream. Avant la v2.55, la sonde demandait donc `Host: 10.0.0.2:80`. Un backend qui aiguille sur le `Host` — un second reverse proxy, un vhost, un routeur de conteneurs — n'a aucun hôte virtuel à ce nom : il répond **404**, et tous les upstreams sont marqués down alors qu'ils servent parfaitement leur route.

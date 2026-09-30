@@ -407,6 +407,13 @@ func NewRouter(h *Handler, dev bool, ipExtractor *auth.IPExtractor, ws *WSTopolo
 				// routes_test_upstream.go for the SSRF posture
 				// rationale).
 				r.Post("/routes/test-upstream", h.testUpstream)
+				// v2.56 — run the active health check with the settings
+				// currently in the form, before saving. A misconfigured
+				// check used to surface only as a post-save 503 and an
+				// undone change, which protected the site and explained
+				// nothing. Same admin-only posture and same probe dialer
+				// as test-upstream above; writes nothing, reloads nothing.
+				r.Post("/routes/test-health-check", h.testHealthCheck)
 				// v2.11 — DNS provider collection (UUID-keyed,
 				// multi-config). Replaces the pre-v2.11 singleton
 				// /settings/dns-providers/ovh GET/PUT.
