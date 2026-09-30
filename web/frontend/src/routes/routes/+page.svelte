@@ -331,7 +331,8 @@
 					})()
 				},
 				routeHost: formData.host?.trim() || undefined,
-				insecureSkipVerify: formData.insecureSkipVerify
+				insecureSkipVerify: formData.insecureSkipVerify,
+				routeId: editingId ?? undefined
 			});
 			hcProbeResults = res.results;
 		} catch (err) {
@@ -611,7 +612,11 @@
 				// route perfectly. Same resolution as the health check:
 				// the check's override if set, otherwise the route's host.
 				hostHeader:
-					formData.healthCheck.hostHeader?.trim() || formData.host?.trim() || undefined
+					formData.healthCheck.hostHeader?.trim() || formData.host?.trim() || undefined,
+				// v2.56.2 — so the audit row carries the route it was launched
+				// from, not just the address. Absent in create mode: there is
+				// no route yet, and an empty string would read as one.
+				routeId: editingId ?? undefined
 			});
 			upstreamTests = {
 				...upstreamTests,

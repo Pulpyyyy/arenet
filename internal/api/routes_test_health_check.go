@@ -90,6 +90,10 @@ type healthProbeRequest struct {
 	// InsecureSkipVerify mirrors the route's TLS posture so an https
 	// upstream with a self-signed certificate is testable.
 	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
+	// RouteID (v2.56.2) is the route the probe was launched from, when
+	// there is one. Absent from the create form, where no route exists
+	// yet.
+	RouteID string `json:"routeId,omitempty"`
 }
 
 // healthProbeSentInfo is what went out, so the operator can see the
@@ -221,10 +225,23 @@ func (h *Handler) testHealthCheck(w http.ResponseWriter, r *http.Request) {
 	if refused > 0 {
 		action = audit.ActionProbeRefused
 	}
-	h.appendAudit(r, audit.Event{
+	evt := audit.Event{
 		Action:  action,
 		Message: healthProbeAuditMessage(results),
+	}
+	probed := make([]string, 0, len(results))
+	healthy := 0
+	for _, res := range results {
+		probed = append(probed, res.Upstream)
+		if res.Healthy {
+			healthy++
+		}
+	}
+	probeAuditTarget(&evt, strings.Join(probed, ","), req.RouteID, map[string]any{
+		"probed":  len(results),
+		"healthy": healthy,
 	})
+	h.appendAudit(r, evt)
 
 	writeJSON(w, http.StatusOK, healthProbeResponse{Results: results})
 }

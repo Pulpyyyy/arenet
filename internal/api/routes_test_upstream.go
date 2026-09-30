@@ -126,6 +126,11 @@ type testUpstreamRequest struct {
 	// for a service that serves the route perfectly. The probe now asks
 	// the question a visitor asks.
 	HostHeader string `json:"hostHeader,omitempty"`
+	// RouteID (v2.56.2) is the route the probe was launched from, when
+	// there is one. Absent from the create form, where no route exists
+	// yet — recorded in the audit event's structured detail rather than
+	// left only in its free text.
+	RouteID string `json:"routeId,omitempty"`
 }
 
 // testUpstreamCertInfo summarises the leaf TLS cert the
@@ -241,10 +246,15 @@ func (h *Handler) testUpstream(w http.ResponseWriter, r *http.Request) {
 	// answers on an internal address. A refusal is recorded under its own
 	// action, because an attempt at the metadata endpoint is worth more
 	// than its absence.
-	h.appendAudit(r, audit.Event{
+	evt := audit.Event{
 		Action:  probeAuditAction(resp.Error),
 		Message: probeAuditMessage(parsed, resp.Reachable, resp.StatusCode, resp.Error),
+	}
+	probeAuditTarget(&evt, parsed.Redacted(), req.RouteID, map[string]any{
+		"reachable": resp.Reachable,
+		"status":    resp.StatusCode,
 	})
+	h.appendAudit(r, evt)
 
 	writeJSON(w, http.StatusOK, resp)
 }

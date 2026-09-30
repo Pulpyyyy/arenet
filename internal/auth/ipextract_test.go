@@ -22,14 +22,31 @@ import (
 	"testing"
 )
 
-func TestNewIPExtractor_EmptyDisablesTrust(t *testing.T) {
+// v2.56.2 — reversed deliberately. This asserted that an empty list means
+// no trust at all, which was the old default and is what made the audit
+// log record 127.0.0.1 for every remote operator and the login limiter
+// bucket every attempt from every source into one shared counter.
+//
+// Loopback is not an external proxy being trusted: the admin API listens
+// on 127.0.0.1 and the documented way to reach the UI is an Arenet route,
+// so the caller IS Arenet's own embedded Caddy. The configured list adds
+// to loopback rather than replacing it.
+func TestNewIPExtractor_EmptyTrustsLoopbackOnly(t *testing.T) {
 	for _, in := range []string{"", "   ", " , ,, "} {
 		e, err := NewIPExtractor(in)
 		if err != nil {
 			t.Fatalf("input %q: unexpected error: %v", in, err)
 		}
-		if len(e.TrustedCIDRs()) != 0 {
-			t.Errorf("input %q: expected 0 trusted CIDRs, got %v", in, e.TrustedCIDRs())
+		got := e.TrustedCIDRs()
+		want := []string{"127.0.0.0/8", "::1/128"}
+		if len(got) != len(want) {
+			t.Errorf("input %q: got %v, want exactly loopback %v", in, got, want)
+			continue
+		}
+		for i, w := range want {
+			if got[i] != w {
+				t.Errorf("input %q: CIDR[%d] = %q, want %q", in, i, got[i], w)
+			}
 		}
 	}
 }
@@ -40,7 +57,10 @@ func TestNewIPExtractor_ValidCIDRs(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	got := e.TrustedCIDRs()
-	want := []string{"10.0.0.0/8", "192.168.0.0/16", "2001:db8::/32"}
+	// Loopback first, then the configured list: the env var ADDS to the
+	// always-trusted set rather than replacing it, so configuring an
+	// external proxy cannot silently break the admin UI's own path.
+	want := []string{"127.0.0.0/8", "::1/128", "10.0.0.0/8", "192.168.0.0/16", "2001:db8::/32"}
 	if len(got) != len(want) {
 		t.Fatalf("want %d CIDRs, got %d", len(want), len(got))
 	}
@@ -163,8 +183,11 @@ func TestIPExtractor_ClientIP_EdgeCases(t *testing.T) {
 		}
 	})
 
-	t.Run("loopback NOT auto-trusted", func(t *testing.T) {
-		// No CIDR configured → 127.0.0.1 is not trusted.
+	// v2.56.2 — reversed. THE case: the admin UI reached through an Arenet
+	// route arrives from the embedded Caddy over loopback, carrying the
+	// real client in X-Forwarded-For. Ignoring it recorded the loopback in
+	// every audit row and collapsed the login limiter to one bucket.
+	t.Run("loopback IS trusted with no configuration", func(t *testing.T) {
 		e, err := NewIPExtractor("")
 		if err != nil {
 			t.Fatalf("NewIPExtractor: %v", err)
@@ -172,8 +195,26 @@ func TestIPExtractor_ClientIP_EdgeCases(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.RemoteAddr = "127.0.0.1:12345"
 		r.Header.Set("X-Forwarded-For", "203.0.113.5")
-		if got := e.ClientIP(r); got != "127.0.0.1" {
-			t.Errorf("loopback auto-trusted: got %q, want 127.0.0.1", got)
+		if got := e.ClientIP(r); got != "203.0.113.5" {
+			t.Errorf("got %q; the real client behind the embedded Caddy must be recorded", got)
+		}
+	})
+
+	// And the other half, which is what keeps this safe: a caller that is
+	// NOT loopback and not configured cannot claim to be someone else.
+	t.Run("an external caller cannot spoof X-Forwarded-For", func(t *testing.T) {
+		e, err := NewIPExtractor("")
+		if err != nil {
+			t.Fatalf("NewIPExtractor: %v", err)
+		}
+		for _, caller := range []string{"203.0.113.9:4000", "10.1.2.3:4000", "[2001:db8::99]:4000"} {
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.RemoteAddr = caller
+			r.Header.Set("X-Forwarded-For", "198.51.100.7")
+			got := e.ClientIP(r)
+			if got == "198.51.100.7" {
+				t.Errorf("caller %s spoofed its IP through X-Forwarded-For", caller)
+			}
 		}
 	})
 
