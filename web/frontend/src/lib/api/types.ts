@@ -876,7 +876,7 @@ export interface PathRule {
 	 */
 	redirect?: { target: string; statusCode?: number };
 	/**
-	 * v2.57 — throttles THIS path in ADDITION to the route's own limit,
+	 * v2.56 — throttles THIS path in ADDITION to the route's own limit,
 	 * with its own counters.
 	 *
 	 * Reason to exist: a login or session endpoint wants a much tighter

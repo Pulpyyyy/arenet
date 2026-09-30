@@ -128,7 +128,7 @@ type PathRule struct {
 	// normally: unlike the route-level redirect state, this replaces
 	// the proxy for ONE path.
 	Redirect *PathRedirect `json:"redirect,omitempty"`
-	// RateLimit (v2.57) throttles THIS path only, in ADDITION to the
+	// RateLimit (v2.56) throttles THIS path only, in ADDITION to the
 	// route's own limit. Its counters are a separate zone, so a strict
 	// limit on a login endpoint does not spend the route's budget and
 	// the route's limit does not dilute it.
@@ -221,7 +221,7 @@ func (p PathRule) Validate() error {
 			return fmt.Errorf("path_rule %q: %w", p.PathPrefix, err)
 		}
 	}
-	// v2.57 — the per-path limit, same contract as the route's.
+	// v2.56 — the per-path limit, same contract as the route's.
 	if p.RateLimit != nil {
 		if err := p.RateLimit.validate(); err != nil {
 			return fmt.Errorf("path_rule %q: %w", p.PathPrefix, err)
@@ -1026,7 +1026,7 @@ type RouteRateLimit struct {
 
 // validate checks a rate-limit declaration.
 //
-// v2.57 — extracted so a path rule's limit is held to the same contract as
+// v2.56 — extracted so a path rule's limit is held to the same contract as
 // a route's. Events < 1 would refuse every request, which is a typo rather
 // than a policy, and a window that does not parse would be dropped at emit
 // time with only a log to say so.

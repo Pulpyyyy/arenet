@@ -27,7 +27,7 @@ import (
 	"github.com/barto95100/arenet/internal/storage"
 )
 
-// v2.57 — a rate limit on one path of a route.
+// v2.56 — a rate limit on one path of a route.
 //
 // Reason to exist: a login or session endpoint wants a much tighter limit
 // than the site around it, and raising the route's limit to protect one
@@ -342,7 +342,7 @@ func TestPathRateLimit_AbsentChangesNothing(t *testing.T) {
 	}
 }
 
-// The ROUTE-level limit had no caddy.Validate coverage at all until v2.57:
+// The ROUTE-level limit had no caddy.Validate coverage at all until v2.56:
 // http.handlers.rate_limit was registered only in cmd/arenet, so any
 // validate over a config carrying one failed with "unknown module" and no
 // test could assert its shape. Arenet has emitted this zone since Step Q.
