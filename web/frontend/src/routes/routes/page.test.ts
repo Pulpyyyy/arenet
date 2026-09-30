@@ -2104,7 +2104,7 @@ describe('Routes page — Test upstream button + chip (#R-PROXMOX-HTTPS-LOOP com
 
 	it('surfaces a refusal instead of claiming the probe ran', async () => {
 		apiMock.testHealthCheck.mockRejectedValue(
-			new ApiError('healthCheck.expectBody is not a valid regular expression', 400, 'bad_request')
+			new ApiError('healthCheck.expectBody is not a valid regular expression', 400, 'validation')
 		);
 		render(Page);
 		await openCreateForm();
