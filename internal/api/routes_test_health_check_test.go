@@ -24,8 +24,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/barto95100/arenet/internal/storage"
 )
 
 // v2.56 — run the active health check before saving it.
@@ -35,10 +33,18 @@ import (
 // upstream left the pool and the route served 503 — surfaced only as
 // "Change undone…", which protected the site and explained nothing.
 
-func healthProbeBody(t *testing.T, upstreamURL string, hc storage.HealthCheck) string {
+// healthProbeBody builds the request in the API's OWN wire shape.
+//
+// Deliberately healthCheckReq rather than storage.HealthCheck: the two spell
+// three fields differently, and the endpoint decoding the storage struct is
+// what made the button answer `unknown field "expectStatus"` on its first
+// real click. These helpers are not the guard against that — a payload built
+// from the handler's type agrees with it by construction — but they should at
+// least exercise the shape the form sends.
+func healthProbeBody(t *testing.T, upstreamURL string, hc healthCheckReq) string {
 	t.Helper()
 	raw, err := json.Marshal(healthProbeRequest{
-		Upstreams:   []storage.Upstream{{URL: upstreamURL, Weight: 1}},
+		Upstreams:   []upstreamReq{{URL: upstreamURL, Weight: 1}},
 		HealthCheck: hc,
 		RouteHost:   "blog.example.com",
 	})
@@ -48,8 +54,8 @@ func healthProbeBody(t *testing.T, upstreamURL string, hc storage.HealthCheck) s
 	return string(raw)
 }
 
-func probeCheck(uri string) storage.HealthCheck {
-	return storage.HealthCheck{
+func probeCheck(uri string) healthCheckReq {
+	return healthCheckReq{
 		Enabled: true, URI: uri, Method: "GET",
 		Interval: "30s", Timeout: "2s", Passes: 1, Fails: 1,
 	}
@@ -338,5 +344,125 @@ func TestHealthProbe_RefusesAnEmptyPool(t *testing.T) {
 	code, _ := postHealthProbe(t, env, string(raw))
 	if code != http.StatusBadRequest {
 		t.Errorf("status %d; want 400", code)
+	}
+}
+
+// v2.56.1 — the wire-shape regression.
+//
+// The first real click on the button answered `unknown field
+// "expectStatus"`. The endpoint decoded storage.HealthCheck, whose tags are
+// snake_case (expect_status, expect_body, host_header), while every route
+// endpoint — and therefore the form — speaks camelCase.
+//
+// Every test above missed it, and could not have caught it: they marshal
+// healthProbeRequest, the handler's OWN type, so producer and consumer
+// agreed by construction. A payload built from the receiver's type can
+// never reveal a disagreement with a different producer.
+//
+// So this one posts LITERAL JSON, written the way the form writes it. It is
+// the operator's reported case verbatim: route www.hacf.fr, URI
+// /ghost/api/admin/site/, expected 200, an X-Forwarded-Proto probe header
+// and an expected-body expression.
+const formProducedProbePayload = `{
+  "upstreams": [{"url": "http://10.66.0.2:80", "weight": 1}],
+  "healthCheck": {
+    "enabled": true,
+    "uri": "/ghost/api/admin/site/",
+    "method": "GET",
+    "interval": "30s",
+    "timeout": "5s",
+    "expectStatus": 200,
+    "expectBody": "\"url\":\"https://www\\\\.hacf\\\\.fr/?\"",
+    "passes": 1,
+    "fails": 1,
+    "hostHeader": "www.hacf.fr",
+    "headers": {"X-Forwarded-Proto": "https"}
+  },
+  "routeHost": "www.hacf.fr",
+  "insecureSkipVerify": false
+}`
+
+func TestHealthProbe_AcceptsThePayloadTheFormSends(t *testing.T) {
+	env := newTestEnv(t, false)
+
+	code, out := postHealthProbe(t, env, formProducedProbePayload)
+	if code != http.StatusOK {
+		t.Fatalf("status %d; the endpoint refused the shape the form produces", code)
+	}
+	res := firstResult(t, out)
+	// The probe will fail to connect (nothing listens on 10.66.0.2 here).
+	// What matters is that every field arrived: the URI, the probe Host and
+	// the header are echoed in what was sent.
+	if res.Sent.URL != "http://10.66.0.2:80/ghost/api/admin/site/" {
+		t.Errorf("sent.URL = %q; the URI did not survive decoding", res.Sent.URL)
+	}
+	if res.Sent.Host != "www.hacf.fr" {
+		t.Errorf("sent.Host = %q; hostHeader did not survive decoding", res.Sent.Host)
+	}
+	if res.Sent.Headers["X-Forwarded-Proto"] != "https" {
+		t.Errorf("sent.Headers = %v; the probe header did not survive decoding", res.Sent.Headers)
+	}
+}
+
+// Every camelCase name the form can send has to be accepted. Field by
+// field, because a single payload that decodes proves nothing about the
+// three names that were wrong — DisallowUnknownFields reports only the
+// first one it meets.
+func TestHealthProbe_AcceptsEveryCamelCaseField(t *testing.T) {
+	env := newTestEnv(t, false)
+	base := map[string]any{
+		"enabled":  true,
+		"uri":      "/",
+		"method":   "GET",
+		"interval": "30s",
+		"timeout":  "1s",
+		"passes":   1,
+		"fails":    1,
+	}
+	// Each of these was snake_case in the storage struct the endpoint used
+	// to decode, so each was its own rejection.
+	extras := map[string]any{
+		"expectStatus": 200,
+		"expectBody":   "ok",
+		"hostHeader":   "app.example.com",
+		"headers":      map[string]string{"X-Probe": "arenet"},
+	}
+	for name, value := range extras {
+		t.Run(name, func(t *testing.T) {
+			hc := map[string]any{}
+			for k, v := range base {
+				hc[k] = v
+			}
+			hc[name] = value
+			raw, err := json.Marshal(map[string]any{
+				"upstreams":   []map[string]any{{"url": "http://127.0.0.1:1", "weight": 1}},
+				"healthCheck": hc,
+			})
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			code, _ := postHealthProbe(t, env, string(raw))
+			if code != http.StatusOK {
+				t.Errorf("field %q was refused with %d; the form sends it", name, code)
+			}
+		})
+	}
+}
+
+// The snake_case names must NOT be accepted: silently taking both would let
+// the two conventions drift again without anything failing.
+func TestHealthProbe_RefusesTheStorageFieldNames(t *testing.T) {
+	env := newTestEnv(t, false)
+	raw, _ := json.Marshal(map[string]any{
+		"upstreams": []map[string]any{{"url": "http://127.0.0.1:1", "weight": 1}},
+		"healthCheck": map[string]any{
+			"enabled": true, "uri": "/", "method": "GET",
+			"interval": "30s", "timeout": "1s", "passes": 1, "fails": 1,
+			"expect_status": 200,
+		},
+	})
+	code, _ := postHealthProbe(t, env, string(raw))
+	if code != http.StatusBadRequest {
+		t.Errorf("status %d; the storage spelling must be refused so the two conventions cannot drift", code)
 	}
 }
