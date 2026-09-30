@@ -87,6 +87,7 @@ func poolUsesHTTPS(pool []storage.Upstream) bool {
 // a blocked client gets its 403 without the request ever reaching the
 // per-path pool.
 func buildPathRulesSubroute(
+	routeID string,
 	rules []storage.PathRule,
 	routeProxy map[string]any,
 	basicAuthBuilder func(storage.BasicAuthRouteConfig) map[string]any,
@@ -106,6 +107,19 @@ func buildPathRulesSubroute(
 					"routes":  []map[string]any{ipRoute},
 				})
 			}
+		}
+		// v2.57 — the per-path limit, BEFORE auth.
+		//
+		// The reason this feature exists is a login or session endpoint,
+		// and the requests worth throttling there are the ones that have
+		// not authenticated yet. Placed after basic auth it would count
+		// only the attempts that already succeeded, which is the opposite
+		// of a brute-force gate.
+		//
+		// Its own zone, so this limit and the route's are two separate
+		// budgets and both apply.
+		if rlHandler := buildPathRateLimitHandler(routeID, pr.PathPrefix, pr.RateLimit); rlHandler != nil {
+			handle = append(handle, rlHandler)
 		}
 		if pr.BasicAuth != nil {
 			handle = append(handle, basicAuthBuilder(*pr.BasicAuth))

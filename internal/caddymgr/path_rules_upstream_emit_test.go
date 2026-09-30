@@ -46,7 +46,7 @@ func emitPathSubrouteJSON(t *testing.T, rules []storage.PathRule) string {
 			InsecureSkipVerify: pr.InsecureSkipVerify,
 		}, sharedHandleResponse, false)
 	}
-	sub, err := buildPathRulesSubroute(rules, routeProxy, func(c storage.BasicAuthRouteConfig) map[string]any {
+	sub, err := buildPathRulesSubroute("r-test", rules, routeProxy, func(c storage.BasicAuthRouteConfig) map[string]any {
 		return map[string]any{"handler": "authentication"}
 	}, pathProxy)
 	if err != nil {
@@ -79,7 +79,7 @@ func firstRuleHandle(t *testing.T, rules []storage.PathRule) []map[string]any {
 			InsecureSkipVerify: pr.InsecureSkipVerify,
 		}, sharedHandleResponse, false)
 	}
-	sub, err := buildPathRulesSubroute(rules, routeProxy, func(c storage.BasicAuthRouteConfig) map[string]any {
+	sub, err := buildPathRulesSubroute("r-test", rules, routeProxy, func(c storage.BasicAuthRouteConfig) map[string]any {
 		return map[string]any{"handler": "authentication"}
 	}, pathProxy)
 	if err != nil {

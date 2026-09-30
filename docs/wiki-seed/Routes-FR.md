@@ -207,6 +207,19 @@ Une IP ou un CIDR par ligne (`192.168.1.10`, `10.0.0.0/8`, IPv6 aussi). Les visi
 
 ---
 
+### Une limite plus stricte pour un seul chemin (v2.57)
+
+La limite de débit de la route gouverne tout le site. Un point d'entrée de connexion ou de session en veut généralement une bien plus serrée — et relever celle de la route pour protéger un chemin serait le mauvais instrument : cela ralentirait chaque ressource de la page pour freiner un seul formulaire.
+
+Cochez **Limite de débit pour ce chemin** sur une règle et donnez-lui ses propres requêtes-par-durée. Ce qui compte :
+
+- elle s'ajoute à celle de la route, elle ne la remplace pas. Les deux s'appliquent, et les compteurs sont des zones distinctes — une limite stricte sur `/api/v1/auth` ne consomme pas le budget de la route, et la limite de la route ne la dilue pas ;
+- elle s'applique **avant** l'authentification basique de ce chemin : les requêtes comptées sont donc celles qui ne se sont pas encore authentifiées. C'est tout l'intérêt sur un point de connexion — ne compter que les connexions réussies ne serait aucune protection ;
+- au-delà, la requête reçoit un `429` ;
+- la clé vaut par défaut l'IP du client (`{http.request.remote.host}`), comme pour la route. Arenet n'émet aucun `trusted_proxies` : c'est donc le véritable pair de la socket, non falsifiable via `X-Forwarded-For`.
+
+Exemple — le point de session admin de Ghost à 3 tentatives par 5 minutes, tandis que le blog reste aux 200 par minute de la route : ajoutez une règle sur `/ghost/api/admin/session`, cochez la limite, mettez 3 et `5m`.
+
 ## Règles par chemin (v2.21.0 → v2.23.0)
 
 Les **règles par chemin** ajoutent une protection — et au besoin un autre backend — à un sous-chemin d'une route, sans créer de seconde route. Cas typiques : basic auth sur `/docs` (Swagger), `/metrics` accessible depuis une seule IP de supervision, `/api/v1` envoyé vers un autre backend, le reste du site inchangé.
@@ -218,6 +231,7 @@ Dans le formulaire de la route → **Règles par chemin** → **Ajouter une règ
 | **Préfixe de chemin** | `/docs` couvre `/docs` **et tout ce qui est en dessous** (`/docs/…`). Préfixe uniquement — pas de regex. |
 | **Authentification Basic spécifique** | Utilisateur + mot de passe exigés pour ce chemin seulement. |
 | **Filtrage IP dédié** | Liste blanche / liste noire pour ce chemin seulement (mêmes règles que le filtrage de la route ci-dessus). |
+| **Limite de débit pour ce chemin** (v2.57) | Une limite plus stricte pour ce seul chemin. **En plus** de celle de la route, et non à sa place — les deux sont des zones de compteurs distinctes. Au-delà : `429`. |
 | **Upstream spécifique (optionnel)** | Envoie ce chemin vers son propre pool de backends au lieu de celui de la route : URL + poids, répartition de charge, health-check actif, et *Ignorer la vérification TLS* pour un backend HTTPS auto-signé (v2.23.0 / v2.23.1). Laisser vide pour suivre l'upstream de la route. |
 
 Une règle doit contenir au moins : une basic auth, un filtrage IP actif ou un upstream spécifique (une règle avec seulement un upstream sert à router).

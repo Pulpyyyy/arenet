@@ -205,6 +205,19 @@ One IP or CIDR per line (`192.168.1.10`, `10.0.0.0/8`, IPv6 too). Blocked visito
 
 ---
 
+### A stricter limit for one path (v2.57)
+
+The route's rate limit governs the whole site. A login or session endpoint usually wants something far tighter — and raising the route's limit to protect one path is the wrong instrument: it would throttle every asset on the page to slow down one form.
+
+Tick **Rate limit for this path** on a path rule and give it its own requests-per-duration. What matters:
+
+- it is **in addition** to the route's limit, not instead of it. Both apply, and the counters are separate zones — a strict limit on `/api/v1/auth` does not spend the route's budget, and the route's limit does not dilute it;
+- it runs **before** this path's basic auth, so the requests it counts are the ones that have not authenticated yet. That is the point on a login endpoint: counting only successful logins would be no gate at all;
+- over the limit, the request gets `429`;
+- the key defaults to the client IP (`{http.request.remote.host}`), the same as the route's limit. Arenet emits no `trusted_proxies`, so that is the real socket peer and cannot be spoofed with `X-Forwarded-For`.
+
+Example — Ghost's admin session endpoint at 3 attempts per 5 minutes while the blog itself stays at the route's 200 per minute: add a path rule on `/ghost/api/admin/session`, tick the limit, set 3 and `5m`.
+
 ## Path rules (v2.21.0 → v2.23.0)
 
 **Path rules** apply extra protection — and optionally a different backend — to a URL sub-path of a route, without creating a second route. Typical: basic-auth on `/docs` (Swagger), `/metrics` reachable from one monitoring IP only, `/api/v1` sent to another backend, the rest of the site unchanged.
@@ -216,6 +229,7 @@ In the route form → **Path rules** → **Add path rule**:
 | **Path prefix** | `/docs` matches `/docs` **and everything under it** (`/docs/…`). Prefix only — no regex. |
 | **Basic auth override** | Username + password required for this path only. |
 | **Scoped IP filter** | Allow-list / deny-list for this path only (same rules as the route-level filter above). |
+| **Rate limit for this path** (v2.57) | A tighter limit for this path only. **In addition** to the route's limit, not instead of it — the two are separate counter zones. Over the limit: `429`. |
 | **Specific upstream (optional)** | Send this path to its own backend pool instead of the route's : URLs + weights, load-balancing policy, active health-check, and *Skip TLS verification* for a self-signed HTTPS backend (v2.23.0 / v2.23.1). Leave empty to follow the route's upstream. |
 
 A rule needs at least one of: basic auth, an active IP filter, or a specific upstream (a rule with only an upstream is pure routing).
