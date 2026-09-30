@@ -17,6 +17,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -130,4 +131,30 @@ func probeAuditMessage(target *url.URL, reachable bool, status int, probeErr str
 		return fmt.Sprintf("target=%s refused=%s", target.Redacted(), truncate(probeErr, 200))
 	}
 	return fmt.Sprintf("target=%s reachable=%t status=%d", target.Redacted(), reachable, status)
+}
+
+// probeAuditTarget fills the event's structured target.
+//
+// v2.56.2 — the probe rows carried their target in the free-text message
+// only, so the audit table's Target column was empty and nothing could be
+// filtered or joined on. TargetType is free-form (the store validates
+// nothing), and values like "access_log" already exist, so "upstream" is
+// the honest name for what was probed.
+//
+// The route is recorded alongside rather than instead: the address is what
+// was contacted and belongs in the column, while the route it was launched
+// from is context and belongs in the structured detail. A probe from the
+// create form has no route yet, and the field is simply absent.
+func probeAuditTarget(evt *audit.Event, probed string, routeID string, detail map[string]any) {
+	evt.TargetType = "upstream"
+	evt.TargetID = probed
+	if detail == nil {
+		detail = map[string]any{}
+	}
+	if routeID != "" {
+		detail["routeId"] = routeID
+	}
+	if raw, err := json.Marshal(detail); err == nil {
+		evt.AfterJSON = raw
+	}
 }

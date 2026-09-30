@@ -199,20 +199,34 @@ defaults; you'll typically touch 2–3 on a real install.
   reverse proxies whose `X-Forwarded-For` header Arenet should
   trust when resolving the client IP. Used by the auth /
   audit / rate-limit / WAF event source-IP attribution.
-- **Default**: empty (no proxies trusted; `X-Forwarded-For` is
-  ignored entirely and source IPs come from the TCP connection
-  directly).
+- **Default**: empty. **Loopback (`127.0.0.0/8`, `::1/128`) is
+  always trusted** and the list below is added to it — it is not
+  an external proxy being trusted, it is Arenet's own embedded
+  Caddy, which proxies the admin API over loopback whenever the
+  UI is reached through an Arenet route (the documented way).
+  Before v2.56.2 loopback was untrusted by default, so every
+  remote operator resolved to `127.0.0.1`: audit rows named the
+  loopback, and the login rate limiter — keyed on the same value
+  — put every attempt from every source into one shared bucket,
+  which is no per-IP protection at all.
 - **Format**: comma-separated CIDR list. Single IPs as `/32`
   (IPv4) or `/128` (IPv6).
 - **Example**: `ARENET_TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12`
 - **Notes**: a malformed CIDR causes Arenet to **fail-fast at
   boot** (`auth: invalid CIDR in ARENET_TRUSTED_PROXIES: ...`).
-  Required when Arenet runs behind another reverse proxy /
-  CDN (Cloudflare, etc.); otherwise rate-limiting + audit logs
-  attribute everything to the proxy's IP. **Security
-  implication**: anyone whose source IP matches a listed CIDR
-  can spoof `X-Forwarded-For` — keep the list as tight as
-  possible.
+  Set this when Arenet runs behind a FURTHER reverse proxy or
+  CDN (Cloudflare, etc.); otherwise rate-limiting and audit logs
+  attribute everything to that proxy's IP. Arenet's own embedded
+  Caddy needs no entry — see the default above.
+  **Security implication**: anyone whose source IP matches a
+  listed CIDR can spoof `X-Forwarded-For` — keep the list as
+  tight as possible. That applies to loopback too: a process
+  already running on the Arenet host can reach the admin API and
+  forge the header, which pollutes the audit IP and lets it
+  rotate rate-limit buckets. It is a local-attacker scenario, on
+  a host where reading the BoltDB file directly is already
+  available, and it is the price of recording the real remote
+  client at all.
 - **Source**: `cmd/arenet/main.go:490`, parser at
   `internal/auth/ipextract.go:46`.
 

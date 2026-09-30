@@ -934,6 +934,8 @@ export interface TestHealthCheckRequest {
 	/** The route's primary host, used as the probe Host unless overridden. */
 	routeHost?: string;
 	insecureSkipVerify?: boolean;
+	/** v2.56.2 — recorded in the audit row's structured target. */
+	routeId?: string;
 }
 
 /** What the probe sent, so the operator sees the request rather than infers it. */
@@ -984,6 +986,12 @@ export interface TestUpstreamRequest {
 	 * and a Host-routing backend answered 404 for a healthy service.
 	 */
 	hostHeader?: string;
+	/**
+	 * v2.56.2 — the route the probe was launched from, recorded in the
+	 * audit row's structured target. Absent in create mode: there is no
+	 * route yet.
+	 */
+	routeId?: string;
 }
 
 /**

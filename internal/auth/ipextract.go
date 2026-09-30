@@ -41,10 +41,28 @@ type IPExtractor struct {
 // Returns an error if any CIDR is malformed; the server should
 // fail-fast in this case (do not start, per spec §8.2).
 //
-// Pass an empty string (or whitespace only) to disable proxy trust
-// entirely; in that case, ClientIP always returns RemoteAddr.
+// Loopback is ALWAYS trusted, and the list adds to it.
+//
+// v2.56.2 — the admin API listens on 127.0.0.1 and the documented way to
+// reach the UI is an Arenet route, so the caller is Arenet's own embedded
+// Caddy proxying over loopback. With loopback untrusted, every remote
+// operator resolved to 127.0.0.1: the audit log recorded the loopback for
+// everyone, and — worse — the login rate limiter bucketed every attempt
+// from every source into one shared counter (ratelimit.go:399 keys on this
+// same value), so per-IP brute-force protection did not exist and an
+// attacker could exhaust the bucket the legitimate operator needs.
+//
+// Requiring ARENET_TRUSTED_PROXIES for Arenet's OWN proxy was a default
+// that produced a wrong audit log and a broken limiter for every
+// installation following the documentation.
+//
+// The residual risk is named rather than hidden: a process already running
+// on the host can reach 127.0.0.1:8001 and forge X-Forwarded-For, which
+// pollutes the audit IP and lets it rotate rate-limit buckets. That is a
+// local-attacker scenario, where reading the BoltDB file directly is
+// already available; the remote case this fixes is the realistic one.
 func NewIPExtractor(cidrList string) (*IPExtractor, error) {
-	e := &IPExtractor{}
+	e := &IPExtractor{trustedCIDRs: loopbackCIDRs()}
 	cidrList = strings.TrimSpace(cidrList)
 	if cidrList == "" {
 		return e, nil
@@ -61,6 +79,19 @@ func NewIPExtractor(cidrList string) (*IPExtractor, error) {
 		e.trustedCIDRs = append(e.trustedCIDRs, ipNet)
 	}
 	return e, nil
+}
+
+// loopbackCIDRs is the always-trusted set: Arenet's own embedded Caddy
+// proxies the admin API over loopback, so this is not an external proxy
+// being trusted, it is the process itself.
+func loopbackCIDRs() []*net.IPNet {
+	out := make([]*net.IPNet, 0, 2)
+	for _, raw := range []string{"127.0.0.0/8", "::1/128"} {
+		if _, n, err := net.ParseCIDR(raw); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // TrustedCIDRs returns the list of parsed CIDRs in canonical form
