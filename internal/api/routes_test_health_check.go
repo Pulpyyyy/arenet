@@ -64,14 +64,25 @@ const (
 )
 
 // healthProbeRequest carries the UNSAVED form state.
+//
+// The two nested shapes are the API's own wire types, NOT the storage
+// structs. That distinction is the whole bug this shape was fixed for:
+// storage.HealthCheck tags its fields snake_case (expect_status,
+// expect_body, host_header) while every route endpoint — and therefore the
+// form — speaks camelCase. Decoding the storage struct with
+// DisallowUnknownFields made the button answer `unknown field
+// "expectStatus"` on its first real click.
+//
+// Reusing healthCheckReq means the test endpoint cannot drift from the
+// shape createRoute and updateRoute accept, because it is the same type.
 type healthProbeRequest struct {
 	// Upstreams is the pool as currently typed. The probe targets these,
 	// not what is stored — testing a changed upstream is half the reason
 	// the button exists.
-	Upstreams []storage.Upstream `json:"upstreams"`
+	Upstreams []upstreamReq `json:"upstreams"`
 	// HealthCheck is the check as currently typed, including its probe
 	// Host and headers.
-	HealthCheck storage.HealthCheck `json:"healthCheck"`
+	HealthCheck healthCheckReq `json:"healthCheck"`
 	// RouteHost is the route's primary host, used as the probe's Host
 	// unless the check overrides it — the same resolution the emitted
 	// config uses.
@@ -153,7 +164,19 @@ func (h *Handler) testHealthCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hc := req.HealthCheck
+	hc := storage.HealthCheck{
+		Enabled:      req.HealthCheck.Enabled,
+		URI:          req.HealthCheck.URI,
+		Method:       req.HealthCheck.Method,
+		Interval:     req.HealthCheck.Interval,
+		Timeout:      req.HealthCheck.Timeout,
+		ExpectStatus: req.HealthCheck.ExpectStatus,
+		ExpectBody:   req.HealthCheck.ExpectBody,
+		Passes:       req.HealthCheck.Passes,
+		Fails:        req.HealthCheck.Fails,
+		HostHeader:   req.HealthCheck.HostHeader,
+		Headers:      req.HealthCheck.Headers,
+	}
 	if !hc.Enabled {
 		writeError(w, http.StatusBadRequest, "the health check must be enabled to test it")
 		return
@@ -184,7 +207,8 @@ func (h *Handler) testHealthCheck(w http.ResponseWriter, r *http.Request) {
 	timeout := healthProbeTimeout(hc.Timeout)
 	results := make([]healthProbeResult, 0, len(req.Upstreams))
 	for _, up := range req.Upstreams {
-		results = append(results, probeHealthCheck(r, up, req, hc, bodyRe, timeout))
+		results = append(results, probeHealthCheck(
+			r, storage.Upstream{URL: up.URL, Weight: up.Weight}, req, hc, bodyRe, timeout))
 	}
 
 	refused := 0
