@@ -175,6 +175,8 @@ Depuis la v2.55, la sonde porte par défaut **l'hôte de la route**, pour ressem
 
 Le bouton **Test** à côté de chaque upstream utilise le même Host : ce qu'il affiche est donc ce que verra le health check. Il marque une réponse 2xx ou 3xx d'un `✓` et une 4xx ou 5xx d'un `⚠` — joindre l'upstream et obtenir une réponse utile sont deux faits distincts.
 
+Depuis la **v2.56**, la sonde refuse deux familles d'adresses, contrôlées sur l'IP effectivement résolue et non sur le nom : la plage **lien-local** (`169.254.0.0/16`, `fe80::/10`) et l'adresse de métadonnées IPv6 d'AWS (`fd00:ec2::254`). C'est là que répondent les métadonnées d'instance d'un fournisseur cloud, qui livrent des identifiants à quiconque les demande depuis l'instance : un bouton Test n'y a rien à faire. Les adresses privées et le loopback restent autorisés, parce que c'est là que vivent réellement les upstreams d'un homelab : `10/8`, `172.16/12`, `192.168/16`, `127.0.0.1`. Chaque sonde est désormais enregistrée dans le journal d'audit, refus compris.
+
 ---
 
 ## Filtrage IP source (v2.21.0)

@@ -25,9 +25,9 @@ import "testing"
 // Adding or removing actions without updating the spec / decisions
 // doc is a process violation; this test forces the conversation.
 func TestAllActions_Count(t *testing.T) {
-	const wantCount = 74
+	const wantCount = 77
 	if got := len(AllActions()); got != wantCount {
-		t.Fatalf("AllActions count drift: got %d, want %d (D7=15 + J.4=1 + v2.11-dns=2 + K.1=2 + K.2=7 + K.3=3 + O.3=2 + P.3=2 + V.4=2 + CS.1=2 + CS.2=1 + CS.3=1 + CS.3-fu=1 + users-page=1 + Phase4=3 + AL.1.a=3 + AL.3b=3 + R=3 + MaxMind=2 + route-toggle=2 + route-maintenance=2 + cert-delete=1 + external-cert=3 + external-cert-csr=1 + scheduled-backups=2 + route-check=2 + tcp-services=3 + local-users=1 + access-log=1)", got, wantCount)
+		t.Fatalf("AllActions count drift: got %d, want %d (D7=15 + J.4=1 + v2.11-dns=2 + K.1=2 + K.2=7 + K.3=3 + O.3=2 + P.3=2 + V.4=2 + CS.1=2 + CS.2=1 + CS.3=1 + CS.3-fu=1 + users-page=1 + Phase4=3 + AL.1.a=3 + AL.3b=3 + R=3 + MaxMind=2 + route-toggle=2 + route-maintenance=2 + cert-delete=1 + external-cert=3 + external-cert-csr=1 + scheduled-backups=2 + route-check=2 + tcp-services=3 + local-users=1 + access-log=1 + probes=3)", got, wantCount)
 	}
 }
 
@@ -216,6 +216,14 @@ func TestAllActions_ExactSet(t *testing.T) {
 		// disk, so both directions belong in the trail: enabling it
 		// starts recording people, disabling it blinds CrowdSec.
 		"access_log_updated": true,
+		// v2.56 — the diagnostic probes. Creating a route to reach an
+		// address is audited; a Test button was not, which made it the
+		// quiet way to find out what answers on an internal address.
+		// The refusal is recorded too: an attempt at the metadata
+		// endpoint is worth more than its absence.
+		"probe_upstream":     true,
+		"probe_health_check": true,
+		"probe_refused":      true,
 	}
 	for _, a := range AllActions() {
 		if !want[a] {
