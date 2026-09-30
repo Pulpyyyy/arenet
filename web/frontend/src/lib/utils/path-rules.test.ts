@@ -3,7 +3,7 @@
 // Licensed under the GNU AGPL v3 or later. See LICENSE.
 
 import { describe, it, expect } from 'vitest';
-import { sanitizePathRules } from './path-rules';
+import { pathRuleContentChecks, sanitizePathRules } from './path-rules';
 import type { PathRule } from '$lib/api/types';
 
 describe('sanitizePathRules', () => {
@@ -159,5 +159,55 @@ describe('sanitizePathRules — redirects', () => {
 	it('still drops a rule that carries nothing at all', () => {
 		expect(sanitizePathRules([{ pathPrefix: '/', redirect: { target: '   ' } }])).toEqual([]);
 		expect(sanitizePathRules([{ pathPrefix: '/nothing' }])).toEqual([]);
+	});
+});
+
+// v2.56.3 — a rule carrying ONLY a rate limit was filtered out here, so
+// saving it returned 200 and the rule was gone on the next read.
+//
+// The same shape of loss happened in v2.44 with a path redirect. The filter
+// enumerates what counts as content, and anything missing from the list is
+// treated as a row the operator abandoned.
+describe('sanitizePathRules — rate-limit-only rules', () => {
+	it('keeps a rule whose only content is a rate limit', () => {
+		const rules: PathRule[] = [
+			{ pathPrefix: '/rl-test', ipFilter: { mode: 'off' }, rateLimit: { events: 5, window: '1m' } }
+		];
+		const kept = sanitizePathRules(rules);
+		expect(kept, 'a rate-limit-only rule was dropped before it could be saved').toHaveLength(1);
+		expect(kept[0].rateLimit).toEqual({ events: 5, window: '1m' });
+	});
+
+	it('still drops a row that carries nothing at all', () => {
+		const rules: PathRule[] = [{ pathPrefix: '/empty', ipFilter: { mode: 'off' } }];
+		expect(sanitizePathRules(rules)).toHaveLength(0);
+	});
+
+	// A limit of zero requests is not a limit; it is a half-filled row.
+	it('drops a rate limit with no request count', () => {
+		const rules: PathRule[] = [
+			{ pathPrefix: '/x', ipFilter: { mode: 'off' }, rateLimit: { events: 0, window: '1m' } }
+		];
+		expect(sanitizePathRules(rules)).toHaveLength(0);
+	});
+
+	// The drift guard. Each content field of PathRule must be recognised by
+	// at least one predicate, or a rule carrying only that field is silently
+	// discarded with a success toast — invisible until an operator notices
+	// their rule vanished.
+	it('recognises every kind of content a rule can carry', () => {
+		const byField: Record<string, PathRule> = {
+			basicAuth: { pathPrefix: '/a', basicAuth: { username: 'ops', password: 'x' } },
+			ipFilter: { pathPrefix: '/a', ipFilter: { mode: 'allow', cidrs: ['10.0.0.0/8'] } },
+			upstreams: { pathPrefix: '/a', upstreams: [{ url: 'http://10.0.0.2:80', weight: 1 }] },
+			redirect: { pathPrefix: '/a', redirect: { target: '/login' } },
+			rateLimit: { pathPrefix: '/a', rateLimit: { events: 5, window: '1m' } }
+		};
+		for (const [field, rule] of Object.entries(byField)) {
+			expect(
+				pathRuleContentChecks.some((has) => has(rule)),
+				`a rule carrying only ${field} is treated as empty and dropped on save`
+			).toBe(true);
+		}
 	});
 });

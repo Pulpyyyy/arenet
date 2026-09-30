@@ -27,7 +27,7 @@
 	} from '$lib/api/error-templates';
 	import { externalCertsApi } from '$lib/api/external-certs';
 	import { hostMatchesSAN } from '$lib/utils/san-match';
-	import { sanitizePathRules } from '$lib/utils/path-rules';
+	import { pathRuleContentChecks, sanitizePathRules } from '$lib/utils/path-rules';
 	import { manualCertDisplayName } from '$lib/utils/manual-cert-name';
 	import type {
 		SecLangError,
@@ -2625,6 +2625,23 @@
 			}
 		}
 
+		// v2.56.3 — a path rule the operator named but never filled is
+		// refused instead of dropped.
+		//
+		// sanitizePathRules removes rules carrying no content, which is
+		// right for a row added and abandoned. It is wrong for a row with
+		// a path typed into it: the rule vanished on save, with a success
+		// toast and nothing said. Telling the operator is the difference
+		// between a filter and a deletion.
+		formData.pathRules.forEach((rule, i) => {
+			if (rule.pathPrefix.trim() === '') return;
+			if (!pathRuleContentChecks.some((has) => has(rule))) {
+				next[`pathRules.${i}`] = t('routes.pathRules.emptyRuleError', {
+					path: rule.pathPrefix.trim()
+				});
+			}
+		});
+
 		// Step X Option (c) — re-parse the exclusion-rules
 		// textarea at submit time so a stale invalid input
 		// surfaces here even if the operator never blurred /
@@ -2848,6 +2865,19 @@
 							// operator lost a path redirect and saw "config is
 							// unchanged" in the log.
 							...(rule.matchExact ? { matchExact: true } : {}),
+							// v2.56.3 — and the same trap caught the rate limit.
+							// The comment above was already there, written after
+							// a path redirect was lost the same way; the field was
+							// added to the type without it being read.
+							...(rule.rateLimit && rule.rateLimit.events > 0
+								? {
+										rateLimit: {
+											events: rule.rateLimit.events,
+											window: rule.rateLimit.window,
+											...(rule.rateLimit.key ? { key: rule.rateLimit.key } : {})
+										}
+									}
+								: {}),
 							...(rule.redirect && rule.redirect.target.trim() !== ''
 								? {
 										redirect: {

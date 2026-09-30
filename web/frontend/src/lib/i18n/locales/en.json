@@ -771,6 +771,7 @@
 			"rateLimitWindow": "Per (duration)",
 			"rateLimitKey": "Key (optional)",
 			"rateLimitHint": "Counted separately from the route's own limit, which still applies — a strict limit here does not throttle the rest of the route. Runs before this path's basic auth. Over the limit: 429.",
+			"emptyRuleError": "The rule on \"{path}\" carries nothing: add a rate limit, basic auth, an IP filter, an upstream or a redirect — or remove the rule.",
 			"upstreamLabel": "Specific upstream (optional)",
 			"upstreamInheritHint": "By default this path follows the route's upstream.",
 			"upstreamUrlPlaceholder": "http://backend:8080",
