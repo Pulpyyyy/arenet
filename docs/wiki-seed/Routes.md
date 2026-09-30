@@ -173,6 +173,8 @@ From v2.55 the probe carries the **route's own host** by default, so it looks to
 
 The **Test** button beside each upstream uses the same Host, so what it reports is what the health check will see. It marks a 2xx or 3xx answer with `✓` and a 4xx or 5xx with `⚠` : the probe reaching the upstream and the upstream answering usefully are two different facts.
 
+Since **v2.56** the probe refuses two kinds of address, checked on the IP it resolves to rather than on the name: the **link-local** range (`169.254.0.0/16`, `fe80::/10`) and AWS's IPv6 metadata address (`fd00:ec2::254`). That is where a cloud provider's instance metadata answers, handing out instance credentials to anything asking from the instance, and a Test button is no business of it. Private space and loopback stay allowed, because that is where a homelab's upstreams actually are: `10/8`, `172.16/12`, `192.168/16`, `127.0.0.1`. Every probe is now recorded in the audit log, refusals included.
+
 ---
 
 ## Source IP filter (v2.21.0)

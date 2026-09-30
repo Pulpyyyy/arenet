@@ -26,6 +26,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/barto95100/arenet/internal/audit"
 )
 
 // Step #R-PROXMOX-HTTPS-LOOP commit 3 — POST /api/v1/routes
@@ -234,6 +236,16 @@ func (h *Handler) testUpstream(w http.ResponseWriter, r *http.Request) {
 		"status_code", resp.StatusCode,
 		"latency_ms", resp.LatencyMs)
 
+	// v2.56 — audited. Creating a route to reach an address leaves a
+	// trail; a probe did not, which made it the quiet way to learn what
+	// answers on an internal address. A refusal is recorded under its own
+	// action, because an attempt at the metadata endpoint is worth more
+	// than its absence.
+	h.appendAudit(r, audit.Event{
+		Action:  probeAuditAction(resp.Error),
+		Message: probeAuditMessage(parsed, resp.Reachable, resp.StatusCode, resp.Error),
+	})
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -268,6 +280,11 @@ func probeUpstream(ctx context.Context, target *url.URL, insecureSkipVerify bool
 		TLSClientConfig:       tlsCfg,
 		TLSHandshakeTimeout:   testUpstreamDeadline,
 		ResponseHeaderTimeout: testUpstreamDeadline,
+		// v2.56 — refuse link-local and cloud-metadata addresses, checked
+		// on the resolved IP rather than on the name. See probe_dialer.go
+		// for why the check belongs after resolution. Behaviour change on
+		// an endpoint that previously fetched any http/https URL.
+		DialContext: newProbeDialer(testUpstreamDeadline).DialContext,
 		// Disable connection reuse — each probe is a
 		// one-shot diagnostic, no benefit to a pooled
 		// connection and explicit close keeps the

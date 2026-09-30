@@ -95,6 +95,16 @@ const (
 	ActionDNSProviderCreated = "dns_provider_created"
 	ActionDNSProviderDeleted = "dns_provider_deleted"
 
+	// v2.56 — diagnostic probes.
+	//
+	// The Test buttons fetch a URL the request names, so the admin API can
+	// reach whatever the host can. Creating a route to do the same is
+	// audited; a probe was not, which made it the quiet way to find out
+	// what answers on an internal address. Recorded so it never is.
+	ActionProbeUpstream    = "probe_upstream"
+	ActionProbeHealthCheck = "probe_health_check"
+	ActionProbeRefused     = "probe_refused"
+
 	// Step K.1 — forward-auth provider (2)
 	ActionForwardAuthProviderUpdated = "forward_auth_provider_updated"
 	ActionForwardAuthProviderDeleted = "forward_auth_provider_deleted"
@@ -317,6 +327,9 @@ var allActions = []string{
 	ActionDNSProviderDeleted,
 	ActionForwardAuthProviderUpdated,
 	ActionForwardAuthProviderDeleted,
+	ActionProbeUpstream,
+	ActionProbeHealthCheck,
+	ActionProbeRefused,
 	ActionOIDCConfigured,
 	ActionOIDCUpdated,
 	ActionOIDCLoginRejected,
