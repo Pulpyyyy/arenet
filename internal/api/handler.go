@@ -1215,6 +1215,9 @@ type pathRuleReq struct {
 	// Redirect (v2.44) answers a redirect for this path instead of
 	// proxying it.
 	Redirect *pathRedirectReq `json:"redirect,omitempty"`
+	// RateLimit (v2.57) throttles THIS path in addition to the route's
+	// own limit, in a separate counter zone.
+	RateLimit *rateLimitReq `json:"rateLimit,omitempty"`
 }
 
 // pathRedirectReq is the wire mirror of storage.PathRedirect.
@@ -1278,6 +1281,15 @@ func mapPathRuleReqs(reqs []pathRuleReq, existing []storage.PathRule) ([]storage
 		if r.IPFilter != nil {
 			f := r.IPFilter.toStorage()
 			pr.IPFilter = &f
+		}
+		// v2.57 — the per-path limit, validated by the same materialiser
+		// as the route's so the two cannot drift apart.
+		if r.RateLimit != nil {
+			rl, rlErr := materialiseRateLimit(r.RateLimit)
+			if rlErr != nil {
+				return nil, fmt.Errorf("path_rule %q: %w", r.PathPrefix, rlErr)
+			}
+			pr.RateLimit = rl
 		}
 		if len(r.Upstreams) > 0 {
 			pool := make([]storage.Upstream, len(r.Upstreams))
@@ -2063,6 +2075,13 @@ func toPathRulesResp(rules []storage.PathRule) []pathRuleReq {
 				Mode:       pr.IPFilter.Mode,
 				CIDRs:      pr.IPFilter.CIDRs,
 				StatusCode: pr.IPFilter.StatusCode,
+			}
+		}
+		if pr.RateLimit != nil {
+			out[i].RateLimit = &rateLimitReq{
+				Events: pr.RateLimit.Events,
+				Window: pr.RateLimit.Window,
+				Key:    pr.RateLimit.Key,
 			}
 		}
 		if len(pr.Upstreams) > 0 {

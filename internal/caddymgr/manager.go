@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"net"
 	"net/url"
@@ -1867,7 +1868,7 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 					InsecureSkipVerify: pr.InsecureSkipVerify,
 				}, sharedHandleResponse, r.UploadStreamingMode)
 			}
-			sub, err := buildPathRulesSubroute(r.PathRules, proxyHandler, func(c storage.BasicAuthRouteConfig) map[string]any {
+			sub, err := buildPathRulesSubroute(r.ID, r.PathRules, proxyHandler, func(c storage.BasicAuthRouteConfig) map[string]any {
 				return buildBasicAuthHandlerFromConfig(c, pathRealm)
 			}, pathProxy)
 			if err != nil {
@@ -3348,6 +3349,85 @@ func buildRateLimitHandler(routeID string, rl *storage.RouteRateLimit) map[strin
 			},
 		},
 	}
+}
+
+// buildPathRateLimitHandler returns the rate_limit handler for ONE path
+// rule, in its own zone.
+//
+// Why the zone name encodes the prefix rather than the rule's position:
+// caddy-ratelimit keeps its zones in a caddy.NewUsagePool keyed by NAME
+// (handler.go:279), reference-counted, and Cleanup deletes by name
+// (handler.go:245-250). A zone whose name is still in use by the next
+// config therefore survives the reload WITH ITS COUNTERS. Naming zones
+// path0, path1, … would mean reordering two rules hands each the other's
+// counters — a client throttled on /admin would arrive pre-throttled on
+// /api after an unrelated edit.
+//
+// So the name carries a sanitised prefix for readability (it surfaces
+// through {http.rate_limit.exceeded.name}) plus a hash of the exact
+// prefix for uniqueness: sanitising alone would collide "/a/b" with
+// "/a-b" and bleed counters between two different rules.
+func buildPathRateLimitHandler(routeID, prefix string, rl *storage.RouteRateLimit) map[string]any {
+	if rl == nil {
+		return nil
+	}
+	if rl.Events <= 0 {
+		slog.Warn("rate-limit emit: skipping path rule with non-positive Events",
+			"route_id", routeID, "path", prefix, "events", rl.Events)
+		return nil
+	}
+	dur, err := time.ParseDuration(rl.Window)
+	if err != nil || dur <= 0 {
+		slog.Warn("rate-limit emit: skipping path rule with invalid Window",
+			"route_id", routeID, "path", prefix, "window", rl.Window, "err", err)
+		return nil
+	}
+	key := rl.Key
+	if key == "" {
+		key = defaultRateLimitKey
+	}
+	return map[string]any{
+		"handler": "rate_limit",
+		"rate_limits": map[string]any{
+			pathRateLimitZoneName(routeID, prefix): map[string]any{
+				"key":        key,
+				"window":     dur,
+				"max_events": rl.Events,
+			},
+		},
+	}
+}
+
+// pathRateLimitZoneName builds a zone name that is unique per (route,
+// prefix) and stable across reloads and rule reordering.
+func pathRateLimitZoneName(routeID, prefix string) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(prefix))
+	return fmt.Sprintf("route-%s-path-%s-%08x", routeID, sanitiseZoneLabel(prefix), h.Sum32())
+}
+
+// sanitiseZoneLabel keeps the readable part of a prefix: lowercase
+// alphanumerics, everything else collapsed to a single dash, bounded so a
+// 256-character prefix does not produce a 256-character zone name. The
+// hash beside it is what guarantees uniqueness, so losing detail here is
+// only a loss of readability.
+func sanitiseZoneLabel(prefix string) string {
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(prefix) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+			lastDash = false
+		case !lastDash && b.Len() > 0:
+			b.WriteByte('-')
+			lastDash = true
+		}
+		if b.Len() >= 32 {
+			break
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 // countryBlockFingerprint serialises the operator-meaningful

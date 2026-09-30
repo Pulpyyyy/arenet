@@ -7,7 +7,8 @@
 // interaction + assert observable outcome, no internal state peeking.
 
 import { describe, it, expect } from 'vitest';
-import { render, fireEvent } from '@testing-library/svelte';
+import { render, fireEvent, screen } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import PathRulesSection from './PathRulesSection.svelte';
 import type { PathRule } from '$lib/api/types';
 
@@ -312,5 +313,64 @@ describe('PathRulesSection — exact match and redirect (v2.44)', () => {
 		];
 		const { getByTestId } = render(PathRulesSection, { value });
 		expect(getByTestId('path-rule-redirect-0').textContent).toMatch(/forever/i);
+	});
+});
+
+// v2.57 — a stricter limit for one path.
+//
+// Reason to exist: a login or session endpoint wants a much tighter limit
+// than the site around it, and raising the route's limit to protect one
+// path would throttle every asset on the page to slow down one form.
+describe('PathRulesSection — per-path rate limit', () => {
+	it('is off until asked for, and seeds a usable pair when turned on', async () => {
+		const rules: PathRule[] = [{ pathPrefix: '/api/v1/auth', ipFilter: { mode: 'off' } }];
+		render(PathRulesSection, { value: rules });
+
+		expect(screen.queryByTestId('path-rule-rate-events-0')).toBeNull();
+
+		await fireEvent.click(screen.getByTestId('path-rule-rate-limit-toggle-0'));
+		await tick();
+
+		const events = screen.getByTestId('path-rule-rate-events-0') as HTMLInputElement;
+		const window_ = screen.getByTestId('path-rule-rate-window-0') as HTMLInputElement;
+		expect(events.value).toBe('10');
+		expect(window_.value).toBe('1m');
+	});
+
+	it('clears the limit when switched back off', async () => {
+		const rules: PathRule[] = [
+			{ pathPrefix: '/api/v1/auth', rateLimit: { events: 5, window: '1m' } }
+		];
+		render(PathRulesSection, { value: rules });
+
+		expect(screen.getByTestId('path-rule-rate-events-0')).toBeTruthy();
+		await fireEvent.click(screen.getByTestId('path-rule-rate-limit-toggle-0'));
+		await tick();
+
+		expect(rules[0].rateLimit).toBeUndefined();
+		expect(screen.queryByTestId('path-rule-rate-events-0')).toBeNull();
+	});
+
+	// The operator has to be told this is NOT the route's limit, or they
+	// will set it thinking they replaced one.
+	it('says the route limit still applies and that counters are separate', async () => {
+		const rules: PathRule[] = [
+			{ pathPrefix: '/api/v1/auth', rateLimit: { events: 5, window: '1m' } }
+		];
+		render(PathRulesSection, { value: rules });
+
+		const hint = screen.getByText(/Counted separately from the route/i);
+		expect(hint.textContent).toMatch(/still applies/i);
+	});
+
+	it('keeps each rule limit to its own rule', async () => {
+		const rules: PathRule[] = [
+			{ pathPrefix: '/api/v1/auth', rateLimit: { events: 5, window: '1m' } },
+			{ pathPrefix: '/admin', ipFilter: { mode: 'off' } }
+		];
+		render(PathRulesSection, { value: rules });
+
+		expect(screen.getByTestId('path-rule-rate-events-0')).toBeTruthy();
+		expect(screen.queryByTestId('path-rule-rate-events-1')).toBeNull();
 	});
 });

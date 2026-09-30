@@ -875,6 +875,19 @@ export interface PathRule {
 	 * The rest of the route keeps being proxied.
 	 */
 	redirect?: { target: string; statusCode?: number };
+	/**
+	 * v2.57 — throttles THIS path in ADDITION to the route's own limit,
+	 * with its own counters.
+	 *
+	 * Reason to exist: a login or session endpoint wants a much tighter
+	 * limit than the site around it, and raising the route's limit to
+	 * protect one path would throttle every asset on the page to slow
+	 * down one form.
+	 *
+	 * Runs before the path's basic auth, so the requests it counts are
+	 * the ones that have not authenticated yet.
+	 */
+	rateLimit?: RouteRateLimit;
 }
 
 /**

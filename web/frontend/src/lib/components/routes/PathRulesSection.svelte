@@ -168,6 +168,20 @@
 	function ipFilterValue(rule: PathRule): NonNullable<PathRule['ipFilter']> {
 		return rule.ipFilter ?? { mode: 'off' };
 	}
+	// v2.57 — the per-path rate limit.
+	//
+	// Its own counters, so a strict limit on a login endpoint does not
+	// spend the route's budget and the route's limit does not dilute it.
+	// Both apply.
+	function rateLimitEnabled(rule: PathRule): boolean {
+		return rule.rateLimit != null;
+	}
+
+	function toggleRateLimit(rule: PathRule, on: boolean): void {
+		rule.rateLimit = on ? { events: 10, window: '1m' } : undefined;
+		value = [...value];
+	}
+
 	function setIpFilterValue(rule: PathRule, next: NonNullable<PathRule['ipFilter']>): void {
 		rule.ipFilter = next;
 	}
@@ -333,6 +347,75 @@
 							(next) => setIpFilterValue(rule, next)
 						}
 					/>
+				</div>
+
+				<!-- v2.57 — a stricter limit for this path only.
+				     The route's own limit is unchanged and still applies: the
+				     two are separate counter zones, so protecting one login
+				     endpoint does not mean throttling every asset on the
+				     page. -->
+				<div>
+					<label class="flex items-center gap-2 text-xs font-medium text-secondary mb-1">
+						<input
+							type="checkbox"
+							checked={rateLimitEnabled(rule)}
+							onchange={(e) => toggleRateLimit(rule, (e.currentTarget as HTMLInputElement).checked)}
+							data-testid="path-rule-rate-limit-toggle-{i}"
+						/>
+						{language.current && t('routes.pathRules.rateLimitLabel')}
+					</label>
+					{#if rule.rateLimit}
+						<div class="grid grid-cols-1 sm:grid-cols-3 gap-2 pl-6">
+							<div>
+								<label
+									for="path-rate-events-{i}"
+									class="text-[11px] text-muted block mb-0.5"
+								>
+									{language.current && t('routes.pathRules.rateLimitEvents')}
+								</label>
+								<input
+									id="path-rate-events-{i}"
+									type="number"
+									min="1"
+									bind:value={rule.rateLimit.events}
+									data-testid="path-rule-rate-events-{i}"
+									class="w-full h-8 rounded border border-border-default bg-surface px-2 text-sm text-primary"
+								/>
+							</div>
+							<div>
+								<label
+									for="path-rate-window-{i}"
+									class="text-[11px] text-muted block mb-0.5"
+								>
+									{language.current && t('routes.pathRules.rateLimitWindow')}
+								</label>
+								<input
+									id="path-rate-window-{i}"
+									type="text"
+									placeholder="1m"
+									bind:value={rule.rateLimit.window}
+									data-testid="path-rule-rate-window-{i}"
+									class="w-full h-8 rounded border border-border-default bg-surface px-2 text-sm text-primary font-mono"
+								/>
+							</div>
+							<div>
+								<label for="path-rate-key-{i}" class="text-[11px] text-muted block mb-0.5">
+									{language.current && t('routes.pathRules.rateLimitKey')}
+								</label>
+								<input
+									id="path-rate-key-{i}"
+									type="text"
+									placeholder="{'{http.request.remote.host}'}"
+									bind:value={rule.rateLimit.key}
+									data-testid="path-rule-rate-key-{i}"
+									class="w-full h-8 rounded border border-border-default bg-surface px-2 text-sm text-primary font-mono"
+								/>
+							</div>
+						</div>
+						<p class="text-[11px] text-muted mt-1 pl-6">
+							{language.current && t('routes.pathRules.rateLimitHint')}
+						</p>
+					{/if}
 				</div>
 
 				<!-- Task 6 (per-path upstream routing) — collapsed-by-default

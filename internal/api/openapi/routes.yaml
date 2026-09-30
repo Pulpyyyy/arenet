@@ -1367,6 +1367,15 @@ components:
           $ref: '#/components/schemas/RoutesLBPolicy'
         healthCheck: { $ref: '#/components/schemas/RoutesHealthCheck' }
         insecureSkipVerify: { type: boolean }
+        rateLimit:
+          allOf:
+            - $ref: '#/components/schemas/RoutesRateLimit'
+          description: >-
+            v2.57 — throttles THIS path in addition to the route's own limit,
+            in a separate counter zone. A strict limit on a login endpoint
+            therefore does not spend the route's budget, and the route's limit
+            does not dilute it. Emitted before the path's basic auth, so the
+            requests it counts are the ones that have not authenticated yet.
     RoutesRateLimit:
       type: object
       required: [events, window]

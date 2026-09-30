@@ -128,6 +128,16 @@ type PathRule struct {
 	// normally: unlike the route-level redirect state, this replaces
 	// the proxy for ONE path.
 	Redirect *PathRedirect `json:"redirect,omitempty"`
+	// RateLimit (v2.57) throttles THIS path only, in ADDITION to the
+	// route's own limit. Its counters are a separate zone, so a strict
+	// limit on a login endpoint does not spend the route's budget and
+	// the route's limit does not dilute it.
+	//
+	// Reason to exist: a login or session endpoint wants a much tighter
+	// limit than the site around it, and raising the route's limit to
+	// protect one path would be the wrong instrument — it would throttle
+	// every asset on the page to slow down one form.
+	RateLimit *RouteRateLimit `json:"rate_limit,omitempty"`
 }
 
 // PathRedirect answers a redirect for one path of a route.
@@ -191,10 +201,11 @@ func (p PathRule) Validate() error {
 				"use %q", p.PathPrefix, strings.ToLower(p.PathPrefix))
 	}
 	hasUpstreams := len(p.Upstreams) > 0
-	if p.BasicAuth == nil && (p.IPFilter == nil || !p.IPFilter.IsActive()) && !hasUpstreams && p.Redirect == nil {
+	if p.BasicAuth == nil && (p.IPFilter == nil || !p.IPFilter.IsActive()) && !hasUpstreams &&
+		p.Redirect == nil && p.RateLimit == nil {
 		return apierr.New("path_rule_empty", map[string]string{"path": p.PathPrefix},
-			"path_rule %q: must declare at least one of basic auth, IP filter, an upstream, or a redirect",
-			p.PathPrefix)
+			"path_rule %q: must declare at least one of basic auth, IP filter, a rate limit, "+
+				"an upstream, or a redirect", p.PathPrefix)
 	}
 	if err := p.validateRedirect(); err != nil {
 		return err
@@ -207,6 +218,12 @@ func (p PathRule) Validate() error {
 	}
 	if p.IPFilter != nil {
 		if err := p.IPFilter.Validate(); err != nil {
+			return fmt.Errorf("path_rule %q: %w", p.PathPrefix, err)
+		}
+	}
+	// v2.57 — the per-path limit, same contract as the route's.
+	if p.RateLimit != nil {
+		if err := p.RateLimit.validate(); err != nil {
 			return fmt.Errorf("path_rule %q: %w", p.PathPrefix, err)
 		}
 	}
@@ -1005,6 +1022,29 @@ type RouteRateLimit struct {
 	// time → defaulted to "{http.request.remote.host}" by
 	// the caddymgr emit.
 	Key string `json:"key,omitempty"`
+}
+
+// validate checks a rate-limit declaration.
+//
+// v2.57 — extracted so a path rule's limit is held to the same contract as
+// a route's. Events < 1 would refuse every request, which is a typo rather
+// than a policy, and a window that does not parse would be dropped at emit
+// time with only a log to say so.
+func (rl RouteRateLimit) validate() error {
+	if rl.Events < 1 {
+		return fmt.Errorf("rate_limit.events must be >= 1 (got %d)", rl.Events)
+	}
+	if strings.TrimSpace(rl.Window) == "" {
+		return errors.New(`rate_limit.window is required (e.g. "1m", "30s")`)
+	}
+	dur, err := time.ParseDuration(rl.Window)
+	if err != nil {
+		return fmt.Errorf("rate_limit.window %q is not a duration: %v", rl.Window, err)
+	}
+	if dur <= 0 {
+		return fmt.Errorf("rate_limit.window must be > 0 (got %s)", rl.Window)
+	}
+	return nil
 }
 
 // AllHosts returns the full ordered list of hostnames this route

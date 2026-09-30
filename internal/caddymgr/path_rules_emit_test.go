@@ -35,7 +35,7 @@ func TestBuildPathRulesSubroute_LongestFirstPlusCatchAll(t *testing.T) {
 	// inherits the route proxy (mirrors the manager.go closure's
 	// len(pr.Upstreams)==0 branch).
 	pathProxy := func(pr storage.PathRule) (map[string]any, error) { return proxy, nil }
-	sr, err := buildPathRulesSubroute(rules, proxy, ba, pathProxy)
+	sr, err := buildPathRulesSubroute("r-test", rules, proxy, ba, pathProxy)
 	if err != nil {
 		t.Fatalf("buildPathRulesSubroute: %v", err)
 	}
