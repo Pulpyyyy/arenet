@@ -61,6 +61,7 @@ const { toastMock, apiMock, settingsMock, authMock, externalCertsMock } = vi.hoi
 		// triggered upstream probe. Per-test rebinds the
 		// resolve / reject to drive the result chip states.
 		testUpstream: vi.fn(),
+		testHealthCheck: vi.fn(),
 		// v2.14.3 — route disable/enable dedicated endpoints.
 		disableRoute: vi.fn(),
 		enableRoute: vi.fn(),
@@ -111,6 +112,7 @@ vi.mock('$lib/api/client', () => ({
 	updateRoute: (...args: unknown[]) => apiMock.updateRoute(...args),
 	deleteRoute: (...args: unknown[]) => apiMock.deleteRoute(...args),
 	testUpstream: (...args: unknown[]) => apiMock.testUpstream(...args),
+	testHealthCheck: (...args: unknown[]) => apiMock.testHealthCheck(...args),
 	disableRoute: (...args: unknown[]) => apiMock.disableRoute(...args),
 	enableRoute: (...args: unknown[]) => apiMock.enableRoute(...args),
 	enterMaintenance: (...args: unknown[]) => apiMock.enterMaintenance(...args),
@@ -241,6 +243,7 @@ beforeEach(() => {
 	apiMock.updateRoute.mockReset();
 	apiMock.deleteRoute.mockReset();
 	apiMock.testUpstream.mockReset();
+	apiMock.testHealthCheck.mockReset();
 	apiMock.disableRoute.mockReset();
 	apiMock.enableRoute.mockReset();
 	apiMock.enterMaintenance.mockReset();
@@ -2030,6 +2033,90 @@ describe('Routes page — Test upstream button + chip (#R-PROXMOX-HTTPS-LOOP com
 		await userEvent.type(firstURL(), 'http://10.0.0.10:8080');
 		await tick();
 		expect(btn0.disabled).toBe(false);
+	});
+
+	// v2.56 — run the health check before saving it.
+	//
+	// A misconfigured check used to surface only as a post-save 503 and an
+	// undone change ("Change undone…"), which protected the site and
+	// explained nothing. The reported case: a probe against Ghost with no
+	// X-Forwarded-Proto, so Ghost answered 301 and the expected 200 never
+	// arrived.
+	it('sends the unsaved settings to the probe endpoint', async () => {
+		apiMock.testHealthCheck.mockResolvedValue({ results: [] });
+		render(Page);
+		await openCreateForm();
+		await userEvent.type(hostInput(), 'blog.example.com');
+		await userEvent.type(firstURL(), 'http://10.66.0.2:80');
+		await userEvent.click(screen.getByLabelText('Enable active health checks'));
+		await tick();
+		await userEvent.type(document.getElementById('hc-uri') as HTMLInputElement, '/alive');
+		await tick();
+
+		await userEvent.click(screen.getByText(/Test the check/i));
+		await waitFor(() => expect(apiMock.testHealthCheck).toHaveBeenCalledTimes(1));
+
+		const sent = apiMock.testHealthCheck.mock.calls[0][0] as {
+			routeHost?: string;
+			upstreams: { url: string }[];
+			healthCheck: { uri: string; enabled: boolean };
+		};
+		// The form state, not what is stored — nothing has been saved.
+		expect(sent.routeHost).toBe('blog.example.com');
+		expect(sent.upstreams.map((u) => u.url)).toEqual(['http://10.66.0.2:80']);
+		expect(sent.healthCheck.uri).toBe('/alive');
+		expect(sent.healthCheck.enabled).toBe(true);
+	});
+
+	it('shows the reason and the redirect hint for a failed probe', async () => {
+		apiMock.testHealthCheck.mockResolvedValue({
+			results: [
+				{
+					upstream: '10.66.0.2:80',
+					healthy: false,
+					reason: 'the upstream answered 301; the check accepts any 2xx',
+					sent: { method: 'GET', url: 'http://10.66.0.2:80/', host: 'blog.example.com' },
+					got: {
+						statusCode: 301,
+						durationMs: 12,
+						location: 'https://10.66.0.2:80/',
+						bodyTruncated: false
+					},
+					hint: 'the upstream redirected to the same URL over https … X-Forwarded-Proto: https header'
+				}
+			]
+		});
+		render(Page);
+		await openCreateForm();
+		await userEvent.type(firstURL(), 'http://10.66.0.2:80');
+		await userEvent.click(screen.getByLabelText('Enable active health checks'));
+		await tick();
+		await userEvent.type(document.getElementById('hc-uri') as HTMLInputElement, '/');
+		await userEvent.click(screen.getByText(/Test the check/i));
+
+		await waitFor(() => expect(screen.getByTestId('hc-probe-result')).toBeInTheDocument());
+		expect(screen.getByTestId('hc-probe-reason').textContent).toContain('301');
+		// The one piece nobody guesses.
+		expect(screen.getByTestId('hc-probe-hint').textContent).toContain('X-Forwarded-Proto');
+		// And the request that went out is on screen, not inferred.
+		expect(screen.getByTestId('hc-probe-result').textContent).toContain('Host: blog.example.com');
+	});
+
+	it('surfaces a refusal instead of claiming the probe ran', async () => {
+		apiMock.testHealthCheck.mockRejectedValue(
+			new ApiError('healthCheck.expectBody is not a valid regular expression', 400, 'bad_request')
+		);
+		render(Page);
+		await openCreateForm();
+		await userEvent.type(firstURL(), 'http://10.66.0.2:80');
+		await userEvent.click(screen.getByLabelText('Enable active health checks'));
+		await tick();
+		await userEvent.type(document.getElementById('hc-uri') as HTMLInputElement, '/');
+		await userEvent.click(screen.getByText(/Test the check/i));
+
+		await waitFor(() => expect(screen.getByTestId('hc-probe-error')).toBeInTheDocument());
+		expect(screen.getByTestId('hc-probe-error').textContent).toContain('regular expression');
+		expect(screen.queryByTestId('hc-probe-result')).toBeNull();
 	});
 
 	// v2.55 — reported from a setup where every route proxies to one

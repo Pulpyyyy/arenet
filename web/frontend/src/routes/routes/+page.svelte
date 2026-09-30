@@ -13,6 +13,7 @@
 		updateRoute,
 		deleteRoute,
 		testUpstream,
+		testHealthCheck,
 		disableRoute,
 		enableRoute,
 		enterMaintenance,
@@ -51,7 +52,7 @@
 	} from '$lib/api/types';
 	import { countryName, matchCountries, type CountryMatch } from '$lib/data/countries';
 	import { secondsToParts, partsToSeconds, type DurationUnit } from '$lib/utils/duration';
-	import { ApiError } from '$lib/api/types';
+	import { ApiError, type TestHealthCheckResult } from '$lib/api/types';
 	import { serverErrorMessage } from '$lib/api/server-errors';
 	import { pushToast } from '$lib/stores/toast';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -303,6 +304,42 @@
 	// NOT one of these: it has its own field, and the server refuses it
 	// here so there is one place to look for it.
 	let healthCheckHeaderRows = $state<{ name: string; value: string }[]>([]);
+
+	// v2.56 — run the check before saving it.
+	//
+	// A misconfigured check used to surface only as a post-save 503 and an
+	// undone change, which protected the site and said nothing about why.
+	let hcProbeRunning = $state(false);
+	let hcProbeError = $state<string | null>(null);
+	let hcProbeResults = $state<TestHealthCheckResult[]>([]);
+
+	async function runHealthCheckProbe(): Promise<void> {
+		hcProbeRunning = true;
+		hcProbeError = null;
+		hcProbeResults = [];
+		try {
+			const res = await testHealthCheck({
+				upstreams: formData.upstreams
+					.filter((u) => (u.url ?? '').trim() !== '')
+					.map((u) => ({ url: u.url.trim(), weight: u.weight })),
+				healthCheck: {
+					...formData.healthCheck,
+					hostHeader: formData.healthCheck.hostHeader?.trim() || undefined,
+					headers: (() => {
+						const h = headersFromRows(healthCheckHeaderRows);
+						return Object.keys(h).length > 0 ? h : undefined;
+					})()
+				},
+				routeHost: formData.host?.trim() || undefined,
+				insecureSkipVerify: formData.insecureSkipVerify
+			});
+			hcProbeResults = res.results;
+		} catch (err) {
+			hcProbeError = err instanceof ApiError ? err.message : t('routes.form.healthCheckProbeNetworkError');
+		} finally {
+			hcProbeRunning = false;
+		}
+	}
 
 	/**
 	 * Whether an upstream probe's status deserves the green tick.
@@ -5300,6 +5337,91 @@
 									>
 										{#snippet children()}{language.current && t('routes.form.healthCheckHeaderAdd')}{/snippet}
 									</Button>
+								</div>
+
+								<!-- v2.56 — run the check before saving it.
+								     Until now a misconfigured check surfaced only as
+								     a post-save 503 and an undone change, which
+								     protected the site and explained nothing. -->
+								<div class="flex flex-col gap-2 pt-2 border-t border-border-subtle">
+									<div class="flex items-center gap-2">
+										<Button
+											variant="secondary"
+											size="sm"
+											onclick={runHealthCheckProbe}
+											loading={hcProbeRunning}
+											disabled={!formData.healthCheck.enabled || hcProbeRunning}
+										>
+											{#snippet children()}{language.current && t('routes.form.healthCheckProbeButton')}{/snippet}
+										</Button>
+										<span class="text-xs text-secondary">
+											{language.current && t('routes.form.healthCheckProbeHint')}
+										</span>
+									</div>
+
+									{#if hcProbeError}
+										<p class="text-xs text-down" role="alert" data-testid="hc-probe-error">
+											{hcProbeError}
+										</p>
+									{/if}
+
+									{#each hcProbeResults as res (res.upstream)}
+										<div
+											class="rounded-md border p-2.5 text-xs flex flex-col gap-1.5"
+											class:border-up={res.healthy}
+											class:border-down={!res.healthy}
+											data-testid="hc-probe-result"
+										>
+											<div class="flex items-center gap-2 flex-wrap">
+												<span class={res.healthy ? 'text-up font-medium' : 'text-down font-medium'}>
+													{res.healthy ? '✓' : '✗'} {res.upstream}
+												</span>
+												{#if res.got}
+													<span class="text-secondary font-mono">
+														HTTP {res.got.statusCode} · {res.got.durationMs}ms
+													</span>
+												{/if}
+											</div>
+
+											{#if res.reason}
+												<p class="text-down" data-testid="hc-probe-reason">{res.reason}</p>
+											{/if}
+											{#if res.hint}
+												<p class="text-warn" data-testid="hc-probe-hint">{res.hint}</p>
+											{/if}
+
+											<!-- What went out, so the operator reads the request
+											     instead of reconstructing it. -->
+											<p class="text-muted font-mono break-all">
+												{res.sent.method} {res.sent.url} — Host: {res.sent.host}
+											</p>
+											{#if res.sent.headers}
+												{#each Object.entries(res.sent.headers) as [name, value] (name)}
+													<p class="text-muted font-mono break-all">{name}: {value}</p>
+												{/each}
+											{/if}
+
+											{#if res.got?.location}
+												<p class="text-secondary font-mono break-all">
+													Location: {res.got.location}
+												</p>
+											{/if}
+											{#if res.got?.bodyExcerpt}
+												<details>
+													<summary class="cursor-pointer text-secondary">
+														{language.current && t('routes.form.healthCheckProbeBody')}
+														{#if res.got.bodyMatched === false}
+															— {language.current && t('routes.form.healthCheckProbeBodyNoMatch')}
+														{:else if res.got.bodyMatched === true}
+															— {language.current && t('routes.form.healthCheckProbeBodyMatch')}
+														{/if}
+													</summary>
+													<pre class="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all text-muted">{res.got
+															.bodyExcerpt}{res.got.bodyTruncated ? '\n…' : ''}</pre>
+												</details>
+											{/if}
+										</div>
+									{/each}
 								</div>
 								<Input
 									label={language.current && t('routes.form.healthCheckExpectBodyLabel')}

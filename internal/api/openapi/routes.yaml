@@ -145,6 +145,52 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /routes/test-health-check:
+    post:
+      summary: Run the active health check with unsaved settings
+      description: |
+        Runs ONE probe per submitted upstream, built the way the emitted Caddy
+        config builds the active check: the dial address plus the check's URI,
+        the scheme from the upstream, the probe `Host` and headers, the
+        configured method. Redirects are NOT followed, because the real check
+        does not follow them either — a check meeting a 301 fails, which is the
+        case this endpoint exists to explain.
+
+        Writes nothing and reloads nothing. The timeout is capped at 10 s even
+        when the submitted value is longer. An invalid `expectBody` regular
+        expression is refused before any probe goes out. Link-local and cloud
+        metadata addresses are refused on the resolved IP; private addresses and
+        loopback are allowed on purpose (homelab). Every call is audited.
+
+        A failed probe is still a 200, with `healthy: false` and a `reason`.
+      tags: [Routes]
+      x-arenet-role: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoutesTestHealthCheckRequest' }
+            example:
+              routeHost: blog.example.com
+              upstreams: [{ url: 'http://10.66.0.2:80', weight: 1 }]
+              healthCheck:
+                enabled: true
+                uri: /
+                method: GET
+                interval: 30s
+                timeout: 5s
+                expectStatus: 200
+                passes: 1
+                fails: 1
+      responses:
+        '200':
+          description: One result per upstream, healthy or not.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoutesTestHealthCheckResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /routes/{id}:
     parameters:
       - $ref: '#/components/parameters/RoutesRouteId'
@@ -1670,6 +1716,76 @@ components:
         serverHeader: { type: string }
         bodyPreview: { type: string, description: First 200 printable chars. }
         error: { type: string, description: Operator-readable failure reason. }
+
+    RoutesTestHealthCheckRequest:
+      type: object
+      additionalProperties: false
+      required: [upstreams, healthCheck]
+      properties:
+        upstreams:
+          type: array
+          maxItems: 20
+          description: The pool as currently typed, not what is stored.
+          items: { $ref: '#/components/schemas/RoutesUpstream' }
+        healthCheck: { $ref: '#/components/schemas/RoutesHealthCheck' }
+        routeHost:
+          type: string
+          description: >-
+            The route's primary host, used as the probe's Host unless the check
+            overrides it — the same resolution the emitted config uses.
+        insecureSkipVerify:
+          type: boolean
+          description: Mirrors the route's TLS posture, for a self-signed upstream.
+
+    RoutesTestHealthCheckResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/RoutesTestHealthCheckResult' }
+
+    RoutesTestHealthCheckResult:
+      type: object
+      required: [upstream, healthy, sent]
+      properties:
+        upstream: { type: string, description: The dial address probed. }
+        healthy: { type: boolean }
+        reason:
+          type: string
+          description: >-
+            Why it failed: an unexpected status, a body that did not match, a
+            timeout, a refused connection, a DNS or TLS failure.
+        sent:
+          type: object
+          description: The request as it went out.
+          properties:
+            method: { type: string }
+            url: { type: string }
+            host: { type: string }
+            headers:
+              type: object
+              additionalProperties: { type: string }
+        got:
+          type: object
+          description: The response, absent when nothing came back.
+          properties:
+            statusCode: { type: integer }
+            durationMs: { type: integer }
+            location: { type: string, description: 'Redirect target, when there is one.' }
+            bodyExcerpt: { type: string, description: First 4 KiB. }
+            bodyTruncated: { type: boolean }
+            bodyMatched:
+              type: boolean
+              description: >-
+                Whether expectBody matched. Absent when no expression was
+                configured, so "no regex" is distinguishable from "did not
+                match".
+        hint:
+          type: string
+          description: >-
+            Attached to an observed redirect. Names the X-Forwarded-Proto header
+            when the redirect points at the same URL over https.
 
     # ---------------- WAF operations ----------------
     WafExclusionRequest:
