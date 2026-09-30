@@ -61,7 +61,19 @@ var (
 	// group keeps the `key=` prefix so we can rewrite to
 	// `key=[REDACTED]` cleanly. The value match stops at the
 	// next `&` boundary or end of string.
-	reSensitiveQueryParam = regexp.MustCompile(`(?i)((?:^|[?&])(?:password|passwd|api[-_]?key|token|secret|session|auth)=)[^&]+`)
+	// v2.56 — the token variants were missing. The alternation is
+	// anchored on `?` or `&`, so `token` never matched
+	// `?access_token=`: what precedes `token=` there is `access_`, not a
+	// separator. Vaultwarden puts the user's access token in the URI, so
+	// the one parameter most worth redacting was the one that got
+	// through.
+	//
+	// The prefixes are spelled out rather than matched as a suffix
+	// (`\w*token`), which would also swallow a legitimate `?mytoken=` or
+	// `?csrftoken=` an attack payload might carry. Over-redacting here
+	// costs forensic detail, which is the whole point of this store.
+	reSensitiveQueryParam = regexp.MustCompile(
+		`(?i)((?:^|[?&])(?:password|passwd|api[-_]?key|(?:access_|id_|refresh_)?token|secret|session|auth)=)[^&]+`)
 )
 
 // Redact runs the input through every declared pattern,

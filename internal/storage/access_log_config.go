@@ -74,16 +74,54 @@ type AccessLogConfig struct {
 	// Compress gzips rotated files. On by default: request logs are
 	// extremely compressible, and the ceiling is the whole point.
 	Compress bool `json:"compress"`
+
+	// RedactQueryParams are the query-parameter names whose VALUE is
+	// replaced with REDACTED in the logged URI (v2.56). The request
+	// forwarded upstream is untouched — the substitution happens in
+	// Caddy's log encoder, not in the request.
+	//
+	// Reported case: Vaultwarden puts the user's access token in the URI
+	// (`/notifications/hub?access_token=eyJ...`), so enabling the access
+	// log wrote a live session credential to disk, in a file CrowdSec
+	// also reads.
+	//
+	// The list is deliberately broader than the WAF store's: there,
+	// over-redacting destroys the forensic detail the store exists for,
+	// while here nothing is lost by masking a parameter that turned out
+	// to be harmless. Empty means "use the defaults"; a list with one
+	// empty-after-trim entry means the operator turned it off.
+	//
+	// No omitempty, deliberately. An operator who clears the list means
+	// it: with omitempty an empty slice is not written, so the next read
+	// would find the key absent, leave the struct's pre-filled defaults
+	// in place, and quietly restore the redaction they had just removed.
+	// Written as [] the choice survives, and nil still means "never set"
+	// so an upgrade inherits the defaults.
+	RedactQueryParams []string `json:"redactQueryParams"`
+}
+
+// DefaultRedactQueryParams are the parameter names masked in the logged
+// URI unless the operator changes the list.
+//
+// Every entry is a name an application is known to pass a credential or
+// a single-use grant in. They are matched case-insensitively.
+func DefaultRedactQueryParams() []string {
+	return []string{
+		"access_token", "token", "id_token", "refresh_token",
+		"code", "state", "password", "secret",
+		"key", "api_key", "apikey", "sig", "signature",
+	}
 }
 
 // DefaultAccessLogConfig is what a fresh install has: off, with bounds
 // already sane so enabling it is one click and never a disk incident.
 func DefaultAccessLogConfig() AccessLogConfig {
 	return AccessLogConfig{
-		Enabled:    false,
-		RollSizeMB: AccessLogDefaultRollSizeMB,
-		RollKeep:   AccessLogDefaultRollKeep,
-		Compress:   true,
+		Enabled:           false,
+		RollSizeMB:        AccessLogDefaultRollSizeMB,
+		RollKeep:          AccessLogDefaultRollKeep,
+		Compress:          true,
+		RedactQueryParams: DefaultRedactQueryParams(),
 	}
 }
 
@@ -121,7 +159,43 @@ func (c *AccessLogConfig) Validate() error {
 		return fmt.Errorf("access log: rollKeep %d out of range 1-%d",
 			c.RollKeep, AccessLogMaxRollKeep)
 	}
+	// nil means "never set" → the defaults. A caller that wants no
+	// redaction at all sends an explicit empty list, which normalises to
+	// an empty (non-nil) slice below and is honoured.
+	if c.RedactQueryParams == nil {
+		c.RedactQueryParams = DefaultRedactQueryParams()
+	} else {
+		c.RedactQueryParams = normaliseRedactParams(c.RedactQueryParams)
+	}
+	for _, name := range c.RedactQueryParams {
+		if strings.ContainsAny(name, "&=?#") {
+			return fmt.Errorf("access log: redactQueryParams entry %q contains a query separator", name)
+		}
+	}
 	return nil
+}
+
+// normaliseRedactParams trims, drops empties and de-duplicates
+// case-insensitively, keeping the operator's order.
+//
+// Case-insensitive because the match is: keeping both `Token` and
+// `token` would compile two alternatives that do the same thing.
+func normaliseRedactParams(names []string) []string {
+	out := make([]string, 0, len(names))
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		lower := strings.ToLower(name)
+		if seen[lower] {
+			continue
+		}
+		seen[lower] = true
+		out = append(out, name)
+	}
+	return out
 }
 
 // CeilingMB is the worst case this config can occupy on disk, before

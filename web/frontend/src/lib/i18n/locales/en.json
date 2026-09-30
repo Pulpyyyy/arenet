@@ -265,6 +265,8 @@
 			"sizeLabel": "Rotate at (MB)",
 			"keepLabel": "Files kept",
 			"compressLabel": "Compress rotated files",
+			"redactLabel": "Masked query parameters",
+			"redactHint": "The value of these parameters is replaced with REDACTED in the logged URI. Matched case-insensitively, separated by commas. The request sent to the backend is not changed. Empty means nothing is masked.",
 			"ceiling": "At most about {mb} MB on disk before compression.",
 			"save": "Save",
 			"saving": "Saving…",

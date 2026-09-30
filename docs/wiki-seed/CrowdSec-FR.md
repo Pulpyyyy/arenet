@@ -120,6 +120,29 @@ C'est la question à laquelle l'écran de réglages ne répond pas seul, parce q
 
 **Avec le bouncer seul**, vous avez la liste communautaire. C'est une vraie couche — des milliers d'opérateurs signalant les IP actuellement malveillantes — mais rien de ce qui concerne *votre* machine n'est jamais détecté.
 
+### Après une mise à jour en v2.56 — les journaux déjà écrits
+
+Le masquage s'applique à partir du rechargement. Tout ce qui a été écrit avant reste en clair sur le disque, et Arenet ne peut pas le réécrire : ces fichiers appartiennent au système de fichiers, pas à la base.
+
+**Les stores d'Arenet ne demandent rien.** Le store d'événements WAF est re-masqué par une migration au premier démarrage, et un secret déjà enregistré y est masqué sur place.
+
+**Les fichiers de journal sont à votre charge.** Les copies tournées comptent, y compris compressées :
+
+```bash
+# Vérifiez d'abord s'il y a eu fuite, avant de supprimer quoi que ce soit.
+sudo zgrep -lE '(access_token|id_token|refresh_token)=' /var/log/arenet/access.log*
+
+# Puis, si oui : videz le fichier courant et supprimez les fichiers tournés.
+sudo truncate -s 0 /var/log/arenet/access.log
+sudo rm -f /var/log/arenet/access.log.*
+```
+
+Videz le fichier courant plutôt que de le supprimer : Caddy le tient ouvert, et le supprimer laisse le processus écrire dans un inode que plus rien ne peut lire.
+
+**Ce que CrowdSec a déjà ingéré est un store distinct.** L'acquisition lit le fichier, et la ligne brute est conservée avec toute alerte déclenchée par les scénarios : un jeton peut donc survivre dans la base de CrowdSec après que vous avez nettoyé le journal. Vérifiez avec `sudo cscli alerts list`, examinez une alerte avec `sudo cscli alerts inspect <id> -d`, et supprimez celles qui portent un identifiant avec `sudo cscli alerts delete --id <id>`. Arenet n'a aucun accès à cette base — elle est à l'agent.
+
+Si la fenêtre a été courte et que le journal n'a pas quitté la machine, juger que cela ne vaut pas l'effort est un choix défendable. Faire tourner le jeton dans l'application concernée est le choix rigoureux : un identifiant qui a atteint un fichier que vous ne maîtrisez pas entièrement vaut mieux être remplacé que poursuivi.
+
 **Le journal d'accès** est ce qui permet aux scénarios de CrowdSec de voir votre trafic : balayages, force brute contre les applications derrière Arenet, tentatives d'exploitation connues. Arenet n'émettait aucun journal d'accès avant la **v2.50**, ce qui explique qu'un agent pouvait rester en place des mois sans jamais déclencher un scénario.
 
 **Security Automation** est l'autre détecteur, et il travaille à partir de ce qu'Arenet comprend déjà plutôt que des requêtes brutes : événements WAF, événements de limitation de débit, et échecs de connexion à l'administration d'Arenet. Quand une IP source franchit un seuil dans une fenêtre, Arenet pousse un bannissement dans LAPI avec `origin=arenet` et un scénario nommé `arenet/…`. Il déduplique, et si vous levez un bannissement à la main il se retient au lieu de le repousser aussitôt.
@@ -138,8 +161,9 @@ Le terme désigne deux choses sans rapport dans Arenet. Un **watcher** CrowdSec 
 
 1. **Réglages → Sécurité → Journal d'accès HTTP** → cochez *Écrire un journal d'accès*.
 2. Lisez le **chemin affiché par la carte**. Ne le devinez pas : le défaut est `/var/log/arenet/access.log` sur une installation systemd et `/var/lib/arenet/logs/access.log` dans le conteneur sous Docker, et seul le processus en cours sait lequel s'applique.
-3. Enregistrez. Arenet recharge Caddy — le journal fait partie de la configuration émise, donc rien n'apparaît avant ce rechargement.
-4. Sur la machine CrowdSec :
+3. Vérifiez **Paramètres d'URL masqués**. La valeur de chaque paramètre listé est remplacée par `REDACTED` dans l'URI journalisée. La liste est pré-remplie, parce que certaines applications transportent un secret dans l'URL : Vaultwarden envoie le jeton de session de l'utilisateur sous la forme `/notifications/hub?access_token=eyJ...`, et sans masquage le journal enregistre un identifiant vivant dans un fichier que CrowdSec lit aussi. La requête transmise au backend n'est pas modifiée — la substitution a lieu dans l'encodeur du journal.
+4. Enregistrez. Arenet recharge Caddy — le journal fait partie de la configuration émise, donc rien n'apparaît avant ce rechargement.
+5. Sur la machine CrowdSec :
 
 ```bash
 sudo cscli collections install crowdsecurity/caddy

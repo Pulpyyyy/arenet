@@ -116,9 +116,22 @@ func TestBuildConfigJSON_AccessLogOn_SinkAndServers(t *testing.T) {
 		t.Fatalf("roll_gzip: got %v", writer["roll_gzip"])
 	}
 
+	// v2.56 — the encoder is now a `filter` wrapping the json one, since
+	// the default config carries a redaction list. The invariant this
+	// assertion protects is unchanged and still checked: the format is
+	// always stated, never left to Caddy's console-if-a-terminal guess.
+	// It just lives one level down now.
 	encoder, _ := sink["encoder"].(map[string]any)
-	if encoder["format"] != "json" {
-		t.Fatalf("the encoder must be pinned to json, got %v", encoder)
+	switch encoder["format"] {
+	case "json":
+		// No redaction list configured.
+	case "filter":
+		wrapped, _ := encoder["wrap"].(map[string]any)
+		if wrapped["format"] != "json" {
+			t.Fatalf("the filter wraps %v; the log must stay json", wrapped["format"])
+		}
+	default:
+		t.Fatalf("the encoder format must be stated, got %v", encoder)
 	}
 
 	include, _ := sink["include"].([]any)

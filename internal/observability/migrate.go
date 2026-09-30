@@ -20,26 +20,37 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/barto95100/arenet/internal/waf"
 )
 
 // currentSchemaVersion is the latest schema version this
 // build of Arenet writes. Bumped per Step that touches the
 // schema:
+//
 //   - v1: Step L bootstrap (bucket_1m + bucket_1h).
+//
 //   - v2: Step M (waf_block_count column on both bucket
 //     tables + waf_event table + indexes).
+//
 //   - v3: Step Q (throttle_block_count column on both bucket
 //     tables + throttle_event table + indexes).
+//
 //   - v4: Step N (crowdsec_decision_count column on both
 //     bucket tables + decision_event table + indexes).
+//
 //   - v5: Step U.1 (cert_event table + indexes).
+//
 //   - v6: Step V.2 (auth_event table + indexes). 30 d
 //     retention per spec §3.6 (short-window security
 //     signal, not lifecycle record).
+//
 //   - v7: Step W.bugfix Fix #1 (action + status_code
 //     columns on waf_event so the sink can distinguish
 //     block-mode from detect-mode events).
+//
 //   - v8: Step W.4 (country_block_event table + indexes).
+//
 //   - v9: #R-DASHBOARD-WAF-COUNTERS-ZERO (waf_detect_count
 //     column on both bucket tables so detect-mode events
 //     surface in the dashboard counters as a sibling to
@@ -49,7 +60,7 @@ import (
 //     on waf_event: the "VARIABLE:key" that triggered the rule).
 //
 // Downgrade is not supported.
-const currentSchemaVersion = 13
+const currentSchemaVersion = 14
 
 // migrate brings db from currentVersion to currentSchemaVersion
 // by replaying every intervening migration step in a single
@@ -116,6 +127,7 @@ var migrateSteps = map[int]func(context.Context, *sql.Tx) error{
 	10: migrateV10toV11,
 	11: migrateV11toV12,
 	12: migrateV12toV13,
+	13: migrateV13toV14,
 }
 
 // migrateV1toV2 — Step M. Adds the waf_block_count column on
@@ -574,11 +586,79 @@ func migrateV11toV12(ctx context.Context, tx *sql.Tx) error {
 // migrateV12toV13 — v2.36 (2026-09-22). Adds matched_var to
 // waf_event: the "VARIABLE:key" of the field that triggered the
 // rule (e.g. "ARGS:content"), used to offer a targeted exclusion
-// from the event. Pre-v13 rows get '' — the field was not recorded.
+// from the event. Pre-v13 rows get ” — the field was not recorded.
 func migrateV12toV13(ctx context.Context, tx *sql.Tx) error {
 	const stmt = `ALTER TABLE waf_event ADD COLUMN matched_var TEXT NOT NULL DEFAULT ''`
 	if _, err := tx.ExecContext(ctx, stmt); err != nil {
 		return fmt.Errorf("exec %q: %w", stmt, err)
+	}
+	return nil
+}
+
+// migrateV13toV14 — v2.56. Re-redacts the WAF events already stored.
+//
+// The redaction pattern was anchored on `?` or `&`, so the name `token`
+// never matched `?access_token=`: what precedes `token=` there is
+// `access_`, not a separator. Vaultwarden puts the user's access token in
+// the URI, so the parameter most worth masking was the one that got
+// through, and every event recorded before this migration may carry a
+// live credential in request_path or payload_sample.
+//
+// Fixing the pattern only protects events recorded from now on. This step
+// applies it to what is already on disk, because a secret in a database
+// is not less of a secret for having been written last week.
+//
+// Redact is idempotent, so a row that was already clean is left alone and
+// re-running this is harmless. Only rows that actually change are
+// written, which keeps a large table from being rewritten wholesale.
+func migrateV13toV14(ctx context.Context, tx *sql.Tx) error {
+	const sel = `SELECT id, request_path, payload_sample FROM waf_event`
+	rows, err := tx.QueryContext(ctx, sel)
+	if err != nil {
+		return fmt.Errorf("exec %q: %w", sel, err)
+	}
+	type row struct {
+		id      int64
+		path    string
+		payload string
+	}
+	// Collected before updating: SQLite will not accept writes on the
+	// same connection while a result set is still open.
+	var changed []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.path, &r.payload); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan waf_event: %w", err)
+		}
+		redactedPath := waf.Redact(r.path)
+		redactedPayload := waf.Redact(r.payload)
+		if redactedPath == r.path && redactedPayload == r.payload {
+			continue
+		}
+		changed = append(changed, row{id: r.id, path: redactedPath, payload: redactedPayload})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate waf_event: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close waf_event rows: %w", err)
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+
+	const upd = `UPDATE waf_event SET request_path = ?, payload_sample = ? WHERE id = ?`
+	stmt, err := tx.PrepareContext(ctx, upd)
+	if err != nil {
+		return fmt.Errorf("prepare %q: %w", upd, err)
+	}
+	defer stmt.Close()
+	for _, r := range changed {
+		if _, err := stmt.ExecContext(ctx, r.path, r.payload, r.id); err != nil {
+			return fmt.Errorf("redact waf_event %d: %w", r.id, err)
+		}
 	}
 	return nil
 }

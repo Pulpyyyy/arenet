@@ -85,6 +85,15 @@ func TestRedact_SensitiveQueryParam(t *testing.T) {
 		{"secret", "/probe?secret=topsecret", "topsecret"},
 		{"session", "/restore?session=s3ssion-id", "s3ssion-id"},
 		{"auth", "/x?auth=basic-creds", "basic-creds"},
+		// v2.56 — the reported case. Vaultwarden puts the user's access
+		// token in the URI; the old pattern was anchored on `?` or `&`
+		// so `token` never matched `access_token`, and the one
+		// parameter most worth redacting was the one that leaked.
+		{"access_token_vaultwarden", "/notifications/hub?access_token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig", "eyJhbGciOiJIUzI1NiJ9"},
+		{"id_token", "/cb?id_token=eyJ.payload.sig", "eyJ.payload.sig"},
+		{"refresh_token", "/cb?refresh_token=r3fr3sh-me", "r3fr3sh-me"},
+		{"access_token_mid_query", "/hub?x=1&access_token=abc123&y=2", "abc123"},
+		{"access_token_uppercase", "/hub?ACCESS_TOKEN=abc123", "abc123"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -109,6 +118,10 @@ func TestRedact_NonSensitivePathPreserved(t *testing.T) {
 		"/sql?id=1+OR+1=1+--",          // SQLi probe
 		"/cmd?run=%3B+cat+/etc/shadow", // RCE probe
 		"/normal?foo=bar&page=2",       // benign
+		// v2.56 — the prefixes are explicit for this reason: a suffix
+		// match would redact these, and they may be the payload.
+		"/x?mytoken=../etc/passwd",
+		"/x?csrftoken=<script>",
 	}
 	for _, in := range cases {
 		t.Run("input="+in, func(t *testing.T) {

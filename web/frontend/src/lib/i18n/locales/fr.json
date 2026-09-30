@@ -265,6 +265,8 @@
 			"sizeLabel": "Rotation à (Mo)",
 			"keepLabel": "Fichiers conservés",
 			"compressLabel": "Compresser les fichiers tournés",
+			"redactLabel": "Paramètres d'URL masqués",
+			"redactHint": "La valeur de ces paramètres est remplacée par REDACTED dans l'URI journalisée. Correspondance insensible à la casse, séparés par des virgules. La requête envoyée au backend n'est pas modifiée. Vide, rien n'est masqué.",
 			"ceiling": "Au plus environ {mb} Mo sur le disque avant compression.",
 			"save": "Enregistrer",
 			"saving": "Enregistrement…",
