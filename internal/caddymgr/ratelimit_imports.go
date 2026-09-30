@@ -16,7 +16,7 @@
 
 package caddymgr
 
-// v2.57 — register http.handlers.rate_limit where the emitter lives.
+// v2.56 — register http.handlers.rate_limit where the emitter lives.
 //
 // Until now this blank import existed only in cmd/arenet/main.go. The
 // binary was therefore fine, and the test suite could not tell: a

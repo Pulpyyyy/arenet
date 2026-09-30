@@ -1215,7 +1215,7 @@ type pathRuleReq struct {
 	// Redirect (v2.44) answers a redirect for this path instead of
 	// proxying it.
 	Redirect *pathRedirectReq `json:"redirect,omitempty"`
-	// RateLimit (v2.57) throttles THIS path in addition to the route's
+	// RateLimit (v2.56) throttles THIS path in addition to the route's
 	// own limit, in a separate counter zone.
 	RateLimit *rateLimitReq `json:"rateLimit,omitempty"`
 }
@@ -1282,7 +1282,7 @@ func mapPathRuleReqs(reqs []pathRuleReq, existing []storage.PathRule) ([]storage
 			f := r.IPFilter.toStorage()
 			pr.IPFilter = &f
 		}
-		// v2.57 — the per-path limit, validated by the same materialiser
+		// v2.56 — the per-path limit, validated by the same materialiser
 		// as the route's so the two cannot drift apart.
 		if r.RateLimit != nil {
 			rl, rlErr := materialiseRateLimit(r.RateLimit)

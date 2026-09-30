@@ -207,7 +207,7 @@ Une IP ou un CIDR par ligne (`192.168.1.10`, `10.0.0.0/8`, IPv6 aussi). Les visi
 
 ---
 
-### Une limite plus stricte pour un seul chemin (v2.57)
+### Une limite plus stricte pour un seul chemin (v2.56)
 
 La limite de débit de la route gouverne tout le site. Un point d'entrée de connexion ou de session en veut généralement une bien plus serrée — et relever celle de la route pour protéger un chemin serait le mauvais instrument : cela ralentirait chaque ressource de la page pour freiner un seul formulaire.
 
@@ -231,7 +231,7 @@ Dans le formulaire de la route → **Règles par chemin** → **Ajouter une règ
 | **Préfixe de chemin** | `/docs` couvre `/docs` **et tout ce qui est en dessous** (`/docs/…`). Préfixe uniquement — pas de regex. |
 | **Authentification Basic spécifique** | Utilisateur + mot de passe exigés pour ce chemin seulement. |
 | **Filtrage IP dédié** | Liste blanche / liste noire pour ce chemin seulement (mêmes règles que le filtrage de la route ci-dessus). |
-| **Limite de débit pour ce chemin** (v2.57) | Une limite plus stricte pour ce seul chemin. **En plus** de celle de la route, et non à sa place — les deux sont des zones de compteurs distinctes. Au-delà : `429`. |
+| **Limite de débit pour ce chemin** (v2.56) | Une limite plus stricte pour ce seul chemin. **En plus** de celle de la route, et non à sa place — les deux sont des zones de compteurs distinctes. Au-delà : `429`. |
 | **Upstream spécifique (optionnel)** | Envoie ce chemin vers son propre pool de backends au lieu de celui de la route : URL + poids, répartition de charge, health-check actif, et *Ignorer la vérification TLS* pour un backend HTTPS auto-signé (v2.23.0 / v2.23.1). Laisser vide pour suivre l'upstream de la route. |
 
 Une règle doit contenir au moins : une basic auth, un filtrage IP actif ou un upstream spécifique (une règle avec seulement un upstream sert à router).

@@ -108,7 +108,7 @@ func buildPathRulesSubroute(
 				})
 			}
 		}
-		// v2.57 — the per-path limit, BEFORE auth.
+		// v2.56 — the per-path limit, BEFORE auth.
 		//
 		// The reason this feature exists is a login or session endpoint,
 		// and the requests worth throttling there are the ones that have

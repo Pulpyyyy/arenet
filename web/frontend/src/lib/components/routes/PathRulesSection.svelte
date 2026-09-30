@@ -168,7 +168,7 @@
 	function ipFilterValue(rule: PathRule): NonNullable<PathRule['ipFilter']> {
 		return rule.ipFilter ?? { mode: 'off' };
 	}
-	// v2.57 — the per-path rate limit.
+	// v2.56 — the per-path rate limit.
 	//
 	// Its own counters, so a strict limit on a login endpoint does not
 	// spend the route's budget and the route's limit does not dilute it.
@@ -349,7 +349,7 @@
 					/>
 				</div>
 
-				<!-- v2.57 — a stricter limit for this path only.
+				<!-- v2.56 — a stricter limit for this path only.
 				     The route's own limit is unchanged and still applies: the
 				     two are separate counter zones, so protecting one login
 				     endpoint does not mean throttling every asset on the

@@ -316,7 +316,7 @@ describe('PathRulesSection — exact match and redirect (v2.44)', () => {
 	});
 });
 
-// v2.57 — a stricter limit for one path.
+// v2.56 — a stricter limit for one path.
 //
 // Reason to exist: a login or session endpoint wants a much tighter limit
 // than the site around it, and raising the route's limit to protect one
