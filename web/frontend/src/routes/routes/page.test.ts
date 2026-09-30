@@ -3097,6 +3097,42 @@ describe('Routes page — Step Q rate-limit toggle + payload', () => {
 		const events = screen.getByTestId('rate-limit-events-input') as HTMLInputElement;
 		expect(events.value).toBe('100');
 	});
+
+	// v2.56.3 — the scenario the load test above stops short of.
+	//
+	// clearRateLimit is the sentinel that actively wipes the stored limit,
+	// and it is sent whenever the form's rateLimit is null. Loading a route
+	// that HAS a limit must populate that field, or every unrelated edit —
+	// a header, a WAF mode — would silently delete the limit while
+	// reporting success.
+	it('does not wipe a stored rate limit on an edit that never touched it', async () => {
+		const seeded = makeRoute({
+			id: 'edit-rate-keep',
+			host: 'keep.rate.example.com',
+			rateLimit: { events: 100, window: '5m', key: '{http.request.remote.host}' }
+		});
+		apiMock.listRoutes.mockResolvedValue([seeded]);
+		apiMock.updateRoute.mockResolvedValue(seeded);
+		render(Page);
+		const hostCell = await screen.findByText('keep.rate.example.com');
+		await userEvent.click(hostCell.closest('tr')!);
+		await tick();
+
+		// Save without going near the rate-limit section.
+		await fireEvent.submit(document.querySelector('form')!);
+		await tick();
+		await tick();
+
+		const payload = apiMock.updateRoute.mock.calls[0][1] as {
+			clearRateLimit?: boolean;
+			rateLimit?: { events: number; window: string };
+		};
+		expect(
+			payload.clearRateLimit,
+			'clearRateLimit on an untouched limit would delete it on every save'
+		).toBeFalsy();
+		expect(payload.rateLimit).toMatchObject({ events: 100, window: '5m' });
+	});
 });
 
 // --- v2.14.3 / Task 9 — route disable/enable/maintenance state control ---
