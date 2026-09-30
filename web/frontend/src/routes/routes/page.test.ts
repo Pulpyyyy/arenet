@@ -5118,3 +5118,195 @@ describe('Routes page — the split only opens on demand', () => {
 		expect(split?.classList.contains('split-open')).toBe(true);
 	});
 });
+
+// v2.56.3 — path rules must survive an edit that never touched them.
+//
+// The route form rebuilds each path rule field by field TWICE: once when
+// loading a route into the form, once when assembling the submit payload.
+// A field missing from either is silently dropped on the next save, with a
+// success toast. That has now happened three times — an upstream pool, a
+// redirect, and a rate limit — and each time a warning comment was added
+// beside the code rather than a test.
+//
+// This is that test. It carries every field a rule can hold through the
+// round trip, so the next addition fails here instead of deleting an
+// operator's configuration.
+describe('routes page — path rules survive an unrelated edit', () => {
+	const fullRule = {
+		pathPrefix: '/admin',
+		basicAuth: { username: 'ops', passwordSet: true },
+		ipFilter: { mode: 'allow' as const, cidrs: ['10.0.0.0/8'], statusCode: 403 },
+		upstreams: [{ url: 'http://10.0.0.9:8080', weight: 2 }],
+		lbPolicy: 'least_conn' as const,
+		healthCheck: {
+			enabled: true,
+			uri: '/healthz',
+			method: 'GET' as const,
+			interval: '30s',
+			timeout: '5s',
+			expectStatus: 200,
+			expectBody: '',
+			passes: 1,
+			fails: 1
+		},
+		insecureSkipVerify: true,
+		matchExact: true,
+		rateLimit: { events: 10, window: '5m', key: '{http.request.remote.host}' }
+	};
+
+	it('ships every sub-block back unchanged after an unrelated change', async () => {
+		const seeded = makeRoute({
+			id: 'keep-path-rules',
+			host: 'keep.paths.example.com',
+			pathRules: [fullRule]
+		});
+		apiMock.listRoutes.mockResolvedValue([seeded]);
+		apiMock.updateRoute.mockResolvedValue(seeded);
+		render(Page);
+		const hostCell = await screen.findByText('keep.paths.example.com');
+		await userEvent.click(hostCell.closest('tr')!);
+		await tick();
+
+		await fireEvent.submit(document.querySelector('form')!);
+		await tick();
+		await tick();
+
+		const payload = apiMock.updateRoute.mock.calls[0][1] as {
+			pathRules?: Record<string, unknown>[];
+		};
+		const rules = payload.pathRules ?? [];
+		expect(rules, 'the rule was dropped entirely').toHaveLength(1);
+		const sent = rules[0];
+
+		// The password is blanked on purpose — the server keeps the stored
+		// hash when it receives an empty one. Everything else must return.
+		expect(sent.pathPrefix).toBe('/admin');
+		expect(sent.ipFilter).toMatchObject({ mode: 'allow', cidrs: ['10.0.0.0/8'], statusCode: 403 });
+		expect(sent.upstreams).toEqual([{ url: 'http://10.0.0.9:8080', weight: 2 }]);
+		expect(sent.lbPolicy).toBe('least_conn');
+		expect(sent.healthCheck).toMatchObject({ enabled: true, uri: '/healthz' });
+		expect(sent.insecureSkipVerify).toBe(true);
+		expect(sent.matchExact).toBe(true);
+		// THE reported one: persisted, enforced, and absent from the form.
+		expect(
+			sent.rateLimit,
+			'the path rate limit was lost on an edit that never touched it'
+		).toMatchObject({ events: 10, window: '5m' });
+		expect((sent.basicAuth as { username: string }).username).toBe('ops');
+	});
+
+	// Every field of the fixture above must actually reach the payload. A
+	// field silently missing from BOTH rebuilds would pass the assertions
+	// above only if someone forgot to assert it — this counts instead.
+	it('sends as many sub-blocks as the rule carried', async () => {
+		const seeded = makeRoute({
+			id: 'count-path-rules',
+			host: 'count.paths.example.com',
+			pathRules: [fullRule]
+		});
+		apiMock.listRoutes.mockResolvedValue([seeded]);
+		apiMock.updateRoute.mockResolvedValue(seeded);
+		render(Page);
+		const hostCell = await screen.findByText('count.paths.example.com');
+		await userEvent.click(hostCell.closest('tr')!);
+		await tick();
+		await fireEvent.submit(document.querySelector('form')!);
+		await tick();
+		await tick();
+
+		const payload = apiMock.updateRoute.mock.calls[0][1] as {
+			pathRules?: Record<string, unknown>[];
+		};
+		const sent = (payload.pathRules ?? [])[0] ?? {};
+		const expected = Object.keys(fullRule);
+		const missing = expected.filter((k) => !(k in sent));
+		expect(
+			missing,
+			`these sub-blocks never reached the payload and would be deleted on save: ${missing.join(', ')}`
+		).toEqual([]);
+	});
+});
+
+// v2.56.3 — "the Save button does absolutely nothing".
+//
+// submitForm returns early when validateBeforeSubmit fails, and used to do
+// so with no feedback at all: an error under a key no template renders
+// produced no message, no toast and no request. The operator's only signal
+// was the absence of one.
+describe('routes page — a refused save is always visible', () => {
+	it('shows something when the API refuses a path rule', async () => {
+		apiMock.createRoute.mockRejectedValue(
+			new ApiError('path_rule "/secure": ipfilter: mode "allow" requires at least one IP/CIDR', 400, 'validation')
+		);
+		render(Page);
+		await openCreateForm();
+		await userEvent.type(hostInput(), 'repro2.example.com');
+		await userEvent.type(upstreamURLInputs()[0], 'http://127.0.0.1:9000');
+		await userEvent.click(screen.getByTestId('path-rules-add'));
+		await tick();
+		await userEvent.type(screen.getByTestId('path-rule-prefix-0') as HTMLInputElement, '/secure');
+		const allow = screen.getAllByTestId('ipfilter-mode-allow');
+		await userEvent.click(allow[allow.length - 1]);
+		await tick();
+		await fireEvent.submit(document.querySelector('form')!);
+		await tick();
+		await tick();
+
+		expect(document.body.textContent).toContain('IP/CIDR');
+	});
+
+	// A rule the operator named but left empty is refused — and the refusal
+	// has to be SEEN. This is the case that produced "the button does
+	// nothing": the error key exists, no template rendered it.
+	it('says why when a named but empty path rule blocks the save', async () => {
+		apiMock.createRoute.mockResolvedValue(makeRoute());
+		render(Page);
+		await openCreateForm();
+		await userEvent.type(hostInput(), 'empty.example.com');
+		await userEvent.type(upstreamURLInputs()[0], 'http://127.0.0.1:9000');
+		await userEvent.click(screen.getByTestId('path-rules-add'));
+		await tick();
+		await userEvent.type(screen.getByTestId('path-rule-prefix-0') as HTMLInputElement, '/named-but-empty');
+		await tick();
+
+		await fireEvent.submit(document.querySelector('form')!);
+		await tick();
+		await tick();
+
+		expect(apiMock.createRoute, 'an empty rule must not be sent').not.toHaveBeenCalled();
+		// The refusal is on screen, next to the section that caused it.
+		//
+		// The toast that also fires is not asserted here: ToastContainer is
+		// mounted by the layout, not by this page, so this harness cannot
+		// observe it. Asserting it would be asserting the harness.
+		expect(screen.getByTestId('path-rule-error-0').textContent).toContain('/named-but-empty');
+	});
+
+	// A rule whose only content is an IP filter mode is legitimate content
+	// and must reach the API, not be refused locally.
+	it('submits when a path rule has an IP filter in allow mode', async () => {
+		apiMock.createRoute.mockResolvedValue(makeRoute());
+		render(Page);
+		await openCreateForm();
+		await userEvent.type(hostInput(), 'repro.example.com');
+		await userEvent.type(upstreamURLInputs()[0], 'http://127.0.0.1:9000');
+
+		// Open Paths & headers and add a rule.
+		await userEvent.click(screen.getByTestId('path-rules-add'));
+		await tick();
+		const prefix = screen.getByTestId('path-rule-prefix-0') as HTMLInputElement;
+		await userEvent.type(prefix, '/secure');
+		await tick();
+
+		// Set the IP filter to allow.
+		const allowRadios = screen.getAllByTestId('ipfilter-mode-allow');
+		await userEvent.click(allowRadios[allowRadios.length - 1]);
+		await tick();
+
+		await fireEvent.submit(document.querySelector('form')!);
+		await tick();
+		await tick();
+
+		expect(apiMock.createRoute).toHaveBeenCalled();
+	});
+});
