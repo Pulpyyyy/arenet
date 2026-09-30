@@ -53,6 +53,9 @@ const off = {
 	rollSizeMB: 10,
 	rollKeep: 5,
 	compress: true,
+	// v2.56 — the server answers with the redaction list, so the field is
+	// seeded from it rather than from a second copy of the defaults here.
+	redactQueryParams: ['access_token', 'token', 'code'],
 	resolvedPath: '/var/log/arenet/access.log',
 	ceilingMB: 60
 };
@@ -132,8 +135,54 @@ describe('settings — access log', () => {
 			path: '/srv/logs/arenet.log',
 			rollSizeMB: 10,
 			rollKeep: 3,
-			compress: false
+			compress: false,
+			redactQueryParams: ['access_token', 'token', 'code']
 		});
+	});
+
+	// v2.56 — the redaction list.
+	//
+	// Reported case: Vaultwarden puts the user's access token in the URI,
+	// so turning the access log on wrote a live credential to disk, in a
+	// file CrowdSec also reads.
+	it('seeds the redaction field from the server list', async () => {
+		await openSecurityTab();
+		await userEvent.click(screen.getByTestId('access-log-enabled'));
+		await waitFor(() => expect(screen.getByTestId('access-log-redact')).toBeInTheDocument());
+
+		const field = screen.getByTestId('access-log-redact') as HTMLInputElement;
+		expect(field.value).toBe('access_token, token, code');
+	});
+
+	it('sends the edited list, split on commas or spaces', async () => {
+		await openSecurityTab();
+		await userEvent.click(screen.getByTestId('access-log-enabled'));
+		await waitFor(() => expect(screen.getByTestId('access-log-redact')).toBeInTheDocument());
+
+		const field = screen.getByTestId('access-log-redact') as HTMLInputElement;
+		await userEvent.clear(field);
+		await userEvent.type(field, 'access_token,  id_token   sig');
+		await userEvent.click(screen.getByTestId('access-log-save'));
+
+		await waitFor(() => expect(api.putAccessLog).toHaveBeenCalledTimes(1));
+		const sent = api.putAccessLog.mock.calls[0][0] as { redactQueryParams?: string[] };
+		expect(sent.redactQueryParams).toEqual(['access_token', 'id_token', 'sig']);
+	});
+
+	// Clearing the field is a choice. It has to be sent as an explicit
+	// empty list: omitting it means "keep the defaults" server-side, which
+	// would put back the redaction the operator just removed.
+	it('sends an explicit empty list when the field is cleared', async () => {
+		await openSecurityTab();
+		await userEvent.click(screen.getByTestId('access-log-enabled'));
+		await waitFor(() => expect(screen.getByTestId('access-log-redact')).toBeInTheDocument());
+
+		await userEvent.clear(screen.getByTestId('access-log-redact'));
+		await userEvent.click(screen.getByTestId('access-log-save'));
+
+		await waitFor(() => expect(api.putAccessLog).toHaveBeenCalledTimes(1));
+		const sent = api.putAccessLog.mock.calls[0][0] as { redactQueryParams?: string[] };
+		expect(sent.redactQueryParams, 'an omitted list would restore the defaults').toEqual([]);
 	});
 
 	// An empty path means "use the default", and must not be sent as an

@@ -1736,6 +1736,19 @@ export interface AccessLogRequest {
 	rollKeep?: number;
 	/** gzip rotated files. */
 	compress?: boolean;
+	/**
+	 * v2.56 — query-parameter names whose VALUE is masked in the logged
+	 * URI. Matched case-insensitively; the request forwarded upstream is
+	 * untouched, the substitution happens in Caddy's log encoder.
+	 *
+	 * Reported case: Vaultwarden puts the user's access token in the URI,
+	 * so turning the log on wrote a live credential to a file CrowdSec
+	 * also reads.
+	 *
+	 * Omitted means "keep the server's defaults". An explicit empty array
+	 * turns redaction off and is stored as such.
+	 */
+	redactQueryParams?: string[];
 }
 
 export interface AccessLogSettings extends AccessLogRequest {

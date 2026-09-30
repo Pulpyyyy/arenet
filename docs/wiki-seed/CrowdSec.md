@@ -117,6 +117,29 @@ This is the question the settings screen does not answer on its own, because Cro
 
 **With only the bouncer**, you get the community blocklist. That is a real layer — thousands of operators reporting IPs that are abusive right now — but nothing about *your* host is ever detected.
 
+### After upgrading to v2.56 — the logs already written
+
+Masking applies from the reload onward. Anything written before it is still on disk in clear, and Arenet cannot rewrite it: the files belong to the filesystem, not to the database.
+
+**Arenet's own stores** need no action. The WAF event store is re-redacted by a migration on first start, and a secret already recorded there is masked in place.
+
+**The log files are yours to deal with.** Rotated copies count, gzip included:
+
+```bash
+# See whether anything leaked, before deleting anything.
+sudo zgrep -lE '(access_token|id_token|refresh_token)=' /var/log/arenet/access.log*
+
+# Then, if it did: truncate the live file and remove the rotated ones.
+sudo truncate -s 0 /var/log/arenet/access.log
+sudo rm -f /var/log/arenet/access.log.*
+```
+
+Truncate rather than delete the live file: Caddy holds it open, and deleting it leaves the process writing to an inode nothing can read.
+
+**What CrowdSec already ingested is a separate store.** Acquisition reads the file, and the raw line is kept with any alert the scenarios raised, so a token can survive in CrowdSec's own database after you have cleaned the log. Check with `sudo cscli alerts list`, inspect one with `sudo cscli alerts inspect <id> -d`, and delete what carries a credential with `sudo cscli alerts delete --id <id>`. Arenet has no reach into that database — it is the agent's.
+
+If the window was short and the log never left the host, deciding this is not worth the effort is a legitimate call. Rotating the token in the affected application is the thorough one: a credential that reached a file you do not fully control is better replaced than chased.
+
 **The access log** is what lets CrowdSec's own scenarios see your traffic: scanning, brute force against the apps behind Arenet, known exploit attempts. Arenet emitted no access log at all before **v2.50**, which is why an agent could sit next to it for months and never fire a scenario.
 
 **Security Automation** is the other detector, and it works from what Arenet already understands rather than from raw requests: WAF events, rate-limit events, and failed logins to Arenet's own admin. When one source IP crosses a threshold inside a window, Arenet pushes a ban to LAPI with `origin=arenet` and a scenario named `arenet/…`. It deduplicates, and if you lift a ban by hand it backs off instead of immediately re-pushing it.
@@ -135,8 +158,9 @@ It means two unrelated things in Arenet. A CrowdSec **watcher** is a machine all
 
 1. **Settings → Security → HTTP access log** → tick *Write an access log*.
 2. Read the **path the card prints**. Do not guess it: the default is `/var/log/arenet/access.log` on a systemd install and `/var/lib/arenet/logs/access.log` inside the container on Docker, and only the running process knows which applied.
-3. Save. Arenet reloads Caddy — the log is part of the emitted configuration, so nothing appears until it does.
-4. On the CrowdSec host:
+3. Check **Masked query parameters**. The value of every parameter listed there is replaced with `REDACTED` in the logged URI. The list ships filled in, because some applications carry a credential in the URL: Vaultwarden sends the user's session token as `/notifications/hub?access_token=eyJ...`, and without masking the log records a live credential in a file CrowdSec also reads. The request forwarded to the backend is not modified — the substitution happens in the log encoder.
+4. Save. Arenet reloads Caddy — the log is part of the emitted configuration, so nothing appears until it does.
+5. On the CrowdSec host:
 
 ```bash
 sudo cscli collections install crowdsecurity/caddy

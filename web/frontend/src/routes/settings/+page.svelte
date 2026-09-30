@@ -606,6 +606,10 @@
 	let alRollSizeMB = $state(10);
 	let alRollKeep = $state(5);
 	let alCompress = $state(true);
+	// v2.56 — the redaction list, edited as one comma-separated line.
+	// A list of names is what it is; a row editor would be four clicks to
+	// add "code".
+	let alRedactInput = $state('');
 
 	// The number the operator actually wants: how big can this get.
 	const alCeilingMB = $derived(alRollSizeMB * (alRollKeep + 1));
@@ -621,11 +625,20 @@
 			alRollSizeMB = cfg.rollSizeMB ?? 10;
 			alRollKeep = cfg.rollKeep ?? 5;
 			alCompress = cfg.compress ?? true;
+			alRedactInput = (cfg.redactQueryParams ?? []).join(', ');
 		} catch (err) {
 			accessLogError = serverErrorMessage(err);
 		} finally {
 			accessLogLoading = false;
 		}
+	}
+
+	/** Splits the redaction field on commas or whitespace. */
+	function parseRedactList(raw: string): string[] {
+		return raw
+			.split(/[\s,;]+/)
+			.map((s) => s.trim())
+			.filter((s) => s.length > 0);
 	}
 
 	async function saveAccessLog(): Promise<void> {
@@ -637,13 +650,18 @@
 				path: alPath.trim() || undefined,
 				rollSizeMB: alRollSizeMB,
 				rollKeep: alRollKeep,
-				compress: alCompress
+				compress: alCompress,
+				// Always sent, so clearing the field is honoured. Omitting
+				// it would mean "keep the defaults" and silently put back
+				// the redaction the operator just removed.
+				redactQueryParams: parseRedactList(alRedactInput)
 			});
 			// Re-read what the server stored: it normalises zeros to the
 			// defaults, and resolvedPath only exists server-side.
 			alPath = accessLog.path ?? '';
 			alRollSizeMB = accessLog.rollSizeMB ?? 10;
 			alRollKeep = accessLog.rollKeep ?? 5;
+			alRedactInput = (accessLog.redactQueryParams ?? []).join(', ');
 			pushToast(tl('settings.accessLog.saved'), 'success');
 		} catch (err) {
 			accessLogError = serverErrorMessage(err);
@@ -1028,6 +1046,31 @@
 						<p class="text-xs text-muted mb-4" data-testid="access-log-ceiling">
 							{tl('settings.accessLog.ceiling', { mb: alCeilingMB })}
 						</p>
+
+						<!-- v2.56 — masked query parameters.
+						     Some applications carry a credential in the URI
+						     (Vaultwarden puts the session access token there),
+						     so the log would write it to disk in clear, in a
+						     file CrowdSec also reads. -->
+						<div class="mb-4">
+							<label
+								for="access-log-redact"
+								class="block text-sm font-medium text-secondary mb-1"
+							>
+								{tl('settings.accessLog.redactLabel')}
+							</label>
+							<input
+								id="access-log-redact"
+								type="text"
+								bind:value={alRedactInput}
+								placeholder="access_token, token, code, state"
+								data-testid="access-log-redact"
+								class="w-full h-9 rounded-md border border-border-subtle bg-surface px-2 text-sm text-primary font-mono"
+							/>
+							<p class="text-xs text-muted mt-1">
+								{tl('settings.accessLog.redactHint')}
+							</p>
+						</div>
 					{/if}
 
 					<Button

@@ -18,6 +18,8 @@ package caddymgr
 
 import (
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/barto95100/arenet/internal/storage"
 )
@@ -66,20 +68,73 @@ type accessLogWriter struct {
 	RollGzip   bool `json:"roll_gzip,omitempty"`
 }
 
-// accessLogEncoder pins the format.
+// accessLogURIField is the log field the redaction filter rewrites.
+// Caddy addresses a nested field with `>`, and the access log's shape is
+// {"request":{"uri":"…"}}.
+const accessLogURIField = "request>uri"
+
+// redactPlaceholder is what replaces a masked value. Spelled like the
+// Cookie header Caddy already redacts, so an operator reading a line
+// recognises it without being told.
+const accessLogRedactPlaceholder = "REDACTED"
+
+// buildURIRedactFilter returns the `regexp` log filter that masks the
+// listed query parameters in the logged URI, or nil when the list is
+// empty.
 //
-// Explicit because Caddy otherwise chooses console or JSON depending on
-// whether stderr happens to be a terminal (logging.go:735-748). A log
-// whose format depends on how the service was started is not a log a
-// parser can rely on.
-type accessLogEncoder struct {
-	Format string `json:"format"`
+// Caddy ships a `query` filter that looks purpose-built for this, and it
+// is not used, for two reasons read in its source
+// (caddy modules/logging/filters.go):
+//
+//   - it matches parameter names through a url.Values map lookup (:418),
+//     so it is case-SENSITIVE: `?Access_Token=` would slip past;
+//   - it rebuilds the query with q.Encode() (:432), which re-orders the
+//     parameters alphabetically and re-encodes them, so a line no longer
+//     shows the URI the client actually sent.
+//
+// One case-insensitive regexp does the whole list in a single pass,
+// touches only the matched values, and leaves order and encoding alone.
+// RegexpFilter applies it with ReplaceAllString (:623), so ${1} carries
+// the `name=` prefix through.
+//
+// Nothing here changes the request forwarded upstream: a log filter runs
+// on the encoded log entry, after the response.
+func buildURIRedactFilter(params []string) map[string]any {
+	if len(params) == 0 {
+		return nil
+	}
+	alternatives := make([]string, 0, len(params))
+	for _, name := range params {
+		alternatives = append(alternatives, regexp.QuoteMeta(name))
+	}
+	// `[?&]` anchors on a real parameter boundary so `?xtoken=` is not
+	// mistaken for `?token=`. `[^&]*` rather than `+` so `?token=` with
+	// an empty value is still rewritten, which keeps the line honest
+	// about what the parameter was.
+	pattern := `(?i)([?&](?:` + strings.Join(alternatives, "|") + `)=)[^&]*`
+	return map[string]any{
+		"filter": "regexp",
+		"regexp": pattern,
+		"value":  "${1}" + accessLogRedactPlaceholder,
+	}
 }
 
 type accessLogSink struct {
-	Writer  accessLogWriter  `json:"writer"`
-	Encoder accessLogEncoder `json:"encoder"`
-	Include []string         `json:"include"`
+	Writer accessLogWriter `json:"writer"`
+	// Encoder is built as a map rather than a struct because it has two
+	// shapes: the bare `json` encoder, or that same encoder wrapped in a
+	// `filter` one when query parameters are masked.
+	//
+	// Two Go fields sharing the json tag "encoder" was the first attempt.
+	// encoding/json drops BOTH on a same-depth tag conflict, silently, so
+	// the sink would have gone out with no encoder at all.
+	//
+	// The format is always stated explicitly: Caddy otherwise picks
+	// console or JSON depending on whether stderr happens to be a
+	// terminal (logging.go:735-748), and a log whose format depends on
+	// how the service was started is not one a parser can rely on.
+	Encoder map[string]any `json:"encoder"`
+	Include []string       `json:"include"`
 }
 
 // ResolveAccessLogPath returns the file to write to: the operator's
@@ -118,8 +173,18 @@ func buildAccessLogging(cfg storage.AccessLogConfig, path string) map[string]any
 			RollKeep:   cfg.RollKeep,
 			RollGzip:   cfg.Compress,
 		},
-		Encoder: accessLogEncoder{Format: "json"},
+		Encoder: map[string]any{"format": "json"},
 		Include: []string{accessLogInclude},
+	}
+	// v2.56 — wrap the JSON encoder in a filter when there is something
+	// to mask. With no list the encoder stays the bare `json` it was, so
+	// the emitted config is unchanged for anyone who clears it.
+	if filter := buildURIRedactFilter(cfg.RedactQueryParams); filter != nil {
+		sink.Encoder = map[string]any{
+			"format": "filter",
+			"wrap":   map[string]any{"format": "json"},
+			"fields": map[string]any{accessLogURIField: filter},
+		}
 	}
 	return map[string]any{"logs": map[string]any{accessLogName: sink}}
 }
