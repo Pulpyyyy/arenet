@@ -1617,7 +1617,14 @@
 				// is wiped the next time the operator saves an unrelated
 				// change on the route.
 				matchExact: rule.matchExact,
-				redirect: rule.redirect ? { ...rule.redirect } : undefined
+				redirect: rule.redirect ? { ...rule.redirect } : undefined,
+				// v2.56.3 — and the same omission caught the rate limit, in
+				// the block that already warns about it twice above. A rule's
+				// limit was persisted and enforced, but the form reopened with
+				// the box unticked, so the next save on an unrelated field
+				// shipped the rule without it and deleted the protection with
+				// a green toast.
+				rateLimit: rule.rateLimit ? { ...rule.rateLimit } : undefined
 			})),
 			// (subform expansion handled below — needs to fire
 			// AFTER formData assignment so the $effect sees the
@@ -2286,6 +2293,46 @@
 
 	const errorOverrideCount = $derived(Object.keys(formData.errorPageOverrides ?? {}).length);
 
+	// v2.56.3 — Paths & headers gets a posture, like the sections it now
+	// resembles.
+	//
+	// It was neutral by design, and RouteSection documents why: sections
+	// that do not decide what happens to traffic pass no posture, so the
+	// colour keeps its meaning. That was written when a path rule carried
+	// headers. A rule can now carry basic auth, an IP filter and a rate
+	// limit — the same gates as Auth, GeoIP and Rate limit, all of which
+	// are coloured — so the section decides, and staying grey made it the
+	// one place a gate is invisible until opened.
+	//
+	// The postures follow the meanings already in use here rather than a
+	// new scheme: a deny-list blocks (as GeoIP deny does), while an
+	// allow-list, basic auth or a rate limit lets traffic through on a
+	// criterion (as GeoIP allow and the route's own rate limit do). A rate
+	// limit is NOT block: it permits, within a budget.
+	//
+	// block wins over allow when rules disagree, because a restriction is
+	// what deserves to be seen first — and it mirrors how GeoIP reports a
+	// deny over an allow.
+	const pathsHeadersBadge = $derived.by<SectionBadge | undefined>(() => {
+		if (formData.pathRules.length === 0) {
+			// No rules: the section carries headers at most, which decide
+			// nothing. Neutral, exactly as before.
+			return undefined;
+		}
+		let blocks = false;
+		let allows = false;
+		for (const rule of formData.pathRules) {
+			if (rule.ipFilter?.mode === 'deny') blocks = true;
+			if (rule.ipFilter?.mode === 'allow') allows = true;
+			if (rule.basicAuth && rule.basicAuth.username.trim() !== '') allows = true;
+			if ((rule.rateLimit?.events ?? 0) > 0) allows = true;
+		}
+		if (blocks) return { badge: tl('routes.form.badgeDeny'), posture: 'block' };
+		if (allows) return { badge: tl('routes.form.badgeAllow'), posture: 'allow' };
+		// Rules exist but gate nothing — a redirect or a per-path backend.
+		return { badge: tl('routes.form.badgeOff'), posture: 'off' };
+	});
+
 	const summaryErrorPages = $derived(
 		formData.errorPageTemplateId
 			? tl('routes.form.summaryErrorPagesTemplate')
@@ -2717,6 +2764,24 @@
 		resetFormErrors();
 		if (!validateBeforeSubmit()) {
 			submitting = false;
+			// v2.56.3 — never refuse silently.
+			//
+			// This returned with no feedback of any kind, so a validation
+			// error under a key no template renders made the Save button do
+			// nothing at all: no message, no toast, no network request. The
+			// operator's only signal was the absence of one.
+			//
+			// Every field error should be rendered next to its field, and
+			// most are. This is the net under that: it says the form was
+			// refused and names what, so a key nobody displays still
+			// produces a visible refusal rather than silence.
+			const unresolved = Object.values(errors).filter((m) => (m ?? '').trim() !== '');
+			pushToast(
+				unresolved.length > 0
+					? tl('routes.form.validationFailed', { reason: unresolved[0] })
+					: tl('routes.form.validationFailedGeneric'),
+				'danger'
+			);
 			return;
 		}
 		try {
@@ -5472,7 +5537,20 @@
 					</RouteSection>
 
 					<!-- Path rules and custom headers. -->
-					<RouteSection name={language.current && t('routes.form.sectionPathsHeaders')} summary={summaryPathsHeaders} testid="section-paths-headers">
+					<RouteSection
+						name={language.current && t('routes.form.sectionPathsHeaders')}
+						summary={summaryPathsHeaders}
+						badge={pathsHeadersBadge?.badge}
+						posture={pathsHeadersBadge?.posture}
+						testid="section-paths-headers"
+					>
+						{#each formData.pathRules as _rule, i (i)}
+							{#if errors[`pathRules.${i}`]}
+								<p class="text-xs text-down" role="alert" data-testid="path-rule-error-{i}">
+									{errors[`pathRules.${i}`]}
+								</p>
+							{/if}
+						{/each}
 						<!-- path-based-rules Task 9 — collapsed path-scoped
 						     rules editor (Task 8 component): per-prefix basic
 						     auth override + IP filter. -->

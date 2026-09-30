@@ -423,6 +423,8 @@
 			"healthCheckHeaderAdd": "Add a header",
 			"healthCheckHeaderRemove": "Remove",
 			"healthCheckProbeButton": "Test the check",
+			"validationFailed": "The form was not saved: {reason}",
+			"validationFailedGeneric": "The form was not saved: a field is invalid.",
 			"healthCheckProbeHint": "Runs one probe per upstream with the settings above. Nothing is saved.",
 			"healthCheckProbeBody": "Response body",
 			"healthCheckProbeBodyMatch": "matches the expression",
