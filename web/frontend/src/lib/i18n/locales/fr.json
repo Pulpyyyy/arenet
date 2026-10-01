@@ -750,7 +750,7 @@
 		},
 		"pathRules": {
 			"sectionLabel": "Règles par chemin",
-			"sectionHelp": "Applique une authentification Basic spécifique et/ou un filtrage IP dédié aux requêtes sous un préfixe de chemin donné.",
+			"sectionHelp": "Applique une protection supplémentaire — authentification Basic, filtrage par IP source, limite de débit — aux requêtes sous un préfixe de chemin. Elles s'ajoutent aux gates de la route, elles ne les remplacent pas.",
 			"add": "Ajouter une règle",
 			"remove": "Supprimer la règle",
 			"prefixLabel": "Préfixe de chemin",
@@ -763,7 +763,8 @@
 			"redirectTargetHelp": "Un chemin sur cet hôte (/admin/login) ou une URL complète ailleurs. Elle doit tomber EN DEHORS du chemin de cette règle, sinon chaque visiteur y serait redirigé indéfiniment — Arenet le refuse à l'enregistrement.",
 			"redirectCodeLabel": "Code",
 			"redirectCodeHelp": "Le 302 est temporaire et convient pour un chemin d'accueil : rien n'est mémorisé, donc une mise à jour de l'application peut le changer. Le 301 est retenu par les navigateurs et se reprend difficilement.",
-			"basicAuthLabel": "Authentification Basic spécifique",
+			"basicAuthLabel": "Authentification Basic pour ce chemin",
+			"basicAuthAdditiveHint": "S'ajoute à l'authentification de la route, qui s'exécute toujours en premier — elle ne la remplace pas.",
 			"basicAuthUsernameLabel": "Utilisateur",
 			"basicAuthUsernamePlaceholder": "utilisateur",
 			"basicAuthPasswordLabel": "Mot de passe",

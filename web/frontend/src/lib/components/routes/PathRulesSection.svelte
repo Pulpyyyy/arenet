@@ -307,6 +307,15 @@
 					</label>
 					{#if rule.basicAuth}
 						<div class="ml-6 flex flex-col gap-2">
+							<!-- v2.56.4 — the label used to read "override", which is
+							     not what happens: the route's own auth handler is
+							     emitted BEFORE the path-rules subroute
+							     (manager.go:1746/1774 vs :1877), so a path gate adds
+							     to it. An operator reading "override" could believe
+							     they had replaced a protection, or weakened one. -->
+							<p class="text-[11px] text-muted" data-testid="path-rule-basicauth-additive-{i}">
+								{language.current && t('routes.pathRules.basicAuthAdditiveHint')}
+							</p>
 							<Input
 								label={language.current && t('routes.pathRules.basicAuthUsernameLabel')}
 								bind:value={rule.basicAuth.username}

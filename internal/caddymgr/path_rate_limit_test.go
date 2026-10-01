@@ -367,3 +367,79 @@ func TestRouteRateLimit_LoadsCleanly(t *testing.T) {
 		t.Fatalf("caddy.Validate with the route-level rate limit: %v\n%s", err, raw)
 	}
 }
+
+// v2.56.4 — a path rule's gates ADD to the route's; they do not replace
+// them.
+//
+// The UI called the per-path basic auth an "override", which claimed a
+// replacement that does not happen: the route's own auth handler is
+// appended before the path-rules subroute, so both run. An operator
+// reading "override" could believe they had swapped one protection for
+// another — or weakened one. The label was corrected, and this pins the
+// behaviour the label now describes.
+func TestPathRule_RouteAuthStillRunsBeforeThePathGate(t *testing.T) {
+	routes := []storage.Route{{
+		ID: "rid-1", Host: "app.example.com",
+		Upstreams: []storage.Upstream{{URL: "http://10.0.0.2:80", Weight: 1}},
+		LBPolicy:  storage.LBPolicyRoundRobin,
+		AuthMode:  storage.RouteAuthBasic,
+		BasicAuth: storage.BasicAuthRouteConfig{
+			Username:     "route-user",
+			PasswordHash: "$argon2id$v=19$m=65536,t=1,p=4$c29tZXNhbHQ$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA",
+		},
+		PathRules: []storage.PathRule{{
+			PathPrefix: "/admin",
+			BasicAuth: &storage.BasicAuthRouteConfig{
+				Username:     "path-user",
+				PasswordHash: "$argon2id$v=19$m=65536,t=1,p=4$c29tZXNhbHQ$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA",
+			},
+		}},
+	}}
+	raw, err := buildConfigJSON(routes, buildOpts{DevMode: true})
+	if err != nil {
+		t.Fatalf("buildConfigJSON: %v", err)
+	}
+
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	servers := cfg["apps"].(map[string]any)["http"].(map[string]any)["servers"].(map[string]any)
+	var order []string
+	for _, s := range servers {
+		rts, _ := s.(map[string]any)["routes"].([]any)
+		for _, r := range rts {
+			names := make([]string, 0, 4)
+			for _, h := range unwrapHandlers(r.(map[string]any)) {
+				n, _ := h.(map[string]any)["handler"].(string)
+				names = append(names, n)
+			}
+			if len(names) > 0 {
+				order = names
+				break
+			}
+		}
+		if len(order) > 0 {
+			break
+		}
+	}
+
+	authAt, subAt := -1, -1
+	for i, name := range order {
+		switch name {
+		case "authentication":
+			if authAt < 0 {
+				authAt = i
+			}
+		case "subroute":
+			subAt = i
+		}
+	}
+	if authAt < 0 || subAt < 0 {
+		t.Fatalf("want the route's auth and the path subroute in the chain, got %v", order)
+	}
+	if authAt > subAt {
+		t.Errorf("chain = %v; the route's auth must run before the path gates, which is why a "+
+			"path gate adds to it rather than replacing it", order)
+	}
+}
