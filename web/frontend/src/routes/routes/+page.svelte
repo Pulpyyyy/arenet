@@ -1624,7 +1624,12 @@
 				// the box unticked, so the next save on an unrelated field
 				// shipped the rule without it and deleted the protection with
 				// a green toast.
-				rateLimit: rule.rateLimit ? { ...rule.rateLimit } : undefined
+				rateLimit: rule.rateLimit ? { ...rule.rateLimit } : undefined,
+				// v2.57 — and the IdP gate, for the same reason, which this
+				// block now warns about three times. Hydrating it matters more
+				// than the fields above: dropping it on an unrelated save does
+				// not degrade the path, it unprotects it.
+				forwardAuth: rule.forwardAuth ? { ...rule.forwardAuth } : undefined
 			})),
 			// (subform expansion handled below — needs to fire
 			// AFTER formData assignment so the $effect sees the
@@ -2326,6 +2331,10 @@
 			if (rule.ipFilter?.mode === 'allow') allows = true;
 			if (rule.basicAuth && rule.basicAuth.username.trim() !== '') allows = true;
 			if ((rule.rateLimit?.events ?? 0) > 0) allows = true;
+			// v2.57 — an IdP gate is a gate. Without this line a path
+			// protected by forward auth and nothing else made the section
+			// read "off", telling the operator their protection was absent.
+			if ((rule.forwardAuth?.providerName ?? '').trim() !== '') allows = true;
 		}
 		if (blocks) return { badge: tl('routes.form.badgeDeny'), posture: 'block' };
 		if (allows) return { badge: tl('routes.form.badgeAllow'), posture: 'allow' };
@@ -2940,6 +2949,16 @@
 											events: rule.rateLimit.events,
 											window: rule.rateLimit.window,
 											...(rule.rateLimit.key ? { key: rule.rateLimit.key } : {})
+										}
+									}
+								: {}),
+							// v2.57 — the IdP gate. Dropping this one here would
+							// not lose a setting, it would serve a protected
+							// path to anyone, with a success toast.
+							...(rule.forwardAuth && rule.forwardAuth.providerName.trim() !== ''
+								? {
+										forwardAuth: {
+											providerName: rule.forwardAuth.providerName.trim()
 										}
 									}
 								: {}),
@@ -5554,7 +5573,7 @@
 						<!-- path-based-rules Task 9 — collapsed path-scoped
 						     rules editor (Task 8 component): per-prefix basic
 						     auth override + IP filter. -->
-						<PathRulesSection bind:value={formData.pathRules} />
+						<PathRulesSection bind:value={formData.pathRules} {forwardAuthProviders} />
 						<!-- Step I.6: custom request headers. v2.41 — one
 						     labelled group instead of a second collapse level
 						     inside an already-collapsible section, with an

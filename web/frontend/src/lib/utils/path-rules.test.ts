@@ -196,12 +196,33 @@ describe('sanitizePathRules — rate-limit-only rules', () => {
 	// discarded with a success toast — invisible until an operator notices
 	// their rule vanished.
 	it('recognises every kind of content a rule can carry', () => {
-		const byField: Record<string, PathRule> = {
+		// v2.57 — this guard used to be a hand-written map typed
+		// Record<string, PathRule>, so adding a field to PathRule did not
+		// make it fail: it only tested the fields someone remembered to
+		// list, which is the same weakness as the payload assembler it
+		// exists to protect. ContentField is now derived from PathRule
+		// itself, with the non-content fields named explicitly, so a new
+		// field makes `npm run check` fail until it is classified as
+		// content (with a sample below) or as a modifier (excluded here).
+		//
+		// pathPrefix is the rule's identity; matchExact changes how the
+		// prefix matches; lbPolicy, healthCheck and insecureSkipVerify
+		// only qualify an upstream pool and are meaningless alone.
+		type NonContentField =
+			| 'pathPrefix'
+			| 'matchExact'
+			| 'lbPolicy'
+			| 'healthCheck'
+			| 'insecureSkipVerify';
+		type ContentField = Exclude<keyof PathRule, NonContentField>;
+
+		const byField: Record<ContentField, PathRule> = {
 			basicAuth: { pathPrefix: '/a', basicAuth: { username: 'ops', password: 'x' } },
 			ipFilter: { pathPrefix: '/a', ipFilter: { mode: 'allow', cidrs: ['10.0.0.0/8'] } },
 			upstreams: { pathPrefix: '/a', upstreams: [{ url: 'http://10.0.0.2:80', weight: 1 }] },
 			redirect: { pathPrefix: '/a', redirect: { target: '/login' } },
-			rateLimit: { pathPrefix: '/a', rateLimit: { events: 5, window: '1m' } }
+			rateLimit: { pathPrefix: '/a', rateLimit: { events: 5, window: '1m' } },
+			forwardAuth: { pathPrefix: '/a', forwardAuth: { providerName: 'authentik' } }
 		};
 		for (const [field, rule] of Object.entries(byField)) {
 			expect(
@@ -209,5 +230,19 @@ describe('sanitizePathRules — rate-limit-only rules', () => {
 				`a rule carrying only ${field} is treated as empty and dropped on save`
 			).toBe(true);
 		}
+	});
+
+	it('keeps a rule gated only by an identity provider', () => {
+		// v2.57 — the ordinary way to use the feature: an exposed path with
+		// nothing else on the rule. Dropped here, the path stays open.
+		const rules: PathRule[] = [
+			{ pathPrefix: '/metrics', forwardAuth: { providerName: 'authentik' } }
+		];
+		expect(sanitizePathRules(rules)).toEqual(rules);
+	});
+
+	it('drops a rule whose forwardAuth names no provider', () => {
+		const rules: PathRule[] = [{ pathPrefix: '/metrics', forwardAuth: { providerName: '  ' } }];
+		expect(sanitizePathRules(rules)).toEqual([]);
 	});
 });

@@ -351,12 +351,174 @@ func TestUpdateRoute_PathRuleNoProtection_Returns400NotServerError(t *testing.T)
 	if putRec.Code != http.StatusBadRequest {
 		t.Fatalf("put status=%d (want 400) body=%s", putRec.Code, putRec.Body)
 	}
-	// v2.23.0 (Q3): the storage validation message was broadened when the
-	// upstream branch was added — a path-rule is now valid with basic-auth,
-	// an active IP filter, OR a non-empty upstream pool. The message wording
-	// changed accordingly (routes.go PathRule.Validate).
-	if !strings.Contains(putRec.Body.String(), "must declare at least one of basic auth, IP filter") {
+	// The message lists every kind of content a rule may carry and grows
+	// with them (v2.23.0 added upstreams, v2.56 the rate limit, v2.57
+	// forward auth), so assert the stable part plus the machine-readable
+	// code rather than the full sentence — the point of the test is that
+	// an empty rule is refused with a 400 the UI can show, not the
+	// enumeration's current wording.
+	if !strings.Contains(putRec.Body.String(), "must declare at least one of") {
 		t.Errorf("put body = %s; want it to contain the validation message %q",
-			putRec.Body.String(), "must declare at least one of basic auth, IP filter")
+			putRec.Body.String(), "must declare at least one of")
+	}
+	if !strings.Contains(putRec.Body.String(), "path_rule_empty") {
+		t.Errorf("put body = %s; want the path_rule_empty code", putRec.Body.String())
+	}
+}
+
+// v2.57 — the per-path IdP gate, exercised through literal JSON written the
+// way the SvelteKit form writes it. A test that builds its payload from
+// pathRuleReq cannot see a camelCase disagreement, because producer and
+// consumer would then agree by construction; that is exactly how the
+// v2.56.0 health-check Test button shipped answering `unknown field
+// "expectStatus"` on its first real click.
+func TestCreateRoute_PathRuleForwardAuth_RoundTrips(t *testing.T) {
+	env := newTestEnv(t, false)
+	body := pathRulesRouteBody("idp.example.com",
+		`,"pathRules":[{"pathPrefix":"/metrics","forwardAuth":{"providerName":"authentik"}}]`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/routes", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST status=%d body=%s (wire-field gap? DisallowUnknownFields)", rec.Code, rec.Body)
+	}
+	var created routeResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if len(created.PathRules) != 1 {
+		t.Fatalf("response pathRules len = %d; want 1", len(created.PathRules))
+	}
+	// Echoed back, unlike the basic-auth password: the form needs the
+	// provider name to re-render the gate on edit, and a provider
+	// reference is not a secret.
+	if created.PathRules[0].ForwardAuth == nil {
+		t.Fatalf("forwardAuth absent from the response; the form cannot re-render the gate")
+	}
+	if got := created.PathRules[0].ForwardAuth.ProviderName; got != "authentik" {
+		t.Errorf("forwardAuth.providerName = %q; want %q", got, "authentik")
+	}
+
+	// And it survives a reload from storage, not just the create echo.
+	id := created.ID
+	getRec := httptest.NewRecorder()
+	env.router.ServeHTTP(getRec, httptest.NewRequest(http.MethodGet, "/api/v1/routes/"+id, nil))
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET status=%d body=%s", getRec.Code, getRec.Body)
+	}
+	var reloaded routeResponse
+	if err := json.Unmarshal(getRec.Body.Bytes(), &reloaded); err != nil {
+		t.Fatalf("decode GET response: %v", err)
+	}
+	if len(reloaded.PathRules) != 1 || reloaded.PathRules[0].ForwardAuth == nil {
+		t.Fatalf("forwardAuth did not survive the round trip to storage: %s", getRec.Body)
+	}
+	if got := reloaded.PathRules[0].ForwardAuth.ProviderName; got != "authentik" {
+		t.Errorf("reloaded forwardAuth.providerName = %q; want %q", got, "authentik")
+	}
+}
+
+// The wrong spelling must stay refused, or the two naming conventions
+// quietly start accepting both and drift again.
+//
+// Only the OUTER key is misspelled here, with a valid camelCase body
+// inside. A payload misspelling both would 400 on the inner key alone, so
+// it would keep passing even if the outer field's tag were switched to
+// snake_case — the very drift this test exists to catch.
+func TestCreateRoute_PathRuleForwardAuth_SnakeCaseIsRefused(t *testing.T) {
+	env := newTestEnv(t, false)
+	body := pathRulesRouteBody("snake.example.com",
+		`,"pathRules":[{"pathPrefix":"/metrics","forward_auth":{"providerName":"authentik"}}]`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/routes", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("POST with snake_case forward_auth status=%d; want 400 so the wire contract stays single-spelled (body=%s)", rec.Code, rec.Body)
+	}
+}
+
+// Two identity gates on one rule is refused with a 400 naming the reason,
+// never a 500 and never a silent drop of one of them. v2.56.1/.2/.3 were
+// three releases spent on rules that vanished without a word.
+func TestCreateRoute_PathRuleForwardAuthAndBasicAuth_Returns400(t *testing.T) {
+	env := newTestEnv(t, false)
+	body := pathRulesRouteBody("both.example.com",
+		`,"pathRules":[{"pathPrefix":"/metrics",`+
+			`"basicAuth":{"username":"ops","password":"somePlainPassword"},`+
+			`"forwardAuth":{"providerName":"authentik"}}]`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/routes", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST status=%d; want 400 (body=%s)", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "both") && !strings.Contains(rec.Body.String(), "either") {
+		t.Errorf("the 400 does not say what is wrong, so the UI cannot show it: %s", rec.Body)
+	}
+}
+
+// A forward-auth gate with no provider named is refused: it would emit a
+// fail-closed 503 for a path the operator believes is protected.
+func TestCreateRoute_PathRuleForwardAuth_EmptyProviderReturns400(t *testing.T) {
+	env := newTestEnv(t, false)
+	body := pathRulesRouteBody("empty.example.com",
+		`,"pathRules":[{"pathPrefix":"/metrics","forwardAuth":{"providerName":""}}]`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/routes", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("POST status=%d; want 400 for a gate naming no provider (body=%s)", rec.Code, rec.Body)
+	}
+}
+
+// Preserve-on-edit: changing an unrelated field must not drop the gate.
+// This is the exact shape of the v2.56.2 bug, where a path rule's rate
+// limit disappeared because one of the form's field-by-field rebuilds did
+// not know the field existed.
+func TestUpdateRoute_PathRuleForwardAuth_SurvivesAnUnrelatedEdit(t *testing.T) {
+	env := newTestEnv(t, false)
+	body := pathRulesRouteBody("edit.example.com",
+		`,"pathRules":[{"pathPrefix":"/metrics","forwardAuth":{"providerName":"authentik"}}]`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/routes", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST status=%d body=%s", rec.Code, rec.Body)
+	}
+	var created routeResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Re-send the rule exactly as the response gave it back, with one
+	// unrelated change to the route.
+	putBody := `{` +
+		`"host":"edit.example.com",` +
+		`"upstreams":[{"url":"http://127.0.0.1:9001","weight":1}],` +
+		`"lbPolicy":"round_robin","tlsEnabled":false,"redirectToHttps":false,` +
+		`"aliases":[],"authMode":"none","requestHeaders":{},"responseHeaders":{},` +
+		`"wafMode":"off",` +
+		`"pathRules":[{"pathPrefix":"/metrics","forwardAuth":{"providerName":"authentik"}}]}`
+	putReq := httptest.NewRequest(http.MethodPut, "/api/v1/routes/"+created.ID, strings.NewReader(putBody))
+	putReq.Header.Set("Content-Type", "application/json")
+	putRec := httptest.NewRecorder()
+	env.router.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", putRec.Code, putRec.Body)
+	}
+	var updated routeResponse
+	if err := json.Unmarshal(putRec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode PUT: %v", err)
+	}
+	if len(updated.PathRules) != 1 || updated.PathRules[0].ForwardAuth == nil {
+		t.Fatalf("the gate was dropped by an unrelated edit: %s", putRec.Body)
+	}
+	if got := updated.PathRules[0].ForwardAuth.ProviderName; got != "authentik" {
+		t.Errorf("after edit providerName = %q; want %q", got, "authentik")
 	}
 }

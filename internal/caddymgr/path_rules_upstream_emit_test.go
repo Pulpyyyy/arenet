@@ -48,7 +48,7 @@ func emitPathSubrouteJSON(t *testing.T, rules []storage.PathRule) string {
 	}
 	sub, err := buildPathRulesSubroute("r-test", rules, routeProxy, func(c storage.BasicAuthRouteConfig) map[string]any {
 		return map[string]any{"handler": "authentication"}
-	}, pathProxy)
+	}, noForwardAuthForTest, pathProxy)
 	if err != nil {
 		t.Fatalf("buildPathRulesSubroute: %v", err)
 	}
@@ -81,7 +81,7 @@ func firstRuleHandle(t *testing.T, rules []storage.PathRule) []map[string]any {
 	}
 	sub, err := buildPathRulesSubroute("r-test", rules, routeProxy, func(c storage.BasicAuthRouteConfig) map[string]any {
 		return map[string]any{"handler": "authentication"}
-	}, pathProxy)
+	}, noForwardAuthForTest, pathProxy)
 	if err != nil {
 		t.Fatalf("buildPathRulesSubroute: %v", err)
 	}

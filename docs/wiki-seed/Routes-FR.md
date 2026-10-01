@@ -220,6 +220,23 @@ Cochez **Limite de débit pour ce chemin** sur une règle et donnez-lui ses prop
 
 Exemple — le point de session admin de Ghost à 3 tentatives par 5 minutes, tandis que le blog reste aux 200 par minute de la route : ajoutez une règle sur `/ghost/api/admin/session`, cochez la limite, mettez 3 et `5m`.
 
+### Un fournisseur d'identité pour un chemin (v2.57)
+
+Certains chemins n'ont aucune authentification propre : un `/metrics` exposé, une console de débogage, une interface d'administration qui n'était pas censée être accessible depuis l'extérieur. Jusqu'ici le seul contrôle d'identité par chemin était l'authentification basique, et un mot de passe partagé est une réponse médiocre quand on exploite déjà un IdP.
+
+Cochez **Fournisseur d'identité pour ce chemin** sur une règle et choisissez l'un de vos fournisseurs configurés (Réglages → Forward auth). Ce qui compte :
+
+- il s'ajoute à l'authentification de la route, qui s'exécute toujours en premier. Une règle par chemin ne désactive jamais une protection de la route ;
+- il **remplace l'authentification basique de cette règle** : un seul contrôle d'identité par chemin, pas deux. Activer l'un désactive l'autre, la combinaison invalide est donc impossible à construire ;
+- si le fournisseur est supprimé par la suite, le chemin répond **`503`** au lieu d'être servi sans protection. Un contrôle qui cesse de contrôler en silence est pire qu'un contrôle indisponible : la panne est rendue visible ;
+- le contrôle se place au même endroit dans la chaîne que l'authentification basique du chemin : après le filtre IP et la limite de débit du chemin, avant le relais vers le backend.
+
+**Ce à quoi cela ne sert pas.** Un chemin dont l'application authentifie elle-même ses utilisateurs. Un IdP placé devant une page de connexion répond aux requêtes d'arrière-plan du navigateur par une redirection vers l'IdP, qu'une application attendant du JSON ne peut pas suivre : le formulaire de connexion cesse silencieusement de fonctionner. Protégez ce qui n'a aucun contrôle propre, et laissez le reste à l'application.
+
+**Avec Authentik**, le forward-auth pour une seule application exige aussi que `/outpost.goauthentik.io` soit routé vers l'outpost sur le même domaine, sous la forme d'une seconde règle par chemin ayant cet outpost comme upstream spécifique. Sans cela le navigateur ne peut pas terminer l'aller-retour de connexion.
+
+---
+
 ## Règles par chemin (v2.21.0 → v2.23.0)
 
 Les **règles par chemin** ajoutent une protection — et au besoin un autre backend — à un sous-chemin d'une route, sans créer de seconde route. Cas typiques : basic auth sur `/docs` (Swagger), `/metrics` accessible depuis une seule IP de supervision, `/api/v1` envoyé vers un autre backend, le reste du site inchangé.
@@ -232,9 +249,10 @@ Dans le formulaire de la route → **Règles par chemin** → **Ajouter une règ
 | **Authentification Basic spécifique** | Utilisateur + mot de passe exigés pour ce chemin seulement. |
 | **Filtrage IP dédié** | Liste blanche / liste noire pour ce chemin seulement (mêmes règles que le filtrage de la route ci-dessus). |
 | **Limite de débit pour ce chemin** (v2.56) | Une limite plus stricte pour ce seul chemin. **En plus** de celle de la route, et non à sa place — les deux sont des zones de compteurs distinctes. Au-delà : `429`. |
+| **Fournisseur d'identité pour ce chemin** (v2.57) | Fait passer ce chemin par l'un de vos fournisseurs forward-auth. **En plus** de l'authentification de la route. Remplace l'authentification basique de cette règle — un seul contrôle d'identité par chemin, pas deux. |
 | **Upstream spécifique (optionnel)** | Envoie ce chemin vers son propre pool de backends au lieu de celui de la route : URL + poids, répartition de charge, health-check actif, et *Ignorer la vérification TLS* pour un backend HTTPS auto-signé (v2.23.0 / v2.23.1). Laisser vide pour suivre l'upstream de la route. |
 
-Une règle doit contenir au moins : une basic auth, un filtrage IP actif ou un upstream spécifique (une règle avec seulement un upstream sert à router).
+Une règle doit contenir au moins : une basic auth, un fournisseur d'identité, un filtrage IP actif, une limite de débit, une redirection ou un upstream spécifique (une règle avec seulement un upstream sert à router).
 
 **Comment les règles se combinent**
 
@@ -244,7 +262,7 @@ Une règle doit contenir au moins : une basic auth, un filtrage IP actif ou un u
 
 La page **Topologie** affiche les pools par chemin comme des sections dans le cluster de backends de la route (voir [Topology](Topology-FR)).
 
-Pas encore disponible par chemin : forward-auth, WAF on/off, rate limit, blocage pays, en-têtes.
+Pas encore disponible par chemin : WAF on/off, blocage pays, en-têtes.
 
 ---
 

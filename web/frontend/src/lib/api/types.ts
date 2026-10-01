@@ -888,6 +888,20 @@ export interface PathRule {
 	 * the ones that have not authenticated yet.
 	 */
 	rateLimit?: RouteRateLimit;
+	/**
+	 * v2.57 — sends THIS path through an identity provider, in ADDITION
+	 * to whatever gate the route already has.
+	 *
+	 * Reason to exist: a path with no authentication of its own — an
+	 * exposed metrics endpoint, a debug console, an admin UI with
+	 * nothing in front of it. Basic auth was the only per-path identity
+	 * gate, and a shared password is a poor answer for an operator who
+	 * already runs an IdP.
+	 *
+	 * Mutually exclusive with this rule's `basicAuth`: one identity gate
+	 * per path, not two. The API refuses both with a 400.
+	 */
+	forwardAuth?: { providerName: string };
 }
 
 /**

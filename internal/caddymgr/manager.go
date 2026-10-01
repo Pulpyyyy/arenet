@@ -1870,6 +1870,15 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 			}
 			sub, err := buildPathRulesSubroute(r.ID, r.PathRules, proxyHandler, func(c storage.BasicAuthRouteConfig) map[string]any {
 				return buildBasicAuthHandlerFromConfig(c, pathRealm)
+			}, func(providerName string) (map[string]any, bool) {
+				// v2.57 — resolve against the same provider map the route
+				// level uses, with the same fail-closed answer when the
+				// name no longer exists.
+				provider, found := opts.ForwardAuthProviders[providerName]
+				if !found {
+					return buildForwardAuthDenyHandler(providerName), false
+				}
+				return buildForwardAuthHandler(provider), true
 			}, pathProxy)
 			if err != nil {
 				return nil, fmt.Errorf("route %s (%s) path rules: %w", r.ID, r.Host, err)

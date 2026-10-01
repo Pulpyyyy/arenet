@@ -35,7 +35,7 @@ func TestBuildPathRulesSubroute_LongestFirstPlusCatchAll(t *testing.T) {
 	// inherits the route proxy (mirrors the manager.go closure's
 	// len(pr.Upstreams)==0 branch).
 	pathProxy := func(pr storage.PathRule) (map[string]any, error) { return proxy, nil }
-	sr, err := buildPathRulesSubroute("r-test", rules, proxy, ba, pathProxy)
+	sr, err := buildPathRulesSubroute("r-test", rules, proxy, ba, noForwardAuthForTest, pathProxy)
 	if err != nil {
 		t.Fatalf("buildPathRulesSubroute: %v", err)
 	}
@@ -56,4 +56,13 @@ func TestBuildPathRulesSubroute_LongestFirstPlusCatchAll(t *testing.T) {
 	if routes[2]["handle"].([]map[string]any)[0]["handler"] != "reverse_proxy" {
 		t.Fatal("catch-all must proxy")
 	}
+}
+
+// noForwardAuthForTest stands in for the resolver in tests that do not
+// exercise a per-path IdP gate. It is never called by those fixtures (no
+// rule carries ForwardAuth), and returning the fail-closed shape rather
+// than nil means a fixture that starts carrying one fails loudly instead
+// of emitting a gate that lets everything through.
+func noForwardAuthForTest(providerName string) (map[string]any, bool) {
+	return buildForwardAuthDenyHandler(providerName), false
 }

@@ -1218,6 +1218,12 @@ type pathRuleReq struct {
 	// RateLimit (v2.56) throttles THIS path in addition to the route's
 	// own limit, in a separate counter zone.
 	RateLimit *rateLimitReq `json:"rateLimit,omitempty"`
+	// ForwardAuth (v2.57) sends THIS path through an IdP, in addition to
+	// whatever gate the route already has. Reuses the route-level wire
+	// shape: a reference to one of the instance-level providers, never
+	// the provider's own config. Mutually exclusive with BasicAuth on
+	// the same rule (refused by storage validation).
+	ForwardAuth *forwardAuthReq `json:"forwardAuth,omitempty"`
 }
 
 // pathRedirectReq is the wire mirror of storage.PathRedirect.
@@ -1287,6 +1293,16 @@ func mapPathRuleReqs(reqs []pathRuleReq, existing []storage.PathRule) ([]storage
 			pr.BasicAuth = &storage.BasicAuthRouteConfig{
 				Username:     r.BasicAuth.Username,
 				PasswordHash: hash,
+			}
+		}
+		// v2.57 — the per-path IdP gate. Only the provider reference
+		// crosses the wire; an unknown name is not rejected here because
+		// a provider can be deleted after the route was saved, and the
+		// emitter answers that with a fail-closed 503 rather than
+		// silently dropping the gate.
+		if r.ForwardAuth != nil {
+			pr.ForwardAuth = &storage.ForwardAuthRouteConfig{
+				ProviderName: r.ForwardAuth.ProviderName,
 			}
 		}
 		if r.IPFilter != nil {
@@ -2080,6 +2096,15 @@ func toPathRulesResp(rules []storage.PathRule) []pathRuleReq {
 			out[i].BasicAuth = &pathRuleBasicAuthReq{
 				Username: pr.BasicAuth.Username,
 				Password: "", // SECRET — never echoed (plain or hash)
+			}
+		}
+		// v2.57 — the provider reference is not a secret (the provider's
+		// own credentials live behind the providers endpoint), so unlike
+		// the basic-auth password it is echoed back as stored. The form
+		// needs it to re-render the gate on edit.
+		if pr.ForwardAuth != nil {
+			out[i].ForwardAuth = &forwardAuthReq{
+				ProviderName: pr.ForwardAuth.ProviderName,
 			}
 		}
 		if pr.IPFilter != nil {
