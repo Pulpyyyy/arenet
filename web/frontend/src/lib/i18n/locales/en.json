@@ -750,7 +750,7 @@
 		},
 		"pathRules": {
 			"sectionLabel": "Path rules",
-			"sectionHelp": "Apply a basic auth override and/or a scoped IP filter to requests under a specific path prefix.",
+			"sectionHelp": "Apply extra protection — basic auth, a source-IP filter, a rate limit — to requests under a path prefix. These add to the route's own gates rather than replacing them.",
 			"add": "Add path rule",
 			"remove": "Remove path rule",
 			"prefixLabel": "Path prefix",
@@ -763,7 +763,8 @@
 			"redirectTargetHelp": "A path on this host (/admin/login) or a full URL elsewhere. It must fall OUTSIDE this rule's own path, or every visitor would be redirected to it forever — Arenet refuses that at save.",
 			"redirectCodeLabel": "Status",
 			"redirectCodeHelp": "302 is temporary and is the right default for a landing path: nothing is cached, so an application update can change it. 301 is remembered by browsers and is hard to take back.",
-			"basicAuthLabel": "Basic auth override",
+			"basicAuthLabel": "Basic auth for this path",
+			"basicAuthAdditiveHint": "Applies in addition to the route's own authentication, which still runs first — it does not replace it.",
 			"basicAuthUsernameLabel": "Username",
 			"basicAuthUsernamePlaceholder": "username",
 			"basicAuthPasswordLabel": "Password",
