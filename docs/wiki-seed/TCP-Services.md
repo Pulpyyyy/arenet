@@ -85,6 +85,23 @@ Layer-4 traffic crosses no HTTP chain, so it appears in no route metric, no log 
 
 Since v2.43 the column **refreshes on its own**, every five seconds, and the bytes move **while a connection is open**. Before that they were only added when a connection closed, so a phone's IMAP session — which stays open for hours — showed 0 B for a relay that was busy the whole time.
 
+**What "open" counts on a UDP relay (v2.57.1).** UDP has no connections, so
+caddy-l4 keeps one pseudo-session per client address and drops it 30 seconds
+after that client's last packet. "Open" on a UDP service therefore means
+*distinct client addresses seen in the last 30 seconds* — a number that falls
+back to zero on its own once traffic stops, and that counts one media client
+several times if it roams between addresses.
+
+That gauge also **restarts at zero whenever you apply a configuration
+change**, for UDP services only. When an apply replaces the layer-4 engine,
+the sessions alive at that instant are abandoned without ever reporting their
+own closure, so their count would otherwise be carried for the lifetime of
+the process: one operator saw `38 open` on a LiveKit relay, frozen, more than
+an hour after the meeting had ended. Real traffic refills the number within
+the idle window, and the cumulative counters — connections and bytes — are
+never reset. A **TCP** service keeps its gauge across an apply, because an
+established relay survives it and does report its own close.
+
 The same counters are available at `GET /api/v1/tcp-services/metrics`.
 
 ---

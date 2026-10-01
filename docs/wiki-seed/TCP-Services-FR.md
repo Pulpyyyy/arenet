@@ -85,6 +85,25 @@ Le trafic de niveau 4 ne traverse aucune chaîne HTTP : il n'apparaît dans aucu
 
 Depuis la v2.43, cette colonne **se rafraîchit toute seule**, toutes les cinq secondes, et les octets avancent **pendant qu'une connexion est ouverte**. Auparavant ils n'étaient ajoutés qu'à la fermeture : une session IMAP de téléphone, qui reste ouverte des heures, affichait 0 o pour un relais occupé en permanence.
 
+**Ce que « ouvertes » compte sur un relais UDP (v2.57.1).** UDP n'a pas de
+connexions : caddy-l4 maintient une pseudo-session par adresse cliente et
+l'abandonne 30 secondes après le dernier paquet de ce client. « Ouvertes »
+sur un service UDP signifie donc *adresses clientes distinctes vues dans les
+30 dernières secondes* — un nombre qui retombe de lui-même à zéro quand le
+trafic cesse, et qui compte plusieurs fois un même client média s'il change
+d'adresse.
+
+Ce compteur **repart aussi de zéro à chaque application de configuration**,
+pour les services UDP uniquement. Lorsqu'une application remplace le moteur
+de niveau 4, les sessions vivantes à cet instant sont abandonnées sans jamais
+signaler leur fermeture : leur décompte serait sinon traîné pendant toute la
+durée de vie du processus. Un opérateur a ainsi vu `38 ouvertes` sur un relais
+LiveKit, figé, plus d'une heure après la fin de la réunion. Le trafic réel
+regarnit le nombre en moins d'une fenêtre d'inactivité, et les compteurs
+cumulés — connexions et octets — ne sont jamais remis à zéro. Un service
+**TCP** conserve son compteur au travers d'une application, parce qu'un
+relais établi y survit et signale bien sa fermeture.
+
 Les mêmes compteurs sont disponibles sur `GET /api/v1/tcp-services/metrics`.
 
 ---

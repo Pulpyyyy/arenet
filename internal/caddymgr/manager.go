@@ -1067,13 +1067,19 @@ func syncL4Registry(services []storage.TCPService) {
 	if reg == nil {
 		return
 	}
-	ids := make([]string, 0, len(services))
+	specs := make([]l4metrics.SyncSpec, 0, len(services))
 	for _, svc := range services {
-		if !svc.Disabled {
-			ids = append(ids, svc.ID)
+		if svc.Disabled {
+			continue
 		}
+		// v2.57.1 — the transport decides whether the open-session gauge
+		// can survive this apply. See l4metrics.SyncSpec.Datagram.
+		specs = append(specs, l4metrics.SyncSpec{
+			ID:       svc.ID,
+			Datagram: svc.Network() == storage.TCPServiceProtocolUDP,
+		})
 	}
-	reg.Sync(ids)
+	reg.Sync(specs)
 }
 
 // syncRegistry reconciles the metrics registry's cells with the
