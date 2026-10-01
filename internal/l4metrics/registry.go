@@ -124,13 +124,48 @@ func NewRegistry() *Registry {
 	return &Registry{cells: make(map[string]*cell)}
 }
 
+// SyncSpec is one mounted service, as the registry needs to know it at
+// apply time.
+type SyncSpec struct {
+	ID string
+	// Datagram marks a UDP service, whose open-session gauge cannot
+	// survive an apply.
+	//
+	// v2.57.1 — a UDP "connection" is a pseudo-session caddy-l4 keeps per
+	// downstream address. When an apply replaces the layer-4 server, the
+	// old server's run loop exits (caddy-l4 v0.1.1 layer4/server.go:154)
+	// while those sessions are still live. Each then reaches its idle
+	// timeout and tries to report its own closure on a channel buffered
+	// at 10 whose only reader was that loop (server.go:135, :138, :367),
+	// so the ones that do not fit block forever — their handler never
+	// returns, and the deferred decrement in module.go never runs. The
+	// gauge keeps those increments for the life of the process.
+	//
+	// Measured, not inferred: 15 live sessions, server stopped, 8 still
+	// counted as open afterwards (TestUDPGauge_LeaksAcrossAnApply).
+	//
+	// So for a datagram service the gauge restarts at zero on every
+	// apply. Nothing of value is lost: a client still sending refills it
+	// within the idle timeout, and sessions from before the apply are
+	// gone whatever the counter says.
+	//
+	// A stream (TCP) service is left alone on purpose. Stop() closes the
+	// listener, not the accepted connections (caddy-l4 layer4/app.go:111),
+	// so a long-lived relay — IMAP from a phone — keeps running across an
+	// apply and does report its own close. Zeroing it would make the
+	// gauge read 0 for a service that is busy, then go negative when the
+	// session finally ends.
+	Datagram bool
+}
+
 // Sync makes the registry hold exactly these services: cells for
-// services that disappeared are dropped, new ones start at zero.
+// services that disappeared are dropped, new ones start at zero, and a
+// datagram service's open-session gauge is reset (see SyncSpec.Datagram).
 // Called on every successful apply, like the HTTP registry's Sync.
-func (r *Registry) Sync(serviceIDs []string) {
-	wanted := make(map[string]struct{}, len(serviceIDs))
-	for _, id := range serviceIDs {
-		wanted[id] = struct{}{}
+func (r *Registry) Sync(specs []SyncSpec) {
+	wanted := make(map[string]SyncSpec, len(specs))
+	for _, s := range specs {
+		wanted[s.ID] = s
 	}
 
 	r.mu.Lock()
@@ -140,9 +175,17 @@ func (r *Registry) Sync(serviceIDs []string) {
 			delete(r.cells, id)
 		}
 	}
-	for id := range wanted {
-		if _, exists := r.cells[id]; !exists {
+	for id, spec := range wanted {
+		existing, exists := r.cells[id]
+		if !exists {
 			r.cells[id] = newCell()
+			continue
+		}
+		// Cumulative counters (connections, bytes, errors, refusals) are
+		// kept: they describe the past and an apply does not undo it.
+		// Only the "right now" gauge is unreliable across an apply.
+		if spec.Datagram {
+			existing.active.Store(0)
 		}
 	}
 }
@@ -176,8 +219,25 @@ func (r *Registry) Opened(serviceID string) {
 // now go straight into the cell as they cross (see Recorder), and
 // this only closes the gauge.
 func (r *Registry) Closed(serviceID string) {
-	if c := r.cellFor(serviceID); c != nil {
-		c.active.Add(-1)
+	c := r.cellFor(serviceID)
+	if c == nil {
+		return
+	}
+	// v2.57.1 — never below zero. A session can open before an apply and
+	// close after it, against a cell whose gauge was reset (a datagram
+	// service) or which was dropped and recreated (disable then
+	// re-enable). The decrement then has no increment to cancel, and
+	// Active is a signed int64 that the API serialises as-is: the UI
+	// would show a negative number of open sessions, which is worse than
+	// a gauge that is briefly low.
+	for {
+		cur := c.active.Load()
+		if cur <= 0 {
+			return
+		}
+		if c.active.CompareAndSwap(cur, cur-1) {
+			return
+		}
 	}
 }
 

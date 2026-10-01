@@ -26,7 +26,7 @@ import (
 
 func TestRegistry_CountsAConnection(t *testing.T) {
 	reg := NewRegistry()
-	reg.Sync([]string{"svc1"})
+	reg.Sync([]SyncSpec{{ID: "svc1"}})
 
 	reg.Opened("svc1")
 	snap := reg.Snapshot()
@@ -63,7 +63,7 @@ func TestRegistry_CountsAConnection(t *testing.T) {
 // pay for a missing cell.
 func TestRegistry_UnknownServiceIsIgnored(t *testing.T) {
 	reg := NewRegistry()
-	reg.Sync([]string{"svc1"})
+	reg.Sync([]SyncSpec{{ID: "svc1"}})
 
 	reg.Opened("ghost")
 	reg.Closed("ghost")
@@ -81,10 +81,10 @@ func TestRegistry_UnknownServiceIsIgnored(t *testing.T) {
 
 func TestRegistry_SyncDropsAndCreates(t *testing.T) {
 	reg := NewRegistry()
-	reg.Sync([]string{"a", "b"})
+	reg.Sync([]SyncSpec{{ID: "a"}, {ID: "b"}})
 	reg.Opened("a")
 
-	reg.Sync([]string{"b", "c"})
+	reg.Sync([]SyncSpec{{ID: "b"}, {ID: "c"}})
 	snap := reg.Snapshot()
 	if _, gone := snap["a"]; gone {
 		t.Fatal("a deleted service must stop being reported")
@@ -129,7 +129,7 @@ func TestHandler_CountsBytesAndAlwaysCallsNext(t *testing.T) {
 	t.Cleanup(ResetForTest)
 
 	reg := NewRegistry()
-	reg.Sync([]string{"svc1"})
+	reg.Sync([]SyncSpec{{ID: "svc1"}})
 	SetRegistry(reg)
 
 	conn := &fakeConn{toRead: []byte("hello backend")}
@@ -193,7 +193,7 @@ func TestHandler_FailureIsRecorded(t *testing.T) {
 	t.Cleanup(ResetForTest)
 
 	reg := NewRegistry()
-	reg.Sync([]string{"svc1"})
+	reg.Sync([]SyncSpec{{ID: "svc1"}})
 	SetRegistry(reg)
 
 	cx := layer4.WrapConnection(&fakeConn{}, []byte{}, nil)
@@ -222,7 +222,7 @@ func TestHandler_FailureIsRecorded(t *testing.T) {
 // service and a working one as the same thing.
 func TestRecorder_BytesVisibleBeforeClose(t *testing.T) {
 	reg := NewRegistry()
-	reg.Sync([]string{"svc1"})
+	reg.Sync([]SyncSpec{{ID: "svc1"}})
 	reg.Opened("svc1")
 
 	rec := reg.RecorderFor("svc1")
