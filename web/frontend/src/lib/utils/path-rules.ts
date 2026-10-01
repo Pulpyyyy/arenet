@@ -76,6 +76,17 @@ function hasActiveRateLimit(rule: PathRule): boolean {
 }
 
 /**
+ * A rule gated by an identity provider: a provider is named.
+ *
+ * v2.57 — gating a path through an IdP and nothing else is the whole point
+ * of the feature, so without this predicate every such rule would be
+ * filtered out here and the path would stay open.
+ */
+function hasActiveForwardAuth(rule: PathRule): boolean {
+	return (rule.forwardAuth?.providerName ?? '').trim().length > 0;
+}
+
+/**
  * Every predicate that makes a rule worth keeping.
  *
  * Exported so a test can assert the list covers each content field of
@@ -88,7 +99,8 @@ export const pathRuleContentChecks: ((rule: PathRule) => boolean)[] = [
 	hasActiveIPFilter,
 	hasActiveUpstream,
 	hasActiveRedirect,
-	hasActiveRateLimit
+	hasActiveRateLimit,
+	hasActiveForwardAuth
 ];
 
 export function sanitizePathRules(rules: PathRule[]): PathRule[] {

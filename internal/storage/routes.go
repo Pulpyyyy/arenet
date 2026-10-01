@@ -128,6 +128,24 @@ type PathRule struct {
 	// normally: unlike the route-level redirect state, this replaces
 	// the proxy for ONE path.
 	Redirect *PathRedirect `json:"redirect,omitempty"`
+	// ForwardAuth (v2.57) delegates THIS path's authentication to an IdP,
+	// in addition to whatever gate the route already has.
+	//
+	// Reason to exist: a path with no authentication of its own — an
+	// exposed /metrics, a debug console, an admin UI with nothing in front
+	// of it. Basic auth was the only identity gate a path could carry, and
+	// a shared password is a poor answer when the operator already runs an
+	// IdP with accounts, MFA and revocation.
+	//
+	// Deliberately NOT the tool for a path whose application authenticates
+	// already: an IdP in front of a login endpoint answers the browser's
+	// XHR with a redirect to its own login page, and the application never
+	// sees that reply. Such a path wants the rate limit below instead.
+	//
+	// Mutually exclusive with BasicAuth on the same rule: two identity
+	// gates on one path is a configuration nobody means, and the route
+	// level has enforced the same exclusion since Step K.1.
+	ForwardAuth *ForwardAuthRouteConfig `json:"forward_auth,omitempty"`
 	// RateLimit (v2.56) throttles THIS path only, in ADDITION to the
 	// route's own limit. Its counters are a separate zone, so a strict
 	// limit on a login endpoint does not spend the route's budget and
@@ -201,11 +219,12 @@ func (p PathRule) Validate() error {
 				"use %q", p.PathPrefix, strings.ToLower(p.PathPrefix))
 	}
 	hasUpstreams := len(p.Upstreams) > 0
-	if p.BasicAuth == nil && (p.IPFilter == nil || !p.IPFilter.IsActive()) && !hasUpstreams &&
+	if p.BasicAuth == nil && p.ForwardAuth == nil &&
+		(p.IPFilter == nil || !p.IPFilter.IsActive()) && !hasUpstreams &&
 		p.Redirect == nil && p.RateLimit == nil {
 		return apierr.New("path_rule_empty", map[string]string{"path": p.PathPrefix},
-			"path_rule %q: must declare at least one of basic auth, IP filter, a rate limit, "+
-				"an upstream, or a redirect", p.PathPrefix)
+			"path_rule %q: must declare at least one of basic auth, forward auth, IP filter, "+
+				"a rate limit, an upstream, or a redirect", p.PathPrefix)
 	}
 	if err := p.validateRedirect(); err != nil {
 		return err
@@ -219,6 +238,16 @@ func (p PathRule) Validate() error {
 	if p.IPFilter != nil {
 		if err := p.IPFilter.Validate(); err != nil {
 			return fmt.Errorf("path_rule %q: %w", p.PathPrefix, err)
+		}
+	}
+	// v2.57 — one identity gate per path, not two.
+	if p.ForwardAuth != nil {
+		if p.BasicAuth != nil {
+			return apierr.New("path_rule_two_auth", map[string]string{"path": p.PathPrefix},
+				"path_rule %q: choose either basic auth or forward auth, not both", p.PathPrefix)
+		}
+		if strings.TrimSpace(p.ForwardAuth.ProviderName) == "" {
+			return fmt.Errorf("path_rule %q: forward auth requires a provider name", p.PathPrefix)
 		}
 	}
 	// v2.56 — the per-path limit, same contract as the route's.

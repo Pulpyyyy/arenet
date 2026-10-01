@@ -91,6 +91,12 @@ func buildPathRulesSubroute(
 	rules []storage.PathRule,
 	routeProxy map[string]any,
 	basicAuthBuilder func(storage.BasicAuthRouteConfig) map[string]any,
+	// forwardAuthBuilder resolves a provider name to its gate, or to the
+	// fail-closed 503 when the provider is gone. It returns the handler and
+	// whether the chain may continue: a missing provider must NOT fall
+	// through to the proxy, because the failure mode of an auth control
+	// that quietly stops gating is a path served to anyone.
+	forwardAuthBuilder func(providerName string) (handler map[string]any, ok bool),
 	pathProxyBuilder func(storage.PathRule) (map[string]any, error),
 ) (map[string]any, error) {
 	sorted := storage.SortPathRulesByPrefixLenDesc(rules)
@@ -123,6 +129,26 @@ func buildPathRulesSubroute(
 		}
 		if pr.BasicAuth != nil {
 			handle = append(handle, basicAuthBuilder(*pr.BasicAuth))
+		}
+		// v2.57 — the per-path IdP gate, where basic auth sits: after the
+		// cheap gates, before the proxy. Storage refuses both on one rule,
+		// so these two are never emitted together.
+		//
+		// A missing provider emits the 503 and stops: the rest of this
+		// rule's chain is skipped so the request cannot reach the backend
+		// through a gate that is not there. Same posture as the route
+		// level, for the same reason — an auth control that fails open is
+		// the worst class of failure.
+		if pr.ForwardAuth != nil {
+			gate, ok := forwardAuthBuilder(pr.ForwardAuth.ProviderName)
+			handle = append(handle, gate)
+			if !ok {
+				inner = append(inner, map[string]any{
+					"match":  []map[string]any{{"path": pathMatchers(pr)}},
+					"handle": handle,
+				})
+				continue
+			}
 		}
 		// v2.44 — a path redirect replaces the proxy for THIS path
 		// only; everything else on the route keeps being proxied. The

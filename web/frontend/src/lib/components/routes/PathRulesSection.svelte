@@ -26,9 +26,11 @@
   Public API (add-only; do not rename/remove props):
 
     value — the bound PathRule[] list.
+    forwardAuthProviders — the instance's forward-auth providers (v2.57),
+      for the per-path IdP gate's selector. Optional, defaults to empty.
 -->
 <script lang="ts">
-	import type { PathRule } from '$lib/api/types';
+	import type { ForwardAuthProvider, PathRule } from '$lib/api/types';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
 	import Button from '$lib/components/Button.svelte';
@@ -37,9 +39,16 @@
 
 	interface Props {
 		value: PathRule[];
+		/**
+		 * v2.57 — the instance-level forward-auth providers, for the
+		 * per-path IdP gate's selector. Defaults to empty so every
+		 * existing caller and test keeps working; the gate then shows its
+		 * empty state instead of an unusable dropdown.
+		 */
+		forwardAuthProviders?: ForwardAuthProvider[];
 	}
 
-	let { value = $bindable() }: Props = $props();
+	let { value = $bindable(), forwardAuthProviders = [] }: Props = $props();
 
 	function addRule(): void {
 		value = [...value, { pathPrefix: '', ipFilter: { mode: 'off' } }];
@@ -62,12 +71,34 @@
 		}
 	}
 
+	// v2.57 — one identity gate per rule, enforced by the controls rather
+	// than by an error message. Storage refuses a rule carrying both, so
+	// two independently tickable boxes would let the operator build a
+	// payload the API answers with a 400; turning one on turns the other
+	// off instead, and the invalid state cannot be reached.
 	function toggleBasicAuth(i: number, enabled: boolean): void {
 		if (enabled) {
 			value[i].basicAuth = { username: '', password: '' };
+			value[i].forwardAuth = undefined;
 		} else {
 			value[i].basicAuth = undefined;
 		}
+		touch();
+	}
+
+	function toggleForwardAuth(i: number, enabled: boolean): void {
+		if (enabled) {
+			// Preselect the only provider when there is exactly one: with a
+			// single choice the selector is a formality, and leaving it
+			// empty means the rule is dropped at submit.
+			value[i].forwardAuth = {
+				providerName: forwardAuthProviders.length === 1 ? forwardAuthProviders[0].name : ''
+			};
+			value[i].basicAuth = undefined;
+		} else {
+			value[i].forwardAuth = undefined;
+		}
+		touch();
 	}
 
 	// Task 6 (per-path upstream routing) — the upstream pool, lbPolicy
@@ -342,6 +373,68 @@
 									class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary"
 								/>
 							</div>
+						</div>
+					{/if}
+				</div>
+
+				<!-- v2.57 — the per-path IdP gate. Mutually exclusive with the
+				     basic auth above: the two toggles clear each other, so the
+				     rule can never carry both (which storage refuses). -->
+				<div class="flex flex-col gap-2">
+					<label class="inline-flex items-center gap-2 text-sm text-secondary cursor-pointer">
+						<input
+							type="checkbox"
+							class="accent-cyan"
+							checked={!!rule.forwardAuth}
+							onchange={(e) => toggleForwardAuth(i, (e.currentTarget as HTMLInputElement).checked)}
+							data-testid="path-rule-forwardauth-toggle-{i}"
+						/>
+						{language.current && t('routes.pathRules.forwardAuthLabel')}
+					</label>
+					{#if rule.forwardAuth}
+						<div class="ml-6 flex flex-col gap-2">
+							<p class="text-[11px] text-muted" data-testid="path-rule-forwardauth-additive-{i}">
+								{language.current && t('routes.pathRules.forwardAuthAdditiveHint')}
+							</p>
+							{#if forwardAuthProviders.length === 0}
+								<!-- The control is unusable until a provider exists, so
+								     say where they are created rather than showing an
+								     empty dropdown. -->
+								<p class="text-xs text-down" data-testid="path-rule-forwardauth-no-provider-{i}">
+									{language.current && t('routes.pathRules.forwardAuthNoProvider')}
+									<a href="/settings" class="text-cyan hover:underline"
+										>{language.current && t('routes.pathRules.forwardAuthConfigureLink')}</a
+									>.
+								</p>
+							{:else}
+								<div>
+									<label
+										for="path-rule-forwardauth-provider-{i}"
+										class="text-sm font-medium text-secondary block mb-1"
+									>
+										{language.current && t('routes.pathRules.forwardAuthProviderLabel')}
+									</label>
+									<select
+										id="path-rule-forwardauth-provider-{i}"
+										bind:value={
+											() => rule.forwardAuth?.providerName ?? '',
+											(v) => {
+												if (rule.forwardAuth) rule.forwardAuth.providerName = v;
+												touch();
+											}
+										}
+										data-testid="path-rule-forwardauth-provider-{i}"
+										class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary"
+									>
+										<option value="" disabled
+											>{language.current && t('routes.pathRules.forwardAuthSelectPlaceholder')}</option
+										>
+										{#each forwardAuthProviders as p (p.name)}
+											<option value={p.name}>{p.name} ({p.kind})</option>
+										{/each}
+									</select>
+								</div>
+							{/if}
 						</div>
 					{/if}
 				</div>

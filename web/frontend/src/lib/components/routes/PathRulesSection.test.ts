@@ -374,3 +374,111 @@ describe('PathRulesSection — per-path rate limit', () => {
 		expect(screen.queryByTestId('path-rule-rate-events-1')).toBeNull();
 	});
 });
+
+// v2.57 — the per-path IdP gate.
+describe('PathRulesSection — per-path forward auth', () => {
+	const providers = [
+		{ name: 'authentik', kind: 'authentik' as const },
+		{ name: 'authelia', kind: 'authelia' as const }
+	] as never[];
+
+	it('is off until asked for', () => {
+		const value: PathRule[] = [{ pathPrefix: '/metrics' }];
+		render(PathRulesSection, { value, forwardAuthProviders: providers });
+		expect(screen.queryByTestId('path-rule-forwardauth-provider-0')).toBeNull();
+		expect(value[0].forwardAuth).toBeUndefined();
+	});
+
+	// Starts from a rule that already carries the gate — the shape of a
+	// saved route being reopened, and the one this assertion can observe.
+	// Clicking the toggle first calls touch(), which replaces the bound
+	// array; in the app that write goes back to the parent's $state, but a
+	// test passing a plain array literal cannot receive it, so the array
+	// this test holds would stop sharing objects with the component and the
+	// assertion would read a stale rule rather than a real failure.
+	it('carries the chosen provider into the rule', async () => {
+		const value: PathRule[] = [
+			{ pathPrefix: '/metrics', forwardAuth: { providerName: 'authentik' } }
+		];
+		render(PathRulesSection, { value, forwardAuthProviders: providers });
+		const select = screen.getByTestId('path-rule-forwardauth-provider-0') as HTMLSelectElement;
+		expect(select.value).toBe('authentik');
+		await fireEvent.change(select, { target: { value: 'authelia' } });
+		expect(value[0].forwardAuth?.providerName).toBe('authelia');
+	});
+
+	it('preselects the provider when there is only one to choose', async () => {
+		const value: PathRule[] = [{ pathPrefix: '/metrics' }];
+		render(PathRulesSection, { value, forwardAuthProviders: [providers[0]] });
+		await fireEvent.click(screen.getByTestId('path-rule-forwardauth-toggle-0'));
+		expect(value[0].forwardAuth?.providerName).toBe('authentik');
+	});
+
+	it('clears the gate when switched back off', async () => {
+		const value: PathRule[] = [
+			{ pathPrefix: '/metrics', forwardAuth: { providerName: 'authentik' } }
+		];
+		render(PathRulesSection, { value, forwardAuthProviders: providers });
+		await fireEvent.click(screen.getByTestId('path-rule-forwardauth-toggle-0'));
+		expect(value[0].forwardAuth).toBeUndefined();
+	});
+
+	// Storage refuses a rule carrying both gates, so the controls must make
+	// that state unreachable rather than let the operator build a payload
+	// the API answers with a 400.
+	it('turning on the IdP gate turns off this rule basic auth', async () => {
+		const value: PathRule[] = [
+			{ pathPrefix: '/metrics', basicAuth: { username: 'ops', password: 'x' } }
+		];
+		render(PathRulesSection, { value, forwardAuthProviders: providers });
+		await fireEvent.click(screen.getByTestId('path-rule-forwardauth-toggle-0'));
+		await tick();
+		expect(value[0].basicAuth).toBeUndefined();
+		expect(value[0].forwardAuth).toBeDefined();
+		expect(screen.queryByTestId('path-rule-basicauth-username-0')).toBeNull();
+	});
+
+	it('turning on basic auth turns off the IdP gate', async () => {
+		const value: PathRule[] = [
+			{ pathPrefix: '/metrics', forwardAuth: { providerName: 'authentik' } }
+		];
+		render(PathRulesSection, { value, forwardAuthProviders: providers });
+		await fireEvent.click(screen.getByTestId('path-rule-basicauth-toggle-0'));
+		await tick();
+		expect(value[0].forwardAuth).toBeUndefined();
+		expect(value[0].basicAuth).toBeDefined();
+		expect(screen.queryByTestId('path-rule-forwardauth-provider-0')).toBeNull();
+	});
+
+	// The route's own auth still runs first: the hint must not let an
+	// operator believe this replaced it. v2.56.4 corrected exactly that
+	// wording on the basic-auth gate.
+	it('says the route authentication still applies', async () => {
+		const value: PathRule[] = [{ pathPrefix: '/metrics' }];
+		render(PathRulesSection, { value, forwardAuthProviders: providers });
+		await fireEvent.click(screen.getByTestId('path-rule-forwardauth-toggle-0'));
+		await tick();
+		const hint = screen.getByTestId('path-rule-forwardauth-additive-0').textContent ?? '';
+		expect(hint.toLowerCase()).toMatch(/in addition|s'ajoute/);
+		expect(hint.toLowerCase()).not.toMatch(/override|remplace l'authentification/);
+	});
+
+	// Without a provider the control cannot be used; say where they are
+	// created instead of offering an empty dropdown.
+	it('points at Settings when no provider exists', async () => {
+		const value: PathRule[] = [{ pathPrefix: '/metrics' }];
+		render(PathRulesSection, { value, forwardAuthProviders: [] });
+		await fireEvent.click(screen.getByTestId('path-rule-forwardauth-toggle-0'));
+		await tick();
+		expect(screen.getByTestId('path-rule-forwardauth-no-provider-0')).toBeTruthy();
+		expect(screen.queryByTestId('path-rule-forwardauth-provider-0')).toBeNull();
+	});
+
+	it('keeps each rule gate to its own rule', async () => {
+		const value: PathRule[] = [{ pathPrefix: '/a' }, { pathPrefix: '/b' }];
+		render(PathRulesSection, { value, forwardAuthProviders: providers });
+		await fireEvent.click(screen.getByTestId('path-rule-forwardauth-toggle-1'));
+		expect(value[0].forwardAuth).toBeUndefined();
+		expect(value[1].forwardAuth).toBeDefined();
+	});
+});

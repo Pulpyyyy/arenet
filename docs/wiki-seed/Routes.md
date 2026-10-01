@@ -218,6 +218,23 @@ Tick **Rate limit for this path** on a path rule and give it its own requests-pe
 
 Example — Ghost's admin session endpoint at 3 attempts per 5 minutes while the blog itself stays at the route's 200 per minute: add a path rule on `/ghost/api/admin/session`, tick the limit, set 3 and `5m`.
 
+### An identity provider for one path (v2.57)
+
+Some paths have no authentication of their own: an exposed `/metrics`, a debug console, an admin UI that was never meant to face the internet. Until now the only per-path identity gate was basic auth, and a shared password is a poor answer for an operator who already runs an IdP.
+
+Tick **Identity provider for this path** on a path rule and pick one of your configured providers (Settings → Forward auth). What matters:
+
+- it is **in addition** to the route's own authentication, which still runs first. A path rule never switches off a protection of the route;
+- it **replaces this rule's basic auth**: one identity gate per path, not two. Turning one on turns the other off, so the invalid combination cannot be built;
+- if the provider is later deleted, the path answers **`503`** instead of being served unprotected. A gate that quietly stops gating is worse than one that is unavailable, so the failure is visible;
+- the gate sits at the same point in the chain as the path's basic auth: after the path's IP filter and rate limit, before the proxy to the backend.
+
+**What it is not for.** A path whose application authenticates its own users. An IdP placed in front of a login endpoint answers the browser's background requests with a redirect to the IdP, which an application expecting JSON cannot follow — the result is a login form that silently stops working. Protect what has no gate of its own; leave the rest to the application.
+
+**With Authentik**, single-application forward-auth also needs `/outpost.goauthentik.io` routed to the outpost on the same domain, as a second path rule with that outpost as its specific upstream. Without it the browser cannot complete the sign-in round trip.
+
+---
+
 ## Path rules (v2.21.0 → v2.23.0)
 
 **Path rules** apply extra protection — and optionally a different backend — to a URL sub-path of a route, without creating a second route. Typical: basic-auth on `/docs` (Swagger), `/metrics` reachable from one monitoring IP only, `/api/v1` sent to another backend, the rest of the site unchanged.
@@ -230,9 +247,10 @@ In the route form → **Path rules** → **Add path rule**:
 | **Basic auth override** | Username + password required for this path only. |
 | **Scoped IP filter** | Allow-list / deny-list for this path only (same rules as the route-level filter above). |
 | **Rate limit for this path** (v2.56) | A tighter limit for this path only. **In addition** to the route's limit, not instead of it — the two are separate counter zones. Over the limit: `429`. |
+| **Identity provider for this path** (v2.57) | Send this path through one of your configured forward-auth providers. **In addition** to the route's own authentication. Replaces this rule's basic auth — one identity gate per path, not two. |
 | **Specific upstream (optional)** | Send this path to its own backend pool instead of the route's : URLs + weights, load-balancing policy, active health-check, and *Skip TLS verification* for a self-signed HTTPS backend (v2.23.0 / v2.23.1). Leave empty to follow the route's upstream. |
 
-A rule needs at least one of: basic auth, an active IP filter, or a specific upstream (a rule with only an upstream is pure routing).
+A rule needs at least one of: basic auth, an identity provider, an active IP filter, a rate limit, a redirect, or a specific upstream (a rule with only an upstream is pure routing).
 
 **How rules combine**
 
@@ -242,7 +260,7 @@ A rule needs at least one of: basic auth, an active IP filter, or a specific ups
 
 The **Topology** page shows a route's path pools as sections inside its backend cluster (see [Topology](Topology)).
 
-Not available per path yet: forward-auth, WAF on/off, rate limit, country block, headers.
+Not available per path yet: WAF on/off, country block, headers.
 
 ---
 

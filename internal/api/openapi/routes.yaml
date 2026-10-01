@@ -1376,6 +1376,21 @@ components:
             therefore does not spend the route's budget, and the route's limit
             does not dilute it. Emitted before the path's basic auth, so the
             requests it counts are the ones that have not authenticated yet.
+        forwardAuth:
+          type: object
+          description: >-
+            v2.57 — sends THIS path through a configured forward-auth provider,
+            in addition to whatever gate the route already has. For a path with
+            no authentication of its own, such as an exposed metrics endpoint or
+            an admin UI. Mutually exclusive with this rule's basicAuth; a rule
+            carrying both is refused with 400. If the named provider no longer
+            exists the path answers 503 rather than being served unprotected.
+          properties:
+            providerName:
+              type: string
+              description: >-
+                A configured forward-auth provider (Settings). Required when
+                forwardAuth is present.
     RoutesRateLimit:
       type: object
       required: [events, window]
