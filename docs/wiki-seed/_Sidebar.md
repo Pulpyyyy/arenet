@@ -15,6 +15,7 @@
 - [Country Block](Country-Block) · [Country Block 🇫🇷](Country-Block-FR)
 - [Rate Limit](Rate-Limit) · [Rate Limit 🇫🇷](Rate-Limit-FR)
 - [OIDC SSO](OIDC-SSO) · [OIDC SSO 🇫🇷](OIDC-SSO-FR)
+- [Forward auth](Forward-Auth) · [Forward auth 🇫🇷](Forward-Auth-FR)
 
 ## Operations / Opérations
 - [Certificates](Certificates) · [Certificats 🇫🇷](Certificates-FR)
