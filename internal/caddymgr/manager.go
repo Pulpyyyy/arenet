@@ -1179,7 +1179,7 @@ type httpServer struct {
 	TLSConnPolicies []tlsConnectionPolicy `json:"tls_connection_policies,omitempty"`
 }
 
-// Step R — mirror of caddy modules/caddyhttp/server.go:745
+// Step R — mirror of caddy modules/caddyhttp/server.go:758
 // HTTPErrorConfig { Routes RouteList }. The "errors" subroute
 // runs whenever a primary-route handler returns a HandlerError
 // (server.go:421-423). Caddy does NOT auto-dispatch by status

@@ -40,7 +40,7 @@ import (
 //
 // X-Forwarded-* trio is NOT pinned here because Caddy's
 // reverse_proxy injects them automatically (verified empirically
-// against caddyserver/caddy/v2@v2.11.3 reverseproxy.go:835).
+// against caddyserver/caddy/v2@v2.11.4 reverseproxy.go:867).
 
 func TestBuildConfigJSON_ProxyHandler_PreservesHostByDefault(t *testing.T) {
 	routes := []storage.Route{

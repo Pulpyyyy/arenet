@@ -127,7 +127,7 @@ func TestPathForwardAuth_EmitsTheGateBeforeTheProxy(t *testing.T) {
 //
 // Two things make that hold, and only one of them is ours. Caddy's
 // static_response returns nil instead of calling next for every status but
-// 103 Early Hints (caddy v2.11.3 modules/caddyhttp/staticresp.go:253-257),
+// 103 Early Hints (caddy v2.11.4 modules/caddyhttp/staticresp.go:253-257),
 // so the 503 ends the request on its own. This test asserts the stronger
 // structural property — nothing is emitted after the refusal at all — so
 // the guarantee does not rest on that upstream detail staying true, and so

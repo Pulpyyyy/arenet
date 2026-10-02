@@ -205,18 +205,30 @@ func (p PathRule) Validate() error {
 			return fmt.Errorf("path_rule: path_prefix %q must not contain whitespace", p.PathPrefix)
 		}
 	}
-	// v2.44 — Caddy lowercases the REQUEST path before matching but
-	// never the pattern (caddyhttp/matchers.go MatchPath.MatchWithError).
-	// A pattern carrying an uppercase letter can therefore never match
-	// anything: Caddy accepts the config, the rule loads, and it
-	// silently does nothing forever. Refusing it here is the only
-	// place an operator can be told.
+	// v2.44, corrected in v2.57.2 — path prefixes are stored lowercase.
+	//
+	// The rule used to say an uppercase pattern "could never match
+	// anything", and said so to the operator in the error. That is wrong,
+	// and was wrong when written: Caddy lowercases the pattern too, in
+	// MatchPath.Provision (caddy v2.11.4 modules/caddyhttp/matchers.go:417),
+	// alongside the request path at :436 — and the escaped-path branch for
+	// patterns containing '%' lowercases both as well (:546). Matching is
+	// case-insensitive on both sides, so "/Docs" would in fact have worked.
+	//
+	// The refusal stays, for a reason that is true: Arenet compares path
+	// prefixes itself — longest-prefix ordering, and the redirect-loop check
+	// in validateRedirect — and those comparisons lowercase both operands to
+	// mirror Caddy. Storing the canonical lowercase form keeps what is
+	// stored reading the way it behaves, and a rule whose prefix looks
+	// case-sensitive while it is not invites the operator to believe "/Docs"
+	// and "/docs" are different rules. Refusing with the lowercase form to
+	// hand says so; rewriting the operator's input silently would not.
 	if p.PathPrefix != strings.ToLower(p.PathPrefix) {
 		return apierr.New("path_rule_uppercase",
 			map[string]string{"path": p.PathPrefix, "lower": strings.ToLower(p.PathPrefix)},
-			"path_rule: path_prefix %q contains an uppercase letter — Caddy lowercases the "+
-				"request path but not the pattern, so this rule could never match anything; "+
-				"use %q", p.PathPrefix, strings.ToLower(p.PathPrefix))
+			"path_rule: path_prefix %q contains an uppercase letter — path matching is "+
+				"case-insensitive, so a prefix is stored lowercase to read the way it "+
+				"behaves; use %q", p.PathPrefix, strings.ToLower(p.PathPrefix))
 	}
 	hasUpstreams := len(p.Upstreams) > 0
 	if p.BasicAuth == nil && p.ForwardAuth == nil &&

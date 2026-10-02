@@ -39,7 +39,7 @@ import (
 // real demand (would need a Caddy templates handler wrap).
 //
 // Inside an errors-block route (set by HTTPErrorConfig.WithError
-// at server.go:765-787 BEFORE the error route runs) :
+// at server.go:778-800 BEFORE the error route runs) :
 //
 //   {http.error.status_code}    HTTP status code (e.g. 403)
 //   {http.error.status_text}    Status text (e.g. "Forbidden")
@@ -51,11 +51,11 @@ import (
 // FIX 3 ; upstream returns 4xx/5xx) :
 //
 //   {http.reverse_proxy.status_code}    Upstream's literal status
-//                                        (verified reverseproxy.go:1081)
+//                                        (verified reverseproxy.go:1113)
 //
 // Standard request placeholders survive into the error pipeline
 // because WithError uses a shallow copy of *Request with the same
-// Replacer (server.go:765-772) :
+// Replacer (server.go:778-785) :
 //
 //   {http.request.method}       GET / POST / etc.
 //   {http.request.host}         Host header (route's primary host)
@@ -68,7 +68,7 @@ import (
 // Reference : https://caddyserver.com/docs/json/apps/http/#errors
 //
 // Wire shape verified against caddy v2.11.3 :
-//   - modules/caddyhttp/server.go:745 (HTTPErrorConfig { Routes RouteList })
+//   - modules/caddyhttp/server.go:758 (HTTPErrorConfig { Routes RouteList })
 //   - modules/caddyhttp/staticresp.go:127 (static_response handler)
 //   - modules/caddyhttp/celmatcher.go:82 (http.matchers.expression module)
 //
