@@ -1487,9 +1487,11 @@
 									Authentik embedded outpost, <code class="font-mono">/oauth2</code> for
 									oauth2-proxy). Requests under this prefix bypass
 									the forward_auth gate and are reverse-proxied
-									directly to the verify URL host. Leave empty for
-									providers that don't need it (Authelia standalone,
-									generic).
+									directly to the verify URL host, carrying the same
+									Host as the verify sub-request so a reverse proxy in
+									front of the IdP routes both the same way. Leave
+									empty for providers that don't need it (Authelia
+									standalone, generic).
 								</p>
 							</div>
 
@@ -1503,11 +1505,14 @@
 									<span>
 										Rewrite Host of verify sub-request to verify URL host
 										<span class="block text-xs font-normal text-muted mt-0.5">
-											Required for Authentik embedded outpost (Authentik
-											routes apps by Host header on its core listener).
-											Leave unchecked for Authelia, Keycloak, oauth2-proxy,
-											and Authentik external outpost — they all accept the
-											client's Host (canonical Caddy forward_auth shape).
+											Depends on your network, not on which IdP you run.
+											Check it when something between Arenet and the IdP
+											routes by Host — typically a reverse proxy in front
+											of the IdP, such as Authentik behind Traefik or
+											nginx. Leave it unchecked when Arenet reaches the IdP
+											directly. Either way the IdP still identifies the
+											application from X-Forwarded-Host, which Arenet sends
+											from the original request.
 										</span>
 									</span>
 								</label>
