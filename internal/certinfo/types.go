@@ -55,8 +55,8 @@
 //     Used by T.1's reconcile-vs-live diff path to know which certs
 //     are actually loaded right now.
 //
-// EMPIRICAL EVENT ORIGIN (verified against caddyserver/caddy v2.11.3,
-// modules/caddytls/tls.go:1001-1004):
+// EMPIRICAL EVENT ORIGIN (verified against caddyserver/caddy v2.11.4,
+// modules/caddytls/tls.go:1003-1006):
 //
 //	The certmagic emit callback flows through (*caddytls.TLS).onEvent
 //	which calls t.events.Emit(t.ctx, eventName, data). The originating
@@ -166,7 +166,7 @@ const (
 	// known).
 	EventCertObtaining EventKind = "cert_obtaining"
 	// EventCertRemoved is synthesized by the tracker (NOT by
-	// certmagic — Caddy v2.11.3 / certmagic v0.25.3 have no
+	// certmagic — Caddy v2.11.4 / certmagic v0.25.4 have no
 	// cert-removal event; verified empirically against the
 	// vendored sources). Fires from RemoveDomain, which the
 	// DELETE managed-domain API handler calls after a successful

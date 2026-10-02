@@ -107,16 +107,16 @@ func errorBrandingStatusCodes() []int {
 // on a media-server restart) streams the upstream's raw body straight to
 // the client. The server's apps.http.servers.<*>.errors.routes chain
 // only fires on Caddy-generated HandlerErrors (verified empirically
-// against caddy v2.11.3 modules/caddyhttp/server.go:421-423 — the err
+// against caddy v2.11.4 modules/caddyhttp/server.go:421-423 — the err
 // arg is the return of s.serveHTTP, not the upstream status;
-// reverseproxy.go:1229 writes res.StatusCode silently in
+// reverseproxy.go:1261 writes res.StatusCode silently in
 // finalizeResponse). A handle_response with a ResponseMatcher on the
 // status list re-emits the upstream status as an http.handlers.error,
 // which propagates as the wrapped roundtripSucceededError
-// (reverseproxy.go:1165) — that one IS a HandlerError, so it triggers
+// (reverseproxy.go:1197) — that one IS a HandlerError, so it triggers
 // the server's errors chain like a native Caddy error. The
 // {http.reverse_proxy.status_code} placeholder is set at
-// reverseproxy.go:1081 BEFORE handle_response evaluates, so it carries
+// reverseproxy.go:1113 BEFORE handle_response evaluates, so it carries
 // the upstream's literal status into the error handler. No buffering is
 // needed: handle_response evaluates on headers, and the upstream body is
 // closed unconsumed if the route doesn't read it — critical for
@@ -138,7 +138,7 @@ func errorBrandingStatusCodes() []int {
 // HTML error page must NOT replace a proxied upstream's JSON / API error
 // responses. Caddy evaluates handle_response entries in order and stops
 // at the FIRST whose OUTER match passes, then runs THAT block's inner
-// routes to completion (reverseproxy.go:1113-1173). A status-only outer
+// routes to completion (reverseproxy.go:1145-1205). A status-only outer
 // block "wins" for every error, so its inner routes must handle EVERY
 // case — an inner route that matches nothing drops the response (200,
 // empty body). The /api decision and the branding fallback therefore
@@ -247,7 +247,7 @@ func buildReverseProxyHandler(p proxyPoolParams, sharedHandleResponse []map[stri
 		// request's Host header (after the listener's matcher binding
 		// but before any rewrites). The X-Forwarded-* trio is already
 		// injected by Caddy's reverse_proxy (verified empirically
-		// against caddyserver/caddy/v2@v2.11.3 reverseproxy.go:835) so
+		// against caddyserver/caddy/v2@v2.11.4 reverseproxy.go:867) so
 		// they don't need explicit wiring here.
 		"headers": map[string]any{
 			"request": map[string]any{

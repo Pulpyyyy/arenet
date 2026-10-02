@@ -252,7 +252,7 @@ func TestPathRule_RefusesAnUppercasePath(t *testing.T) {
 	})
 	err := r.validate()
 	if err == nil {
-		t.Fatal("an uppercase path could never match: it must be refused")
+		t.Fatal("an uppercase path prefix must be refused, so what is stored reads the way it matches")
 	}
 	// And the message must hand over the fix, not just the diagnosis.
 	if !strings.Contains(err.Error(), "/admin") {

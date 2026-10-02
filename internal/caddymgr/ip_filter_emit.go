@@ -38,7 +38,7 @@ import "github.com/barto95100/arenet/internal/storage"
 //
 // deny mode → block the listed: match {client_ip}.
 // Caddy has no ResponseMatcher `not` but MatchNot (http.matchers.not,
-// matchers.go:1366) IS a request matcher — valid here.
+// matchers.go:1379) IS a request matcher — valid here.
 func buildIPFilterRoute(f storage.IPFilter) map[string]any {
 	if !f.IsActive() {
 		return nil
