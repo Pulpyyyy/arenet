@@ -4293,6 +4293,92 @@ describe('Routes page — v2.41 route form sections', () => {
 		expect(row('section-state')).toMatch(/active/i);
 	});
 
+	// v2.58.3 — an operator pointed out that a Paths & headers section holding
+	// five configured rules read as untouched, while every other configured
+	// section shows its colour. The cause was worse than cosmetic: the
+	// exemption used posture 'off', which RouteSection documents as
+	// "configured but inactive". An exemption is active — it is the one thing
+	// that changes what reaches the backend — so 'off' was a false statement
+	// about the route, in the one place meant to be readable at a glance.
+	it('shows a configured auth exemption as active, not as off', async () => {
+		const seeded = makeRoute({
+			id: 'exempt',
+			host: 'exempt.local',
+			authMode: 'forward_auth',
+			forwardAuth: { providerName: 'authentik' },
+			pathRules: [
+				{ pathPrefix: '/webhook', disableRouteAuth: true },
+				{ pathPrefix: '/form', disableRouteAuth: true }
+			]
+		});
+		apiMock.listRoutes.mockResolvedValue([seeded]);
+		render(Page);
+		await userEvent.click((await screen.findByText('exempt.local')).closest('tr')!);
+		await tick();
+
+		const section = screen.getByTestId('section-paths-headers');
+		// The rail colour is the glanceable signal, and 'off' means
+		// "configured but inactive" in this component's contract.
+		expect(section.getAttribute('data-posture')).not.toBe('off');
+		expect(section.getAttribute('data-posture')).toBe('allow');
+		// And the badge still names what it is, so the colour is never read
+		// as a protection the route does not have.
+		const row = section.querySelector('summary')?.textContent ?? '';
+		expect(row.toLowerCase()).toMatch(/exempt/);
+	});
+
+	// v2.58.3 — the operator's actual need: tell, without opening anything,
+	// which sections hold configuration. Eight of ten already did, because
+	// configuring them means deciding about traffic. These are the two that
+	// did not.
+	it('marks a configured Error pages section, and leaves an empty one neutral', async () => {
+		const configured = makeRoute({
+			id: 'errpages',
+			host: 'errpages.local',
+			errorPageTemplateId: 'tpl-1',
+			errorPageOverrides: { '404': 'o1', '503': 'o2' }
+		});
+		apiMock.listRoutes.mockResolvedValue([configured]);
+		render(Page);
+		await userEvent.click((await screen.findByText('errpages.local')).closest('tr')!);
+		await tick();
+
+		const section = screen.getByTestId('section-error-pages');
+		// Configured: visible, and in the accent rather than a traffic colour.
+		expect(section.getAttribute('data-posture')).toBe('set');
+		const row = section.querySelector('summary')?.textContent ?? '';
+		expect(row).toMatch(/2/); // the override count reaches the closed row
+	});
+
+	it('leaves an untouched Error pages section with no rail at all', async () => {
+		apiMock.listRoutes.mockResolvedValue([makeRoute({ id: 'plain', host: 'plain.local' })]);
+		render(Page);
+		await userEvent.click((await screen.findByText('plain.local')).closest('tr')!);
+		await tick();
+
+		const section = screen.getByTestId('section-error-pages');
+		// Nothing in it: no posture. That distinction is the whole point —
+		// "empty" must not look like "configured but deciding nothing".
+		expect(section.getAttribute('data-posture')).toBeNull();
+	});
+
+	it('marks path rules that gate nothing as configured, not as off', async () => {
+		const seeded = makeRoute({
+			id: 'routingonly',
+			host: 'routingonly.local',
+			pathRules: [{ pathPrefix: '/old', redirect: { target: '/new', statusCode: 302 } }]
+		});
+		apiMock.listRoutes.mockResolvedValue([seeded]);
+		render(Page);
+		await userEvent.click((await screen.findByText('routingonly.local')).closest('tr')!);
+		await tick();
+
+		const section = screen.getByTestId('section-paths-headers');
+		// A redirect is configuration. Grey "off" said the section was empty.
+		expect(section.getAttribute('data-posture')).toBe('set');
+		expect(section.getAttribute('data-posture')).not.toBe('off');
+	});
+
 	it('follows the edits live: switching the WAF mode updates its summary row', async () => {
 		apiMock.listRoutes.mockResolvedValue([]);
 		render(Page);
