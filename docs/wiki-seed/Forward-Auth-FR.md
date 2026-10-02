@@ -22,22 +22,23 @@ Une application sans authentification propre, ou dont vous préférez ne pas exp
 | **Kind** | `authelia`, `authentik`, `keycloak` ou `generic`. Cela ne déclenche aucune magie ; cela consigne à quoi vous parlez. |
 | **Verify URL** | Où Arenet interroge. L'adresse de l'IdP *telle qu'Arenet l'atteint*, donc en général une adresse privée ou un nom de conteneur — `http://authelia:9091`, `http://10.0.0.50:9000`. Pas votre domaine public. |
 | **Auth request URI** | Le chemin, sur cet hôte, qui répond à la question. Doit commencer par `/`. Variable selon le fournisseur, voir le tableau ci-dessous. |
-| **Copy headers** | Les en-têtes que la réponse de l'IdP transmet à votre application — l'identité qu'elle lira. Séparés par des virgules. Par défaut `Remote-User, Remote-Email`. |
+| **Copy headers** | Les en-têtes que la réponse de l'IdP transmet à votre application — l'identité qu'elle lira. Séparés par des virgules. Le défaut `Remote-User, Remote-Email` du formulaire est la convention **Authelia** ; Authentik envoie plutôt `X-authentik-username`, `X-authentik-email`, `X-authentik-groups`, `X-authentik-name`, `X-authentik-uid`. Recopiez les noms que votre application lit réellement. |
 | **Client secret** | Seulement si votre fournisseur l'exige. Laissez vide à la modification pour conserver la valeur enregistrée ; elle n'est jamais renvoyée, ni par l'API ni par le journal d'audit. |
 | **Auth passthrough prefix** | Un chemin servi par l'IdP lui-même, sous le domaine de votre application, qui doit **échapper** au contrôle. Sans cela, la redirection de l'IdP vers sa propre interface repasse dans le contrôle : boucle infinie ou 404. Voir Authentik ci-dessous. |
-| **Rewrite verify host** | Envoyer le nom d'hôte de l'IdP dans la question, au lieu de celui de votre visiteur. Nécessaire quand l'IdP aiguille par `Host` — c'est le cas de l'outpost embarqué d'Authentik. |
+| **Rewrite verify host** | Envoyer le nom d'hôte de l'IdP au lieu de celui de votre visiteur. Activez-le **quand quelque chose entre Arenet et l'IdP aiguille par `Host`** — typiquement un reverse proxy devant l'IdP, comme Authentik derrière Traefik ou nginx. Laissez-le désactivé quand Arenet joint l'IdP directement. Dans les deux cas l'IdP identifie l'application par `X-Forwarded-Host`, qu'Arenet envoie depuis la requête d'origine. |
 
 ### Valeurs selon le fournisseur
 
-| Kind | Auth request URI | Passthrough prefix | Rewrite verify host |
-| ---- | ---------------- | ------------------ | ------------------- |
-| **Authelia** | `/api/authz/forward-auth` | — | non |
-| **Authentik**, outpost embarqué | `/outpost.goauthentik.io/auth/caddy` | `/outpost.goauthentik.io` | **oui** |
-| **Authentik**, outpost séparé | `/outpost.goauthentik.io/auth/caddy` | `/outpost.goauthentik.io` | non |
-| **oauth2-proxy** (`generic`) | `/oauth2/auth` | `/oauth2` | non |
-| **Keycloak** | selon votre adaptateur | — | non |
+| Kind | Auth request URI | Passthrough prefix | Copy headers |
+| ---- | ---------------- | ------------------ | ------------ |
+| **Authelia** | `/api/authz/forward-auth` | — | `Remote-User, Remote-Email, Remote-Groups` |
+| **Authentik** | `/outpost.goauthentik.io/auth/caddy` | `/outpost.goauthentik.io` | `X-authentik-username, X-authentik-email, X-authentik-groups` |
+| **oauth2-proxy** (`generic`) | `/oauth2/auth` | `/oauth2` | `X-Auth-Request-User, X-Auth-Request-Email` |
+| **Keycloak** | selon votre adaptateur | — | selon votre adaptateur |
 
-Les deux lignes Authentik ne diffèrent que par **Rewrite verify host**. L'outpost embarqué vit dans le serveur Authentik, qui aiguille les applications par `Host` ; une question portant le `Host` de votre visiteur reçoit un 404 du routeur d'applications d'Authentik. Un outpost déployé séparément a son propre écouteur et n'a pas besoin de cette réécriture.
+**Rewrite verify host** ne figure volontairement pas dans ce tableau : il dépend de votre réseau, pas de l'IdP que vous exploitez. Ne l'activez que si un reverse proxy se trouve entre Arenet et l'IdP et aiguille par `Host`.
+
+**Authentik demande une étape de plus, facile à manquer.** L'endpoint `/outpost.goauthentik.io/...` est servi par un **outpost**, pas par le serveur Authentik seul : le provider doit donc être rattaché à l'un d'eux. *Applications → Outposts → authentik Embedded Outpost → Edit*, et votre provider doit apparaître dans **Selected**. Tant qu'il n'y est pas, toute requête vers ce chemin répond **404** quoi que vous configuriez par ailleurs — et le journal d'Authentik reste muet, puisque pour lui la route n'existe pas.
 
 ## Étape 2 — y rattacher une route
 
@@ -62,11 +63,11 @@ Ensemble, elles couvrent le cas n8n : l'éditeur derrière l'IdP, `/webhook/`, `
 
 ### Boucle de redirection infinie, ou 404 sur un chemin de l'IdP
 
-L'IdP sert une partie de lui-même sous le domaine de votre application, et cette partie est contrôlée elle aussi. Renseignez **Auth passthrough prefix** (`/outpost.goauthentik.io` pour Authentik, `/oauth2` pour oauth2-proxy). Arenet relaie alors ce sous-arbre directement vers l'hôte du Verify URL, sans contrôle.
+L'IdP sert une partie de lui-même sous le domaine de votre application, et cette partie est contrôlée elle aussi. Renseignez **Auth passthrough prefix** (`/outpost.goauthentik.io` pour Authentik, `/oauth2` pour oauth2-proxy). Arenet relaie alors ce sous-arbre directement vers l'hôte du Verify URL, sans contrôle — en portant le même `Host` que la vérification, pour qu'un reverse proxy devant l'IdP les aiguille de la même façon (v2.58.1 ; avant cela le passthrough ignorait **Rewrite verify host**, et une telle installation avait un contrôle fonctionnel et une connexion cassée).
 
 ### Authentik répond 404 à la vérification
 
-**Rewrite verify host** est désactivé alors que vous utilisez l'outpost embarqué. Activez-le.
+Si la réponse est **404** : le provider n'est probablement pas rattaché à un outpost — voyez la note Authentik ci-dessus. Si c'est **500** avec `failed to detect a forward URL` dans le journal d'Authentik, l'outpost n'a pas reçu les en-têtes `X-Forwarded-*` ; Arenet les envoie, donc soupçonnez un intermédiaire qui les retire. Si c'est un reverse proxy devant l'IdP qui répond 404, activez **Rewrite verify host**.
 
 ### L'application ne sait pas qui est le visiteur
 

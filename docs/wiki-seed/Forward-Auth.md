@@ -22,22 +22,23 @@ An application with no authentication of its own, or whose own login you would r
 | **Kind** | `authelia`, `authentik`, `keycloak` or `generic`. It selects nothing magic; it records what you are talking to. |
 | **Verify URL** | Where Arenet asks. The IdP's address *as Arenet reaches it*, so usually a private address or a container name — `http://authelia:9091`, `http://10.0.0.50:9000`. Not your public domain. |
 | **Auth request URI** | The path on that host that answers the question. Must start with `/`. Per provider, see the table below. |
-| **Copy headers** | Which headers the IdP's answer carries forward to your application — the identity it will read. Comma-separated. Default `Remote-User, Remote-Email`. |
+| **Copy headers** | Which headers the IdP's answer carries forward to your application — the identity it will read. Comma-separated. The form's default `Remote-User, Remote-Email` is **Authelia's** convention; Authentik sends `X-authentik-username`, `X-authentik-email`, `X-authentik-groups`, `X-authentik-name`, `X-authentik-uid` instead. Copy the names your application actually reads. |
 | **Client secret** | Only if your provider requires one. Leave blank on edit to keep the stored value; it is never echoed back, by the API or the audit log. |
 | **Auth passthrough prefix** | A path served by the IdP itself, under your application's domain, that must **skip** the gate. Without it the IdP's redirect to its own UI feeds back into the gate — an infinite loop or a 404. See Authentik below. |
-| **Rewrite verify host** | Send the IdP's own hostname on the question instead of your visitor's. Needed when the IdP routes by `Host` — Authentik's embedded outpost does. |
+| **Rewrite verify host** | Send the IdP's own hostname instead of your visitor's. Turn it on **when something between Arenet and the IdP routes by `Host`** — typically a reverse proxy in front of the IdP, such as Authentik behind Traefik or nginx. Leave it off when Arenet reaches the IdP directly. The IdP still identifies the application either way, from `X-Forwarded-Host`, which Arenet sends from the original request. |
 
 ### Values per provider
 
-| Kind | Auth request URI | Passthrough prefix | Rewrite verify host |
-| ---- | ---------------- | ------------------ | ------------------- |
-| **Authelia** | `/api/authz/forward-auth` | — | no |
-| **Authentik**, embedded outpost | `/outpost.goauthentik.io/auth/caddy` | `/outpost.goauthentik.io` | **yes** |
-| **Authentik**, separate outpost | `/outpost.goauthentik.io/auth/caddy` | `/outpost.goauthentik.io` | no |
-| **oauth2-proxy** (`generic`) | `/oauth2/auth` | `/oauth2` | no |
-| **Keycloak** | depends on your adapter | — | no |
+| Kind | Auth request URI | Passthrough prefix | Copy headers |
+| ---- | ---------------- | ------------------ | ------------ |
+| **Authelia** | `/api/authz/forward-auth` | — | `Remote-User, Remote-Email, Remote-Groups` |
+| **Authentik** | `/outpost.goauthentik.io/auth/caddy` | `/outpost.goauthentik.io` | `X-authentik-username, X-authentik-email, X-authentik-groups` |
+| **oauth2-proxy** (`generic`) | `/oauth2/auth` | `/oauth2` | `X-Auth-Request-User, X-Auth-Request-Email` |
+| **Keycloak** | depends on your adapter | — | depends on your adapter |
 
-The two Authentik rows differ only in **Rewrite verify host**. The embedded outpost lives inside the Authentik server, which dispatches applications by `Host`; a question carrying your visitor's `Host` gets a 404 from Authentik's app router. A separately deployed outpost has its own listener and does not need the rewrite.
+**Rewrite verify host** is not in this table on purpose: it depends on your network, not on which IdP you run. Turn it on only when a reverse proxy sits between Arenet and the IdP and routes by `Host`.
+
+**Authentik needs one more step that is easy to miss.** The `/outpost.goauthentik.io/...` endpoint is served by an **outpost**, not by the Authentik server on its own, so the provider has to be assigned to one: *Applications → Outposts → authentik Embedded Outpost → Edit*, and your provider must appear under **Selected**. Until it is, every request to that path answers **404** whatever else you configure — and the Authentik log says nothing, because as far as it is concerned the route does not exist.
 
 ## Step 2 — point a route at it
 
@@ -62,11 +63,11 @@ Together they cover the n8n case: the editor behind the IdP, `/webhook/`, `/form
 
 ### Infinite redirect loop, or a 404 on the IdP's own path
 
-The IdP serves part of itself under your application's domain and that part is being gated too. Fill in **Auth passthrough prefix** (`/outpost.goauthentik.io` for Authentik, `/oauth2` for oauth2-proxy). Arenet then proxies that subtree straight to the Verify URL's host, with no gate.
+The IdP serves part of itself under your application's domain and that part is being gated too. Fill in **Auth passthrough prefix** (`/outpost.goauthentik.io` for Authentik, `/oauth2` for oauth2-proxy). Arenet then proxies that subtree straight to the Verify URL's host, with no gate — carrying the same `Host` as the auth check, so a reverse proxy fronting the IdP routes both the same way (v2.58.1; before that the passthrough ignored **Rewrite verify host**, and such a setup had a working gate and a broken sign-in).
 
 ### Authentik answers 404 to the check
 
-**Rewrite verify host** is off and you are using the embedded outpost. Turn it on.
+If the reply is **404**: the provider is probably not assigned to an outpost — see the Authentik note above. If it is **500** with `failed to detect a forward URL` in the Authentik log, the outpost did not receive the `X-Forwarded-*` headers; Arenet sends them, so suspect something between Arenet and the IdP stripping them. If a reverse proxy in front of the IdP answers 404 instead, turn **Rewrite verify host** on.
 
 ### The application does not know who the visitor is
 
