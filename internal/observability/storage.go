@@ -392,12 +392,26 @@ type WafEvent struct {
 // are optional; the API layer at M.2 maps query-string
 // parameters into this struct. Limit > 100 is clamped by the
 // store as a defence-in-depth on top of the API-layer cap.
+// WafActionBlock and WafActionDetect are the two values of WafEvent.Action.
+// BLOCK means the WAF refused the request; DETECT means it recorded the match
+// and let the request through.
+const (
+	WafActionBlock  = "BLOCK"
+	WafActionDetect = "DETECT"
+)
+
 type WafEventFilter struct {
 	RouteID  string
 	Category string
-	// Action, when set ("BLOCK" / "DETECT"), narrows in SQL. Only
-	// CountWafEvents honours it: QueryWafEvents is the events-page
-	// reader and its callers filter presentation-side.
+	// Action, when set, narrows in SQL to WafActionBlock or
+	// WafActionDetect.
+	//
+	// v2.58.4 — this said "Only CountWafEvents honours it: QueryWafEvents
+	// is the events-page reader and its callers filter presentation-side".
+	// That was wrong: both go through wafEventPredicates, which has always
+	// added the predicate. The claim mattered, because it is why Security
+	// Automation counted detect-mode events — nobody passed Action, having
+	// read that passing it would do nothing.
 	Action string
 	From   time.Time // inclusive
 	To     time.Time // exclusive; zero = open-ended (now)

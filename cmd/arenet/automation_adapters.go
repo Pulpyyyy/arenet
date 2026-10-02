@@ -48,9 +48,31 @@ func (a automationWafReader) QueryWafEvents(ctx context.Context, filter automati
 		return nil, nil
 	}
 	rows, err := a.store.QueryWafEvents(ctx, observability.WafEventFilter{
-		From:  filter.From,
-		To:    filter.To,
-		Limit: filter.Limit,
+		From: filter.From,
+		To:   filter.To,
+		// v2.58.4 — only what the WAF actually refused.
+		//
+		// Security Automation counted detect-mode events too, which inverted
+		// the severity of the WAF's own modes: a route in detect let the
+		// request through and then had its visitor banned everywhere, a
+		// broader consequence than the block it had declined to apply.
+		//
+		// Detect mode exists so an operator can see what CRS flags before
+		// acting on it — it is how exclusions get found. Counting those
+		// detections to ban a source acts on exactly the signal that has not
+		// been validated yet. An operator's log showed what that costs: CRS
+		// flagging Arenet's own /api/v1/system/version as SQLi, its own
+		// static assets as anomalies, an OIDC authorize URL as SQLi, n8n's
+		// telemetry as RCE, and a stream of real readers of a public article
+		// as protocol violations. Enabling the SQLi and RCE rules would have
+		// banned the admin IP, the SSO, two backends and those readers within
+		// minutes.
+		//
+		// Filtered in SQL rather than after the read: with detect-mode events
+		// outnumbering blocks as heavily as they do, a post-filter would let
+		// them consume Limit and starve the blocks that matter.
+		Action: observability.WafActionBlock,
+		Limit:  filter.Limit,
 	})
 	if err != nil {
 		return nil, err

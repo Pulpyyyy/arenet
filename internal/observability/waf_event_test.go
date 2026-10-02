@@ -655,3 +655,65 @@ func TestAggregateWafEventsByRoute_UnknownActionsDropped(t *testing.T) {
 		t.Errorf("route counts = %+v; want {Block:0 Detect:2} (WARN dropped)", r)
 	}
 }
+
+// v2.58.4 — QueryWafEvents honours the Action filter.
+//
+// It always did: both it and CountWafEvents go through wafEventPredicates.
+// But the field's own doc comment said "Only CountWafEvents honours it", and
+// that false claim had a cost — Security Automation never passed Action,
+// because the comment said passing it would do nothing, so it counted
+// detect-mode events and would have banned the sources of every CRS false
+// positive. The behaviour is pinned here so the next reader trusts the test
+// rather than a sentence.
+func TestQueryWafEvents_HonoursTheActionFilter(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	t0 := time.Date(2026, 10, 2, 18, 0, 0, 0, time.UTC)
+	seedEvents(t, s, []WafEvent{
+		// What a real log looks like: the false positives dominate.
+		{Ts: t0, RouteID: "r-a", RuleID: "942290", Category: "SQLi", Severity: 2,
+			SrcIP: "10.0.0.1", RequestMethod: "GET", RequestPath: "/api/v1/system/version",
+			Action: WafActionDetect, StatusCode: 200},
+		{Ts: t0.Add(time.Second), RouteID: "r-a", RuleID: "949110", Category: "ANOMALY_REQ", Severity: 2,
+			SrcIP: "10.0.0.1", RequestMethod: "GET", RequestPath: "/_app/immutable/chunks/x.js",
+			Action: WafActionDetect, StatusCode: 200},
+		// And the one that was actually refused.
+		{Ts: t0.Add(2 * time.Second), RouteID: "r-a", RuleID: "942100", Category: "SQLi", Severity: 4,
+			SrcIP: "203.0.113.9", RequestMethod: "GET", RequestPath: "/?id=1'+OR+1=1",
+			Action: WafActionBlock, StatusCode: 403},
+	})
+
+	blocked, err := s.QueryWafEvents(ctx, WafEventFilter{Action: WafActionBlock})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(blocked) != 1 {
+		t.Fatalf("Action=BLOCK returned %d rows; want 1 — the filter is not applied, and "+
+			"Security Automation would count every detect-mode false positive", len(blocked))
+	}
+	if blocked[0].SrcIP != "203.0.113.9" {
+		t.Errorf("blocked row SrcIP = %q; want the one the WAF refused", blocked[0].SrcIP)
+	}
+
+	detected, err := s.QueryWafEvents(ctx, WafEventFilter{Action: WafActionDetect})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(detected) != 2 {
+		t.Errorf("Action=DETECT returned %d rows; want 2", len(detected))
+	}
+
+	// No Action = everything, so the events page keeps showing both.
+	all, err := s.QueryWafEvents(ctx, WafEventFilter{})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(all) != 3 {
+		t.Errorf("unfiltered returned %d rows; want 3 — an empty Action must not narrow", len(all))
+	}
+}
