@@ -1629,7 +1629,11 @@
 				// block now warns about three times. Hydrating it matters more
 				// than the fields above: dropping it on an unrelated save does
 				// not degrade the path, it unprotects it.
-				forwardAuth: rule.forwardAuth ? { ...rule.forwardAuth } : undefined
+				forwardAuth: rule.forwardAuth ? { ...rule.forwardAuth } : undefined,
+				// v2.58 — and the exemption. Of everything in this block it is
+				// the one whose loss is not a lost setting but a path that
+				// silently starts demanding a login again.
+				disableRouteAuth: rule.disableRouteAuth
 			})),
 			// (subform expansion handled below — needs to fire
 			// AFTER formData assignment so the $effect sees the
@@ -2326,6 +2330,7 @@
 		}
 		let blocks = false;
 		let allows = false;
+		let opens = false;
 		for (const rule of formData.pathRules) {
 			if (rule.ipFilter?.mode === 'deny') blocks = true;
 			if (rule.ipFilter?.mode === 'allow') allows = true;
@@ -2335,9 +2340,17 @@
 			// protected by forward auth and nothing else made the section
 			// read "off", telling the operator their protection was absent.
 			if ((rule.forwardAuth?.providerName ?? '').trim() !== '') allows = true;
+			// v2.58 — an exemption is not a protection, so it must not read as
+			// one; but a section holding one is not neutral either. It is
+			// counted as content so the badge stops saying "off", without
+			// claiming the path is guarded.
+			if (rule.disableRouteAuth) opens = true;
 		}
 		if (blocks) return { badge: tl('routes.form.badgeDeny'), posture: 'block' };
 		if (allows) return { badge: tl('routes.form.badgeAllow'), posture: 'allow' };
+		// A rule that only removes authentication: say so plainly rather
+		// than let it read as a protection or as nothing at all.
+		if (opens) return { badge: tl('routes.form.badgeAuthExempt'), posture: 'off' };
 		// Rules exist but gate nothing — a redirect or a per-path backend.
 		return { badge: tl('routes.form.badgeOff'), posture: 'off' };
 	});
@@ -2952,6 +2965,11 @@
 										}
 									}
 								: {}),
+							// v2.58 — the exemption. Dropped here, an exempted
+							// webhook path starts answering with a redirect to the
+							// IdP and the calling service breaks, with a green
+							// toast to say the save worked.
+							...(rule.disableRouteAuth ? { disableRouteAuth: true } : {}),
 							// v2.57 — the IdP gate. Dropping this one here would
 							// not lose a setting, it would serve a protected
 							// path to anyone, with a success toast.

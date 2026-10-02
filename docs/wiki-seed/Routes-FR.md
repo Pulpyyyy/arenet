@@ -237,6 +237,26 @@ Cochez **Fournisseur d'identité pour ce chemin** sur une règle et choisissez l
 
 ---
 
+### Exempter un chemin de l'authentification de la route (v2.58)
+
+Toutes les autres règles par chemin **ajoutent** à ce que fait déjà la route. Celle-ci retire, et c'est la seule.
+
+Le cas qui la justifie : une application qui a besoin des deux postures en même temps. n8n derrière un IdP veut son éditeur protégé, et `/webhook/`, `/form/` ainsi que `/rest/oauth2-credential/callback` joignables par des services — HelloAsso, Ghost, l'aller-retour OAuth de Google — qui n'auront jamais de session. Sans cela, la seule option est une seconde route sur le même hôte, qui duplique tous les autres réglages et divergera de la première dès qu'on en modifiera une.
+
+Cochez **Exempter ce chemin de l'authentification de la route** sur une règle. Ce que cela fait, exactement :
+
+- l'authentification de la route — Basic ou le fournisseur d'identité — **ne s'exécute pas** sur ce chemin. Elle continue de s'exécuter partout ailleurs ;
+- **tout le reste de la route continue de s'appliquer** : WAF, CrowdSec, filtrage par pays, filtrage d'IP source et limite de débit. Le chemin est exempté de la connexion, pas des défenses ;
+- les en-têtes d'identité sont **retirés des requêtes entrantes** sur ce chemin : `Remote-User`, `Remote-Email`, `Remote-Groups`, `Remote-Name`, `X-Authentik-*`, `X-Forwarded-User`, plus ceux que votre fournisseur est configuré à recopier. Sans cela, un appelant pourrait envoyer `Remote-User: admin` et votre application — qui fait confiance à cet en-tête précisément parce que l'IdP le pose d'ordinaire — le croirait. C'est ce point qui rend l'exemption utilisable sans danger ;
+- elle ne se combine pas avec un fournisseur d'identité sur la même règle, ce qui serait deux instructions opposées. Elle **se combine** avec l'authentification Basic de cette règle, ce qui remplace le contrôle d'identité de la route par un secret partagé sur un seul chemin ;
+- la modification est inscrite au journal d'audit, dans les deux sens : quand l'exemption est ajoutée, et quand elle est retirée.
+
+**Attention aux préfixes.** `/webhook` couvre `/webhook` et tout ce qui est en dessous, et ne couvre **pas** `/webhook-test` : ce sont deux préfixes distincts, chacun a besoin de sa règle. Pour une URL unique sans rien en dessous, comme un rappel OAuth, cochez **correspondance exacte** pour que l'exemption couvre ce seul chemin.
+
+**n8n, concrètement.** Quatre règles sur la route : `/webhook` exempté, `/webhook-test` exempté, `/form` exempté, et `/rest/oauth2-credential/callback` exempté en correspondance exacte. L'éditeur et tout le reste restent derrière l'IdP.
+
+---
+
 ## Règles par chemin (v2.21.0 → v2.23.0)
 
 Les **règles par chemin** ajoutent une protection — et au besoin un autre backend — à un sous-chemin d'une route, sans créer de seconde route. Cas typiques : basic auth sur `/docs` (Swagger), `/metrics` accessible depuis une seule IP de supervision, `/api/v1` envoyé vers un autre backend, le reste du site inchangé.
@@ -249,10 +269,11 @@ Dans le formulaire de la route → **Règles par chemin** → **Ajouter une règ
 | **Authentification Basic spécifique** | Utilisateur + mot de passe exigés pour ce chemin seulement. |
 | **Filtrage IP dédié** | Liste blanche / liste noire pour ce chemin seulement (mêmes règles que le filtrage de la route ci-dessus). |
 | **Limite de débit pour ce chemin** (v2.56) | Une limite plus stricte pour ce seul chemin. **En plus** de celle de la route, et non à sa place — les deux sont des zones de compteurs distinctes. Au-delà : `429`. |
+| **Exempter de l'authentification de la route** (v2.58) | L'authentification de la route ne s'exécute pas sur ce chemin. Tout le reste s'applique, et les en-têtes d'identité sont retirés pour qu'un appelant ne puisse pas en forger un. |
 | **Fournisseur d'identité pour ce chemin** (v2.57) | Fait passer ce chemin par l'un de vos fournisseurs forward-auth. **En plus** de l'authentification de la route. Remplace l'authentification basique de cette règle — un seul contrôle d'identité par chemin, pas deux. |
 | **Upstream spécifique (optionnel)** | Envoie ce chemin vers son propre pool de backends au lieu de celui de la route : URL + poids, répartition de charge, health-check actif, et *Ignorer la vérification TLS* pour un backend HTTPS auto-signé (v2.23.0 / v2.23.1). Laisser vide pour suivre l'upstream de la route. |
 
-Une règle doit contenir au moins : une basic auth, un fournisseur d'identité, un filtrage IP actif, une limite de débit, une redirection ou un upstream spécifique (une règle avec seulement un upstream sert à router).
+Une règle doit contenir au moins : une basic auth, un fournisseur d'identité, une exemption d'authentification, un filtrage IP actif, une limite de débit, une redirection ou un upstream spécifique (une règle avec seulement un upstream sert à router).
 
 **Comment les règles se combinent**
 

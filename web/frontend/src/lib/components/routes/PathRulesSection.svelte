@@ -86,6 +86,19 @@
 		touch();
 	}
 
+	// v2.58 — the exemption. Storage refuses it together with an IdP gate on
+	// the same rule (two opposite instructions), so turning one on turns the
+	// other off and the refused state cannot be built.
+	function toggleAuthExemption(i: number, enabled: boolean): void {
+		if (enabled) {
+			value[i].disableRouteAuth = true;
+			value[i].forwardAuth = undefined;
+		} else {
+			value[i].disableRouteAuth = undefined;
+		}
+		touch();
+	}
+
 	function toggleForwardAuth(i: number, enabled: boolean): void {
 		if (enabled) {
 			// Preselect the only provider when there is exactly one: with a
@@ -95,6 +108,7 @@
 				providerName: forwardAuthProviders.length === 1 ? forwardAuthProviders[0].name : ''
 			};
 			value[i].basicAuth = undefined;
+			value[i].disableRouteAuth = undefined;
 		} else {
 			value[i].forwardAuth = undefined;
 		}
@@ -320,6 +334,43 @@
 							</label>
 							<p class="text-xs text-muted">
 								{language.current && t('routes.pathRules.redirectCodeHelp')}
+							</p>
+						</div>
+					{/if}
+				</div>
+
+				<!-- v2.58 — the one subtractive control. It sits above the two
+				     gates because it is about the ROUTE's authentication, not
+				     about adding one to this path. -->
+				<div class="flex flex-col gap-2">
+					<label class="inline-flex items-center gap-2 text-sm text-secondary cursor-pointer">
+						<input
+							type="checkbox"
+							class="accent-down"
+							checked={!!rule.disableRouteAuth}
+							onchange={(e) =>
+								toggleAuthExemption(i, (e.currentTarget as HTMLInputElement).checked)}
+							data-testid="path-rule-auth-exempt-toggle-{i}"
+						/>
+						{language.current && t('routes.pathRules.authExemptLabel')}
+					</label>
+					{#if rule.disableRouteAuth}
+						<div
+							class="ml-6 rounded-md border border-down/40 bg-down/5 p-2 flex flex-col gap-1"
+							data-testid="path-rule-auth-exempt-warning-{i}"
+						>
+							<p class="text-[11px] text-down font-medium">
+								{language.current && t('routes.pathRules.authExemptWarning')}
+							</p>
+							<p class="text-[11px] text-muted">
+								{language.current && t('routes.pathRules.authExemptStillApplies')}
+							</p>
+							<p class="text-[11px] text-muted">
+								{language.current && t('routes.pathRules.authExemptHeaders')}
+								<code class="text-[10px]"
+									>Remote-User, Remote-Email, Remote-Groups, Remote-Name, X-Authentik-*,
+									X-Forwarded-User</code
+								>
 							</p>
 						</div>
 					{/if}

@@ -87,6 +87,18 @@ function hasActiveForwardAuth(rule: PathRule): boolean {
 }
 
 /**
+ * A rule that exempts its path from the route's authentication.
+ *
+ * v2.58 — content, even though it protects nothing: it is a deliberate
+ * instruction, and an exemption-only rule is the ordinary shape of the
+ * feature. Without this predicate every such rule would be filtered out at
+ * submit and the path would quietly keep demanding a login.
+ */
+function hasAuthExemption(rule: PathRule): boolean {
+	return rule.disableRouteAuth === true;
+}
+
+/**
  * Every predicate that makes a rule worth keeping.
  *
  * Exported so a test can assert the list covers each content field of
@@ -100,7 +112,8 @@ export const pathRuleContentChecks: ((rule: PathRule) => boolean)[] = [
 	hasActiveUpstream,
 	hasActiveRedirect,
 	hasActiveRateLimit,
-	hasActiveForwardAuth
+	hasActiveForwardAuth,
+	hasAuthExemption
 ];
 
 export function sanitizePathRules(rules: PathRule[]): PathRule[] {

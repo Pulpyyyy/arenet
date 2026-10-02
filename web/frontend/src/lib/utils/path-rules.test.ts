@@ -222,7 +222,8 @@ describe('sanitizePathRules — rate-limit-only rules', () => {
 			upstreams: { pathPrefix: '/a', upstreams: [{ url: 'http://10.0.0.2:80', weight: 1 }] },
 			redirect: { pathPrefix: '/a', redirect: { target: '/login' } },
 			rateLimit: { pathPrefix: '/a', rateLimit: { events: 5, window: '1m' } },
-			forwardAuth: { pathPrefix: '/a', forwardAuth: { providerName: 'authentik' } }
+			forwardAuth: { pathPrefix: '/a', forwardAuth: { providerName: 'authentik' } },
+			disableRouteAuth: { pathPrefix: '/a', disableRouteAuth: true }
 		};
 		for (const [field, rule] of Object.entries(byField)) {
 			expect(
@@ -239,6 +240,19 @@ describe('sanitizePathRules — rate-limit-only rules', () => {
 			{ pathPrefix: '/metrics', forwardAuth: { providerName: 'authentik' } }
 		];
 		expect(sanitizePathRules(rules)).toEqual(rules);
+	});
+
+	it('keeps a rule that only exempts its path from the route auth', () => {
+		// v2.58 — the ordinary shape: an exempted webhook prefix with no gate
+		// and no backend. Dropped here, the path keeps demanding a login and
+		// the calling service keeps failing.
+		const rules: PathRule[] = [{ pathPrefix: '/webhook', disableRouteAuth: true }];
+		expect(sanitizePathRules(rules)).toEqual(rules);
+	});
+
+	it('drops a rule whose exemption was turned back off', () => {
+		const rules: PathRule[] = [{ pathPrefix: '/webhook', disableRouteAuth: false }];
+		expect(sanitizePathRules(rules)).toEqual([]);
 	});
 
 	it('drops a rule whose forwardAuth names no provider', () => {
