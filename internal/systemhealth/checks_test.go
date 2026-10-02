@@ -286,3 +286,105 @@ func TestCertmagicCheck_DegradedOnNoCerts(t *testing.T) {
 		t.Errorf("status = %q; want degraded on empty cert list (no HTTPS routes)", got.Status)
 	}
 }
+
+// v2.58.3 — the LAPI probe retries once before calling the LAPI down.
+//
+// Operator report, 2026-10-02: "crowdsec-lapi-down, Arenet is fail-open"
+// arrived while the enforcement bouncer was streaming without a single
+// error — its log showed it starting at 14:09 and the alert firing at
+// 15:06, with both CrowdSec machines heartbeating 35s apart. One sample
+// decided, PerCheckTimeout is 2s, and the alerting rule fires on a single
+// degraded reading, so one slow response was enough.
+//
+// The cost is not the inconvenience. An alert that cries wolf about a
+// security control teaches the operator to ignore it, and then the real
+// outage says nothing new.
+
+// flakyLAPI fails the first n requests at the transport level, then serves
+// 200. It counts attempts so a test can assert the probe tried twice.
+type flakyLAPI struct {
+	failures int
+	attempts int
+}
+
+func (f *flakyLAPI) RoundTrip(req *http.Request) (*http.Response, error) {
+	f.attempts++
+	if f.attempts <= f.failures {
+		return nil, errors.New("connection refused")
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       http.NoBody,
+		Header:     make(http.Header),
+		Request:    req,
+	}, nil
+}
+
+func crowdSecCheckWith(rt http.RoundTripper) *CrowdSecCheck {
+	return &CrowdSecCheck{
+		Config:     &stubCrowdSecConfig{lapiURL: "http://10.0.0.1:8080", apiKey: "k", configured: true},
+		HTTPClient: &http.Client{Transport: rt},
+	}
+}
+
+type stubCrowdSecConfig struct {
+	lapiURL, apiKey string
+	configured      bool
+}
+
+func (s *stubCrowdSecConfig) GetCrowdSecConfig(context.Context) (string, string, bool, error) {
+	return s.lapiURL, s.apiKey, s.configured, nil
+}
+
+func TestCrowdSecCheck_OneTransientFailureIsNotAnOutage(t *testing.T) {
+	f := &flakyLAPI{failures: 1}
+	got := crowdSecCheckWith(f).Check(context.Background())
+
+	if got.Status != StatusHealthy {
+		t.Errorf("status = %q (%s); want healthy — a single lost request must not be "+
+			"reported as the LAPI being down", got.Status, got.Message)
+	}
+	if f.attempts != 2 {
+		t.Errorf("attempts = %d; want 2 (one retry)", f.attempts)
+	}
+}
+
+func TestCrowdSecCheck_TwoFailuresIsAnOutage(t *testing.T) {
+	f := &flakyLAPI{failures: 2}
+	got := crowdSecCheckWith(f).Check(context.Background())
+
+	if got.Status != StatusDegraded {
+		t.Errorf("status = %q; want degraded — a LAPI that answers neither attempt is "+
+			"genuinely unreachable and the operator must hear about it", got.Status)
+	}
+	if f.attempts != 2 {
+		t.Errorf("attempts = %d; want exactly 2 — the retry must not become a loop", f.attempts)
+	}
+}
+
+// An answer is not transient: a rejected key is the same on the second try,
+// and retrying it just spends the per-check budget twice.
+func TestCrowdSecCheck_AuthFailureIsNotRetried(t *testing.T) {
+	attempts := 0
+	rt := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		return &http.Response{
+			StatusCode: http.StatusForbidden,
+			Body:       http.NoBody,
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})
+	got := crowdSecCheckWith(rt).Check(context.Background())
+
+	if got.Status != StatusDegraded {
+		t.Errorf("status = %q; want degraded", got.Status)
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d; want 1 — an auth rejection is an answer, not a lost packet", attempts)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
