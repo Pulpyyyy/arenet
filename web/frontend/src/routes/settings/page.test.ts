@@ -116,3 +116,52 @@ describe('Settings page — v2.41 categories', () => {
 		expect(document.getElementById('oidc-config')).not.toBeNull();
 	});
 });
+
+// v2.58.2 — the help text under "Rewrite Host of verify sub-request" told
+// operators it was "Required for Authentik embedded outpost", and to leave it
+// unchecked for "Authentik external outpost". Both framings are wrong: the
+// setting depends on whether anything BETWEEN Arenet and the IdP routes by
+// Host, not on which IdP or which outpost kind. An operator running an
+// embedded outpost reached directly answered 302 with it unchecked, and one
+// running Authentik behind Traefik needs it checked — the opposite of what
+// the text said in each case.
+//
+// The wording is pinned here because nothing else would catch it drifting
+// back: it is prose in a Svelte template, and no type or build step has an
+// opinion about prose.
+describe('settings — forward-auth provider help text', () => {
+	async function openProviderForm() {
+		render(Page);
+		await userEvent.click(tab('security'));
+		await waitFor(() => expect(screen.getByText('Forward-auth providers')).toBeInTheDocument());
+		await userEvent.click(screen.getByText('+ Add provider'));
+		await waitFor(() =>
+			expect(screen.getByLabelText(/Auth passthrough prefix/i)).toBeInTheDocument()
+		);
+	}
+
+	it('frames the host rewrite as a property of the network, not of the IdP', async () => {
+		await openProviderForm();
+		const body = document.body.textContent ?? '';
+
+		// The claims that misled, in both directions. The text is wrapped in
+		// the template, so textContent carries newlines and indentation
+		// between words — every multi-word pattern matches on \s+.
+		expect(body).not.toMatch(/Required\s+for\s+Authentik\s+embedded\s+outpost/i);
+		expect(body).not.toMatch(/Authentik\s+external\s+outpost/i);
+
+		// What is actually true, and the signal that decides it.
+		expect(body).toMatch(/depends\s+on\s+your\s+network/i);
+		expect(body).toMatch(/routes\s+by\s+Host/i);
+		expect(body).toMatch(/reverse\s+proxy\s+in\s+front\s+of\s+the\s+IdP/i);
+		expect(body).toMatch(/X-Forwarded-Host/i);
+	});
+
+	it('says the passthrough carries the same Host as the verify sub-request', async () => {
+		await openProviderForm();
+		const body = document.body.textContent ?? '';
+		// v2.58.1 made the two halves agree; the text has to say so, because
+		// "one checkbox covers both" is the whole reason one is enough.
+		expect(body).toMatch(/same\s+Host\s+as\s+the\s+verify\s+sub-request/i);
+	});
+});
