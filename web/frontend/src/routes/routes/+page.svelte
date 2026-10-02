@@ -72,7 +72,7 @@
 	import WafTargetedExclusionsEditor from '$lib/components/routes/WafTargetedExclusionsEditor.svelte';
 	import WafCustomRulesEditor from '$lib/components/routes/WafCustomRulesEditor.svelte';
 	import WafSecLangSection from '$lib/components/routes/WafSecLangSection.svelte';
-	import RouteSection from '$lib/components/routes/RouteSection.svelte';
+	import RouteSection, { type Posture } from '$lib/components/routes/RouteSection.svelte';
 	import ModeSelector from '$lib/components/form/ModeSelector.svelte';
 	import SwitchRow from '$lib/components/form/SwitchRow.svelte';
 	import PostureSentence from '$lib/components/form/PostureSentence.svelte';
@@ -2066,7 +2066,11 @@
 		formData.wafExcludeRules.length + formData.wafExcludeTags.length
 	);
 
-	type SectionBadge = { badge: string; posture: 'allow' | 'block' | 'watch' | 'off' | undefined };
+	// v2.58.3 — the posture union is taken from RouteSection rather than
+	// restated here. It was restated, and adding `set` to the component left
+	// this copy behind: the type error that produced is the only reason the
+	// drift surfaced at all.
+	type SectionBadge = { badge: string; posture: Posture | undefined };
 
 	const summaryEssentials = $derived(
 		[
@@ -2340,19 +2344,46 @@
 			// protected by forward auth and nothing else made the section
 			// read "off", telling the operator their protection was absent.
 			if ((rule.forwardAuth?.providerName ?? '').trim() !== '') allows = true;
-			// v2.58 — an exemption is not a protection, so it must not read as
-			// one; but a section holding one is not neutral either. It is
-			// counted as content so the badge stops saying "off", without
-			// claiming the path is guarded.
+			// v2.58 — an exemption is tracked separately from the gates: it
+			// is not a protection, so the badge must not claim one.
 			if (rule.disableRouteAuth) opens = true;
 		}
 		if (blocks) return { badge: tl('routes.form.badgeDeny'), posture: 'block' };
 		if (allows) return { badge: tl('routes.form.badgeAllow'), posture: 'allow' };
-		// A rule that only removes authentication: say so plainly rather
-		// than let it read as a protection or as nothing at all.
-		if (opens) return { badge: tl('routes.form.badgeAuthExempt'), posture: 'off' };
-		// Rules exist but gate nothing — a redirect or a per-path backend.
-		return { badge: tl('routes.form.badgeOff'), posture: 'off' };
+		// v2.58.3 — a rule that only removes authentication. This shipped as
+		// posture 'off', which the RouteSection contract defines as
+		// "configured but inactive" — and an exemption is anything but
+		// inactive, so the section read as untouched next to every other
+		// configured one. It is 'allow' instead: the contract's own wording
+		// for that colour is "lets traffic through on a criterion", which is
+		// literally what an exemption does, the criterion being the path. The
+		// badge still says "auth exempt" so the green is never read as a
+		// protection.
+		if (opens) return { badge: tl('routes.form.badgeAuthExempt'), posture: 'allow' };
+		// v2.58.3 — rules exist but gate nothing: a redirect, or a per-path
+		// backend. That is configuration, so it no longer reads "off" in grey,
+		// which said the section was empty. It says how many rules there are,
+		// in the accent colour that claims nothing about traffic.
+		return {
+			badge: tl('routes.form.badgeRules', { count: formData.pathRules.length }),
+			posture: 'set'
+		};
+	});
+
+	// v2.58.3 — Error pages was the one section that showed nothing at all
+	// when configured: no badge, no rail. An operator could not tell a route
+	// with a custom template and three per-code overrides from an untouched
+	// one without opening it. It decides nothing about traffic, so it takes
+	// the `set` posture rather than a traffic colour, and nothing at all when
+	// there is nothing in it.
+	const errorPagesBadge = $derived.by<SectionBadge | undefined>(() => {
+		const parts: string[] = [];
+		if (formData.errorPageTemplateId) parts.push(tl('routes.form.badgeTemplate'));
+		if (errorOverrideCount > 0) {
+			parts.push(tl('routes.form.badgeOverrides', { count: errorOverrideCount }));
+		}
+		if (parts.length === 0) return undefined;
+		return { badge: parts.join(' · '), posture: 'set' };
 	});
 
 	const summaryErrorPages = $derived(
@@ -5657,7 +5688,13 @@
 					</RouteSection>
 
 					<!-- Error pages. -->
-					<RouteSection name={language.current && t('routes.form.sectionErrorPages')} summary={summaryErrorPages} testid="section-error-pages">
+					<RouteSection
+						name={language.current && t('routes.form.sectionErrorPages')}
+						summary={summaryErrorPages}
+						badge={errorPagesBadge?.badge}
+						posture={errorPagesBadge?.posture}
+						testid="section-error-pages"
+					>
 						<!--
 						  Step R Phase 2.b — error pages section.
 						  Sits between Rate Limit and Country Block

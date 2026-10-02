@@ -13,16 +13,27 @@
     block  (red)    — blocks traffic
     watch  (amber)  — observes without blocking (WAF detect)
     off    (grey)   — configured but inactive
+    set    (accent) — configured, and decides nothing about traffic
 
-  Sections that do not decide (TLS, health check, headers…) pass no
-  posture and stay neutral, so the colour keeps its meaning.
+  `set` exists because the colour answers two questions at once, and an
+  operator reads the second one first: "what happens to traffic here"
+  and "is there anything in here at all". A section that is configured
+  but makes no allow/block decision used to show either nothing or the
+  grey of `off`, both of which read as empty — so error pages with a
+  custom template, or path rules carrying only a redirect, looked
+  untouched until opened. `set` says "something is here" in the accent
+  colour, which claims nothing about traffic and so leaves green, red
+  and amber their meaning.
+
+  A section with nothing in it still passes no posture and stays
+  neutral. That distinction is the whole point.
 -->
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import type { Snippet } from 'svelte';
 
 	/** What the section does to traffic; undefined = not an authorisation decision. */
-	export type Posture = 'allow' | 'block' | 'watch' | 'off';
+	export type Posture = 'allow' | 'block' | 'watch' | 'off' | 'set';
 
 	interface Props {
 		/** Section name, e.g. "WAF". */
@@ -85,6 +96,9 @@
 	}
 	.section[data-posture='off'] {
 		border-left-color: var(--border-default);
+	}
+	.section[data-posture='set'] {
+		border-left-color: var(--accent-cyan);
 	}
 
 	summary {
