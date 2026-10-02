@@ -3848,6 +3848,35 @@ func buildAuthPassthroughRoute(provider storage.ForwardAuthProvider, hosts []str
 		"handler":   "reverse_proxy",
 		"upstreams": []map[string]any{{"dial": dial}},
 	}
+	// v2.58.1 — honour RewriteVerifyHost here too.
+	//
+	// This route and the forward-auth sub-request both go to the verify
+	// host, so they must agree about the Host header or only one of them
+	// arrives. They did not: buildForwardAuthHandler applied the rewrite
+	// and this route did not, so with an IdP behind a third-party reverse
+	// proxy that routes by Host — Authentik behind Traefik, which is the
+	// common deployment — the auth check reached the IdP while every
+	// browser request to the IdP's own endpoint got that proxy's 404. The
+	// gate worked and the sign-in round trip could not complete.
+	//
+	// Both topologies now work from one setting:
+	//   - Arenet talks to the IdP directly: leave it off, both halves send
+	//     the visitor's Host, and the IdP resolves the application from it.
+	//   - A reverse proxy fronts the IdP: turn it on, both halves send the
+	//     IdP's own host so that proxy routes them, and the IdP still
+	//     resolves the application from X-Forwarded-Host, which Caddy sets
+	//     from the original request before these header ops apply
+	//     (caddy v2.11.4 reverseproxy.go:489 prepareRequest, then the user
+	//     ops at ~:695).
+	if provider.RewriteVerifyHost {
+		if u, err := url.Parse(provider.VerifyURL); err == nil && u.Host != "" {
+			rp["headers"] = map[string]any{
+				"request": map[string]any{
+					"set": map[string][]string{"Host": {u.Host}},
+				},
+			}
+		}
+	}
 	// When the verify URL is HTTPS the upstream must be reached
 	// over TLS; reverse_proxy's transport defaults to plain HTTP
 	// unless we tell it otherwise.
