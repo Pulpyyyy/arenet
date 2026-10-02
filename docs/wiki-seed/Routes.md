@@ -231,7 +231,7 @@ Tick **Identity provider for this path** on a path rule and pick one of your con
 
 **What it is not for.** A path whose application authenticates its own users. An IdP placed in front of a login endpoint answers the browser's background requests with a redirect to the IdP, which an application expecting JSON cannot follow — the result is a login form that silently stops working. Protect what has no gate of its own; leave the rest to the application.
 
-**With Authentik**, single-application forward-auth also needs `/outpost.goauthentik.io` routed to the outpost on the same domain, as a second path rule with that outpost as its specific upstream. Without it the browser cannot complete the sign-in round trip.
+**With Authentik**, the outpost also serves `/outpost.goauthentik.io` under your application's domain, and that subtree must skip the gate or the sign-in round trip cannot complete. Set it as the provider's **Auth passthrough prefix** rather than as a path rule — see [Forward auth](Forward-Auth). An earlier version of this page suggested the path-rule route; the provider field is the supported way and needs no rule.
 
 ---
 
@@ -240,6 +240,8 @@ Tick **Identity provider for this path** on a path rule and pick one of your con
 Every other path rule **adds** to what the route already does. This one subtracts, and it is the only one that does.
 
 The case it exists for: an application that needs both postures at once. n8n behind an IdP wants its editor protected, and `/webhook/`, `/form/` and `/rest/oauth2-credential/callback` reachable by services — HelloAsso, Ghost, Google's OAuth round trip — that will never hold a session. Without this the only option is a second route for the same host, duplicating every other setting and drifting from the first the moment one is edited.
+
+This needs the route to have authentication in the first place — see [Forward auth](Forward-Auth) to set a provider up.
 
 Tick **Exempt this path from the route's authentication** on a path rule. What that does, exactly:
 

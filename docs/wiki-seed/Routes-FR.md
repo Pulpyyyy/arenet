@@ -233,7 +233,7 @@ Cochez **Fournisseur d'identité pour ce chemin** sur une règle et choisissez l
 
 **Ce à quoi cela ne sert pas.** Un chemin dont l'application authentifie elle-même ses utilisateurs. Un IdP placé devant une page de connexion répond aux requêtes d'arrière-plan du navigateur par une redirection vers l'IdP, qu'une application attendant du JSON ne peut pas suivre : le formulaire de connexion cesse silencieusement de fonctionner. Protégez ce qui n'a aucun contrôle propre, et laissez le reste à l'application.
 
-**Avec Authentik**, le forward-auth pour une seule application exige aussi que `/outpost.goauthentik.io` soit routé vers l'outpost sur le même domaine, sous la forme d'une seconde règle par chemin ayant cet outpost comme upstream spécifique. Sans cela le navigateur ne peut pas terminer l'aller-retour de connexion.
+**Avec Authentik**, l'outpost sert aussi `/outpost.goauthentik.io` sous le domaine de votre application, et ce sous-arbre doit échapper au contrôle, sinon l'aller-retour de connexion ne peut pas aboutir. Renseignez-le dans le champ **Auth passthrough prefix** du fournisseur plutôt qu'en règle par chemin — voir [Forward auth](Forward-Auth-FR). Une version antérieure de cette page conseillait la règle par chemin ; le champ du fournisseur est la voie prévue et ne demande aucune règle.
 
 ---
 
@@ -242,6 +242,8 @@ Cochez **Fournisseur d'identité pour ce chemin** sur une règle et choisissez l
 Toutes les autres règles par chemin **ajoutent** à ce que fait déjà la route. Celle-ci retire, et c'est la seule.
 
 Le cas qui la justifie : une application qui a besoin des deux postures en même temps. n8n derrière un IdP veut son éditeur protégé, et `/webhook/`, `/form/` ainsi que `/rest/oauth2-credential/callback` joignables par des services — HelloAsso, Ghost, l'aller-retour OAuth de Google — qui n'auront jamais de session. Sans cela, la seule option est une seconde route sur le même hôte, qui duplique tous les autres réglages et divergera de la première dès qu'on en modifiera une.
+
+Cela suppose que la route porte une authentification — voyez [Forward auth](Forward-Auth-FR) pour configurer un fournisseur.
 
 Cochez **Exempter ce chemin de l'authentification de la route** sur une règle. Ce que cela fait, exactement :
 

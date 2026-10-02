@@ -22,7 +22,8 @@ If you're new : start with [Installation](Installation), then follow [Routes](Ro
 - **[CrowdSec](CrowdSec)** — community IP reputation, LAPI bouncer setup
 - **[Country Block](Country-Block)** — GeoIP-based allow/deny lists per route
 - **[Rate Limit](Rate-Limit)** — events/window throttling per route
-- **[OIDC SSO](OIDC-SSO)** — authentik / Keycloak / Authelia integration + RBAC
+- **[OIDC SSO](OIDC-SSO)** — authentik / Keycloak / Authelia integration + RBAC, for signing in to Arenet itself
+- **[Forward auth](Forward-Auth)** — put your IdP in front of a backend application that has no login of its own
 
 ### Operations
 - **[Updating Arenet](Updates)** — manual upgrade workflow (Docker + binary), rollback, security notes
