@@ -902,6 +902,20 @@ export interface PathRule {
 	 * per path, not two. The API refuses both with a 400.
 	 */
 	forwardAuth?: { providerName: string };
+	/**
+	 * v2.58 — exempt THIS path from the route's own authentication.
+	 *
+	 * The only thing a path rule subtracts rather than adds. For an
+	 * application that needs both at once: an editor behind an IdP, and
+	 * webhook / form / OAuth-callback paths reachable by services that will
+	 * never hold a session.
+	 *
+	 * Everything else the route carries still applies — WAF, CrowdSec,
+	 * country block, IP filter, rate limit — and the emitted config strips
+	 * the identity headers on the exempted path so a client cannot forge
+	 * one.
+	 */
+	disableRouteAuth?: boolean;
 }
 
 /**

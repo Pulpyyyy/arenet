@@ -146,6 +146,26 @@ type PathRule struct {
 	// gates on one path is a configuration nobody means, and the route
 	// level has enforced the same exclusion since Step K.1.
 	ForwardAuth *ForwardAuthRouteConfig `json:"forward_auth,omitempty"`
+	// DisableRouteAuth (v2.58) exempts THIS path from the route's own
+	// authentication. It is the one thing a path rule may subtract rather
+	// than add, and it exists because an application can need both at once:
+	// n8n behind an IdP wants its editor protected and its /webhook/ and
+	// /form/ paths reachable by services that will never hold a session,
+	// plus /rest/oauth2-credential/callback for the IdP round trip itself.
+	// Without this the operator's only option is a second route, which
+	// duplicates every other setting and drifts from the first.
+	//
+	// It is a deliberate opening, so it is loud: the UI warns, and the
+	// emitted config strips the identity headers on the exempted path
+	// (buildPathAuthExemption) — otherwise a client could send
+	// Remote-User and the upstream, which trusts that header precisely
+	// because the IdP sets it, would believe them.
+	//
+	// Everything else the route carries still applies: WAF, CrowdSec,
+	// country block, IP filter, rate limit, and this rule's own gate if it
+	// declares one. A rule may combine this with BasicAuth to replace the
+	// route's identity gate with a shared secret on one path.
+	DisableRouteAuth bool `json:"disable_route_auth,omitempty"`
 	// RateLimit (v2.56) throttles THIS path only, in ADDITION to the
 	// route's own limit. Its counters are a separate zone, so a strict
 	// limit on a login endpoint does not spend the route's budget and
@@ -231,12 +251,25 @@ func (p PathRule) Validate() error {
 				"behaves; use %q", p.PathPrefix, strings.ToLower(p.PathPrefix))
 	}
 	hasUpstreams := len(p.Upstreams) > 0
-	if p.BasicAuth == nil && p.ForwardAuth == nil &&
+	// v2.58 — DisableRouteAuth counts as content. It is the operator saying
+	// something definite about this path, and a rule carrying only that is
+	// the ordinary shape of the feature: an exempted webhook prefix with no
+	// gate and no backend of its own.
+	if p.BasicAuth == nil && p.ForwardAuth == nil && !p.DisableRouteAuth &&
 		(p.IPFilter == nil || !p.IPFilter.IsActive()) && !hasUpstreams &&
 		p.Redirect == nil && p.RateLimit == nil {
 		return apierr.New("path_rule_empty", map[string]string{"path": p.PathPrefix},
 			"path_rule %q: must declare at least one of basic auth, forward auth, IP filter, "+
 				"a rate limit, an upstream, or a redirect", p.PathPrefix)
+	}
+	// v2.58 — exempting a path from the route's authentication and then
+	// gating it with an IdP on the same rule is two opposite instructions.
+	// Basic auth is allowed alongside (replace the route's identity gate
+	// with a shared secret on this one path); a second IdP gate is not.
+	if p.DisableRouteAuth && p.ForwardAuth != nil {
+		return apierr.New("path_rule_exempt_with_idp", map[string]string{"path": p.PathPrefix},
+			"path_rule %q: a path exempted from the route's authentication cannot also "+
+				"require an identity provider", p.PathPrefix)
 	}
 	if err := p.validateRedirect(); err != nil {
 		return err

@@ -235,6 +235,26 @@ Tick **Identity provider for this path** on a path rule and pick one of your con
 
 ---
 
+### Exempting one path from the route's authentication (v2.58)
+
+Every other path rule **adds** to what the route already does. This one subtracts, and it is the only one that does.
+
+The case it exists for: an application that needs both postures at once. n8n behind an IdP wants its editor protected, and `/webhook/`, `/form/` and `/rest/oauth2-credential/callback` reachable by services — HelloAsso, Ghost, Google's OAuth round trip — that will never hold a session. Without this the only option is a second route for the same host, duplicating every other setting and drifting from the first the moment one is edited.
+
+Tick **Exempt this path from the route's authentication** on a path rule. What that does, exactly:
+
+- the route's authentication — basic auth or the identity provider — **does not run** on this path. It still runs everywhere else;
+- **everything else on the route still applies**: WAF, CrowdSec, country filtering, the source-IP filter and the rate limit. The path is exempt from the login, not from the defences;
+- the identity headers are **removed from incoming requests** on this path: `Remote-User`, `Remote-Email`, `Remote-Groups`, `Remote-Name`, `X-Authentik-*`, `X-Forwarded-User`, plus whatever your provider is configured to copy. Without that, a caller could send `Remote-User: admin` and your application — which trusts that header precisely because the IdP normally sets it — would believe them. This is the part that makes the exemption safe to use at all;
+- it cannot be combined with an identity provider on the same rule, which would be two opposite instructions. It **can** be combined with that rule's own basic auth, which replaces the route's identity gate with a shared secret on one path;
+- the change is recorded in the audit log, in both directions — when the exemption is added and when it is taken away.
+
+**Prefix care.** `/webhook` covers `/webhook` and everything under it, and does **not** cover `/webhook-test`: those are two different prefixes and each needs its own rule. For a single URL with nothing under it, such as an OAuth callback, tick **exact match** so the exemption covers that one path and no more.
+
+**n8n, concretely.** Four rules on the route: `/webhook` exempt, `/webhook-test` exempt, `/form` exempt, and `/rest/oauth2-credential/callback` exempt with exact match. The editor and everything else stay behind the IdP.
+
+---
+
 ## Path rules (v2.21.0 → v2.23.0)
 
 **Path rules** apply extra protection — and optionally a different backend — to a URL sub-path of a route, without creating a second route. Typical: basic-auth on `/docs` (Swagger), `/metrics` reachable from one monitoring IP only, `/api/v1` sent to another backend, the rest of the site unchanged.
@@ -247,10 +267,11 @@ In the route form → **Path rules** → **Add path rule**:
 | **Basic auth override** | Username + password required for this path only. |
 | **Scoped IP filter** | Allow-list / deny-list for this path only (same rules as the route-level filter above). |
 | **Rate limit for this path** (v2.56) | A tighter limit for this path only. **In addition** to the route's limit, not instead of it — the two are separate counter zones. Over the limit: `429`. |
+| **Exempt from the route's authentication** (v2.58) | The route's own authentication does not run on this path. Everything else does, and the identity headers are stripped so a caller cannot forge one. |
 | **Identity provider for this path** (v2.57) | Send this path through one of your configured forward-auth providers. **In addition** to the route's own authentication. Replaces this rule's basic auth — one identity gate per path, not two. |
 | **Specific upstream (optional)** | Send this path to its own backend pool instead of the route's : URLs + weights, load-balancing policy, active health-check, and *Skip TLS verification* for a self-signed HTTPS backend (v2.23.0 / v2.23.1). Leave empty to follow the route's upstream. |
 
-A rule needs at least one of: basic auth, an identity provider, an active IP filter, a rate limit, a redirect, or a specific upstream (a rule with only an upstream is pure routing).
+A rule needs at least one of: basic auth, an identity provider, an authentication exemption, an active IP filter, a rate limit, a redirect, or a specific upstream (a rule with only an upstream is pure routing).
 
 **How rules combine**
 

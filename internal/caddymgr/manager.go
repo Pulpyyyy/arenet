@@ -1749,7 +1749,12 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 			// the pre-extraction behaviour (fix for a Task 5 review
 			// regression where the extraction dropped r.Host access
 			// and fell back to a fixed "Arenet" realm).
-			handlers = append(handlers, buildBasicAuthHandlerFromConfig(r.BasicAuth, fmt.Sprintf("Arenet route %s", r.Host)))
+			// v2.58 — a path rule may exempt itself from the route's
+			// authentication; with none doing so this appends exactly the
+			// same single handler as before. See buildPathAuthExemption.
+			handlers = append(handlers, buildPathAuthExemption(
+				buildBasicAuthHandlerFromConfig(r.BasicAuth, fmt.Sprintf("Arenet route %s", r.Host)),
+				r.PathRules, nil)...)
 		case storage.RouteAuthForwardAuth:
 			// Step K.1 — forward_auth. Look up the referenced
 			// provider in opts.ForwardAuthProviders (passed in by
@@ -1777,7 +1782,11 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 			// provider, Caddy reloads, the route comes back up.
 			provider, ok := opts.ForwardAuthProviders[r.ForwardAuth.ProviderName]
 			if ok {
-				handlers = append(handlers, buildForwardAuthHandler(provider))
+				// v2.58 — same exemption wrapper as basic auth above. The
+				// provider is passed so the headers it copies are stripped
+				// on the exempted paths, on top of the conventional set.
+				handlers = append(handlers, buildPathAuthExemption(
+					buildForwardAuthHandler(provider), r.PathRules, &provider)...)
 				// Capture for the passthrough-route block below.
 				// Local-variable copy — the loop iteration reuses
 				// the same map key on the next route, so we take a

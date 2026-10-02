@@ -482,3 +482,91 @@ describe('PathRulesSection — per-path forward auth', () => {
 		expect(value[1].forwardAuth).toBeDefined();
 	});
 });
+
+// v2.58 — exempting a path from the route's authentication.
+describe('PathRulesSection — auth exemption', () => {
+	const providers = [{ name: 'authentik', kind: 'authentik' as const }] as never[];
+
+	it('is off until asked for', () => {
+		const value: PathRule[] = [{ pathPrefix: '/webhook' }];
+		render(PathRulesSection, { value });
+		expect(screen.queryByTestId('path-rule-auth-exempt-warning-0')).toBeNull();
+		expect(value[0].disableRouteAuth).toBeUndefined();
+	});
+
+	it('sets the exemption and shows the warning', async () => {
+		const value: PathRule[] = [{ pathPrefix: '/webhook' }];
+		render(PathRulesSection, { value });
+		await fireEvent.click(screen.getByTestId('path-rule-auth-exempt-toggle-0'));
+		await tick();
+		expect(value[0].disableRouteAuth).toBe(true);
+		expect(screen.getByTestId('path-rule-auth-exempt-warning-0')).toBeTruthy();
+	});
+
+	// The operator asked for a visible warning: removing authentication is a
+	// deliberate opening, and the UI must not let it look routine.
+	it('the warning says the path becomes reachable without signing in', async () => {
+		const value: PathRule[] = [{ pathPrefix: '/webhook', disableRouteAuth: true }];
+		render(PathRulesSection, { value });
+		const text = (screen.getByTestId('path-rule-auth-exempt-warning-0').textContent ?? '')
+			.toLowerCase();
+		expect(text).toMatch(/without signing in|sans connexion/);
+		// And that the rest of the route still applies, so nobody reads it as
+		// "this path is now unprotected entirely".
+		expect(text).toMatch(/waf/);
+		expect(text).toMatch(/crowdsec/);
+		// And which headers are stripped, so no removal is invisible.
+		expect(text).toMatch(/remote-user/);
+		expect(text).toMatch(/x-authentik/);
+	});
+
+	it('clears the exemption when switched back off', async () => {
+		const value: PathRule[] = [{ pathPrefix: '/webhook', disableRouteAuth: true }];
+		render(PathRulesSection, { value });
+		await fireEvent.click(screen.getByTestId('path-rule-auth-exempt-toggle-0'));
+		expect(value[0].disableRouteAuth).toBeUndefined();
+	});
+
+	// Storage refuses exemption + IdP gate on one rule, so the controls make
+	// it unreachable rather than let the API answer 400.
+	it('turning on the exemption turns off this rule IdP gate', async () => {
+		const value: PathRule[] = [
+			{ pathPrefix: '/webhook', forwardAuth: { providerName: 'authentik' } }
+		];
+		render(PathRulesSection, { value, forwardAuthProviders: providers });
+		await fireEvent.click(screen.getByTestId('path-rule-auth-exempt-toggle-0'));
+		await tick();
+		expect(value[0].forwardAuth).toBeUndefined();
+		expect(value[0].disableRouteAuth).toBe(true);
+	});
+
+	it('turning on the IdP gate turns off the exemption', async () => {
+		const value: PathRule[] = [{ pathPrefix: '/webhook', disableRouteAuth: true }];
+		render(PathRulesSection, { value, forwardAuthProviders: providers });
+		await fireEvent.click(screen.getByTestId('path-rule-forwardauth-toggle-0'));
+		await tick();
+		expect(value[0].disableRouteAuth).toBeUndefined();
+		expect(value[0].forwardAuth).toBeDefined();
+	});
+
+	// Basic auth on the same rule IS allowed: replace the route's identity
+	// gate with a shared secret on one path.
+	it('leaves this rule basic auth alone', async () => {
+		const value: PathRule[] = [
+			{ pathPrefix: '/webhook', basicAuth: { username: 'hook', password: 'x' } }
+		];
+		render(PathRulesSection, { value });
+		await fireEvent.click(screen.getByTestId('path-rule-auth-exempt-toggle-0'));
+		await tick();
+		expect(value[0].basicAuth).toBeDefined();
+		expect(value[0].disableRouteAuth).toBe(true);
+	});
+
+	it('keeps each exemption to its own rule', async () => {
+		const value: PathRule[] = [{ pathPrefix: '/webhook' }, { pathPrefix: '/editor' }];
+		render(PathRulesSection, { value });
+		await fireEvent.click(screen.getByTestId('path-rule-auth-exempt-toggle-0'));
+		expect(value[0].disableRouteAuth).toBe(true);
+		expect(value[1].disableRouteAuth).toBeUndefined();
+	});
+});

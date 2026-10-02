@@ -522,3 +522,202 @@ func TestUpdateRoute_PathRuleForwardAuth_SurvivesAnUnrelatedEdit(t *testing.T) {
 		t.Errorf("after edit providerName = %q; want %q", got, "authentik")
 	}
 }
+
+// v2.58 — the auth exemption, end to end through literal JSON written the way
+// the form writes it.
+//
+// The operator asked for this explicitly, "vu les deux bugs récents de
+// décalage interface/API sur les règles par chemin": v2.56.1 and v2.56.2 were
+// both a path-rule field that the form sent and the API dropped, or stored and
+// never read back. For an exemption that failure mode is worse than a lost
+// setting — the path silently starts demanding a login again and whatever
+// service calls it breaks.
+func TestCreateRoute_PathRuleAuthExemption_RoundTrips(t *testing.T) {
+	env := newTestEnv(t, false)
+	body := pathRulesRouteBody("n8n.example.com",
+		`,"pathRules":[`+
+			`{"pathPrefix":"/webhook","disableRouteAuth":true},`+
+			`{"pathPrefix":"/form","disableRouteAuth":true},`+
+			`{"pathPrefix":"/rest/oauth2-credential/callback","disableRouteAuth":true,"matchExact":true}`+
+			`]`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/routes", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST status=%d body=%s (wire-field gap? DisallowUnknownFields)", rec.Code, rec.Body)
+	}
+	var created routeResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	if len(created.PathRules) != 3 {
+		t.Fatalf("response pathRules len = %d; want 3", len(created.PathRules))
+	}
+	for _, pr := range created.PathRules {
+		if !pr.DisableRouteAuth {
+			t.Errorf("rule %q came back with disableRouteAuth=false; the form cannot "+
+				"re-render the exemption and the next save would re-protect the path",
+				pr.PathPrefix)
+		}
+	}
+
+	// And it survives the round trip to storage, not just the create echo.
+	getRec := httptest.NewRecorder()
+	env.router.ServeHTTP(getRec, httptest.NewRequest(http.MethodGet, "/api/v1/routes/"+created.ID, nil))
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET status=%d body=%s", getRec.Code, getRec.Body)
+	}
+	var reloaded routeResponse
+	if err := json.Unmarshal(getRec.Body.Bytes(), &reloaded); err != nil {
+		t.Fatalf("decode GET: %v", err)
+	}
+	if len(reloaded.PathRules) != 3 {
+		t.Fatalf("reloaded pathRules len = %d; want 3: %s", len(reloaded.PathRules), getRec.Body)
+	}
+	exact := 0
+	for _, pr := range reloaded.PathRules {
+		if !pr.DisableRouteAuth {
+			t.Errorf("rule %q lost its exemption in storage", pr.PathPrefix)
+		}
+		if pr.MatchExact {
+			exact++
+		}
+	}
+	if exact != 1 {
+		t.Errorf("matchExact survived on %d rules; want 1 (the OAuth callback)", exact)
+	}
+}
+
+// The exact shape of the v2.56.2 bug: change something unrelated, and the
+// exemption must still be there afterwards.
+func TestUpdateRoute_PathRuleAuthExemption_SurvivesAnUnrelatedEdit(t *testing.T) {
+	env := newTestEnv(t, false)
+	body := pathRulesRouteBody("edit-n8n.example.com",
+		`,"pathRules":[{"pathPrefix":"/webhook","disableRouteAuth":true}]`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/routes", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST status=%d body=%s", rec.Code, rec.Body)
+	}
+	var created routeResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	putBody := `{` +
+		`"host":"edit-n8n.example.com",` +
+		`"upstreams":[{"url":"http://127.0.0.1:5678","weight":1}],` +
+		`"lbPolicy":"round_robin","tlsEnabled":false,"redirectToHttps":false,` +
+		`"aliases":[],"authMode":"none","requestHeaders":{},"responseHeaders":{},` +
+		`"wafMode":"off",` +
+		`"pathRules":[{"pathPrefix":"/webhook","disableRouteAuth":true}]}`
+	putReq := httptest.NewRequest(http.MethodPut, "/api/v1/routes/"+created.ID, strings.NewReader(putBody))
+	putReq.Header.Set("Content-Type", "application/json")
+	putRec := httptest.NewRecorder()
+	env.router.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", putRec.Code, putRec.Body)
+	}
+	var updated routeResponse
+	if err := json.Unmarshal(putRec.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode PUT: %v", err)
+	}
+	if len(updated.PathRules) != 1 || !updated.PathRules[0].DisableRouteAuth {
+		t.Fatalf("the exemption was dropped by an unrelated edit: %s", putRec.Body)
+	}
+}
+
+// The wrong spelling stays refused, so the wire contract keeps one spelling.
+func TestCreateRoute_PathRuleAuthExemption_SnakeCaseIsRefused(t *testing.T) {
+	env := newTestEnv(t, false)
+	body := pathRulesRouteBody("snake-n8n.example.com",
+		`,"pathRules":[{"pathPrefix":"/webhook","disable_route_auth":true}]`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/routes", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("POST with snake_case disable_route_auth status=%d; want 400 (body=%s)",
+			rec.Code, rec.Body)
+	}
+}
+
+// Exemption plus an IdP gate on one rule is two opposite instructions: a 400
+// that says so, never a 500 and never a silent drop of one of them.
+func TestCreateRoute_PathRuleAuthExemption_WithIdPReturns400(t *testing.T) {
+	env := newTestEnv(t, false)
+	body := pathRulesRouteBody("both-n8n.example.com",
+		`,"pathRules":[{"pathPrefix":"/webhook","disableRouteAuth":true,`+
+			`"forwardAuth":{"providerName":"authentik"}}]`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/routes", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST status=%d; want 400 (body=%s)", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "path_rule_exempt_with_idp") {
+		t.Errorf("the 400 does not carry the machine-readable code, so the UI cannot "+
+			"localise it: %s", rec.Body)
+	}
+}
+
+// The operator asked for an audit entry when such a rule is created or
+// changed. No new code was needed — routeForAudit clones the whole route,
+// path rules included — but "no new code was needed" is a claim, so here it
+// is as a test. Removing authentication from a path is exactly the change an
+// operator will want to find in the log six months later.
+func TestAuditRecordsThePathAuthExemption(t *testing.T) {
+	env := newTestEnv(t, false)
+	body := pathRulesRouteBody("audit-n8n.example.com",
+		`,"pathRules":[{"pathPrefix":"/webhook","disableRouteAuth":true}]`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/routes", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST status=%d body=%s", rec.Code, rec.Body)
+	}
+	var created routeResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	ev := lastAuditEvent(t, env, "route_created")
+	if !strings.Contains(string(ev.AfterJSON), "disable_route_auth") {
+		t.Errorf("the create audit entry does not record the exemption, so the log cannot "+
+			"answer \"when did /webhook stop requiring a login\": %s", ev.AfterJSON)
+	}
+
+	// And the removal is recorded too: turning protection back ON is just as
+	// much a change worth finding.
+	putBody := `{` +
+		`"host":"audit-n8n.example.com",` +
+		`"upstreams":[{"url":"http://127.0.0.1:9000","weight":1}],` +
+		`"lbPolicy":"round_robin","tlsEnabled":false,"redirectToHttps":false,` +
+		`"aliases":[],"authMode":"none","requestHeaders":{},"responseHeaders":{},` +
+		`"wafMode":"off",` +
+		`"pathRules":[{"pathPrefix":"/webhook","basicAuth":{"username":"hook","password":"somePlainPassword"}}]}`
+	putReq := httptest.NewRequest(http.MethodPut, "/api/v1/routes/"+created.ID, strings.NewReader(putBody))
+	putReq.Header.Set("Content-Type", "application/json")
+	putRec := httptest.NewRecorder()
+	env.router.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", putRec.Code, putRec.Body)
+	}
+	up := lastAuditEvent(t, env, "route_updated")
+	if !strings.Contains(string(up.BeforeJSON), "disable_route_auth") {
+		t.Errorf("the update audit entry does not show the exemption in the BEFORE state, "+
+			"so the log cannot show it was removed: %s", up.BeforeJSON)
+	}
+	if strings.Contains(string(up.AfterJSON), "disable_route_auth") {
+		t.Errorf("the AFTER state still claims the exemption: %s", up.AfterJSON)
+	}
+	// And the path-rule password never reaches the log.
+	if strings.Contains(string(up.AfterJSON), "somePlainPassword") {
+		t.Errorf("a path-rule password leaked into the audit log: %s", up.AfterJSON)
+	}
+}

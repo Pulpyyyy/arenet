@@ -1224,6 +1224,11 @@ type pathRuleReq struct {
 	// the provider's own config. Mutually exclusive with BasicAuth on
 	// the same rule (refused by storage validation).
 	ForwardAuth *forwardAuthReq `json:"forwardAuth,omitempty"`
+	// DisableRouteAuth (v2.58) exempts THIS path from the route's own
+	// authentication — the one thing a path rule subtracts rather than
+	// adds. See storage.PathRule.DisableRouteAuth for why it exists and
+	// what it deliberately does not switch off.
+	DisableRouteAuth bool `json:"disableRouteAuth,omitempty"`
 }
 
 // pathRedirectReq is the wire mirror of storage.PathRedirect.
@@ -1295,6 +1300,10 @@ func mapPathRuleReqs(reqs []pathRuleReq, existing []storage.PathRule) ([]storage
 				PasswordHash: hash,
 			}
 		}
+		// v2.58 — the exemption. A plain bool: absent means "inherit the
+		// route's authentication", which is what every rule stored before
+		// this release means too, so no migration is needed.
+		pr.DisableRouteAuth = r.DisableRouteAuth
 		// v2.57 — the per-path IdP gate. Only the provider reference
 		// crosses the wire; an unknown name is not rejected here because
 		// a provider can be deleted after the route was saved, and the
@@ -2098,6 +2107,7 @@ func toPathRulesResp(rules []storage.PathRule) []pathRuleReq {
 				Password: "", // SECRET — never echoed (plain or hash)
 			}
 		}
+		out[i].DisableRouteAuth = pr.DisableRouteAuth
 		// v2.57 — the provider reference is not a secret (the provider's
 		// own credentials live behind the providers endpoint), so unlike
 		// the basic-auth password it is echoed back as stored. The form
