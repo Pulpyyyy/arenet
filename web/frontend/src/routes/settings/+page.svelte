@@ -1110,7 +1110,7 @@
 
 					<!-- Watcher credentials sub-form -->
 					<section class="mb-6">
-						<h3 class="text-base font-medium mb-2">Watcher credentials</h3>
+						<h3 class="text-base font-medium text-primary mb-2">Watcher credentials</h3>
 						<p class="text-xs text-muted mb-3">
 							Run <code>cscli machines add arenet-writer</code> on your CrowdSec host and paste the resulting credentials here. Distinct from the read-side bouncer key (Step N): writes to LAPI require a watcher per CrowdSec's auth model.
 						</p>
@@ -1196,7 +1196,7 @@
 
 					<!-- Per-category rule toggles -->
 					<section>
-						<h3 class="text-base font-medium mb-2">Trigger rules</h3>
+						<h3 class="text-base font-medium text-primary mb-2">Trigger rules</h3>
 						<p class="text-xs text-muted mb-3">
 							Each category is disabled by default. When enabled, Arenet bans a source IP after <em>threshold</em> events in <em>window</em>, for <em>duration</em>, with a <em>cooldown</em> after an operator unban that suppresses re-ban for that long.
 						</p>
