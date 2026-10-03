@@ -1163,20 +1163,26 @@ describe('Routes page — aggregate health badges + filter tabs', () => {
 		expect(screen.queryByText('UNKNOWN')).not.toBeInTheDocument();
 	});
 
-	it('renders "HC INACTIF" distinct badge for not_monitored aggregateStatus (2026-06-25 UX split)', async () => {
+	it('renders the inactive-HC badge for not_monitored aggregateStatus (2026-06-25 UX split)', async () => {
 		// Pre-2026-06-25 : routes with HealthCheck.Enabled=false
 		// rendered the same "UNKNOWN" badge as HC-enabled-but-warm-up
 		// routes, making the operator unable to tell whether the
 		// gray badge meant "I chose not to monitor" or "I monitor
 		// but I don't know yet". The split adds 'not_monitored' as
 		// a distinct aggregateStatus with its own label.
+		//
+		// v2.59 — the label was the hard-coded French "HC INACTIF",
+		// and this test asserted it WHILE RUNNING IN ENGLISH, which
+		// is how a French string in the English locale survived four
+		// months with a test covering it. The label now goes through
+		// i18n; this asserts the English one.
 		apiMock.listRoutes.mockResolvedValue([
 			mkRoute('r-nm', 'unmonitored.example', 'not_monitored', 0, 1),
 			mkRoute('r-u', 'warmup.example', 'unknown', 0, 1),
 		]);
 		render(Page);
 
-		expect(await screen.findByText('HC INACTIF')).toBeInTheDocument();
+		expect(await screen.findByText('HC INACTIVE')).toBeInTheDocument();
 		expect(screen.getByText('UNKNOWN')).toBeInTheDocument();
 	});
 
@@ -5394,5 +5400,87 @@ describe('routes page — a refused save is always visible', () => {
 		await tick();
 
 		expect(apiMock.createRoute).toHaveBeenCalled();
+	});
+});
+
+// -----------------------------------------------------------------
+// v2.59 — the list row of a REDIRECTING route.
+//
+// Three cells lied about it, and all three were invisible to the
+// test suite because no test ever rendered a redirecting row:
+//   - Upstream was blank (the route legally has no pool), so the one
+//     fact that matters — where the visitor is sent — appeared
+//     nowhere in the list and was not searchable.
+//   - State read UNKNOWN with a tooltip describing a health-check
+//     warm-up window, on a route with neither health check nor
+//     backend: a window that can never close.
+//   - Security advertised the stored WAF / geo / IP / rate-limit
+//     config, none of which is emitted for a route that proxies
+//     nothing (manager.go:1549 → :1618).
+// -----------------------------------------------------------------
+describe('Routes page — a redirecting route reads as a redirect', () => {
+	function redirectRoute() {
+		return makeRoute({
+			id: 'redir-1',
+			host: 'old.example.com',
+			upstreams: [],
+			totalUpstreamCount: 0,
+			healthyUpstreamCount: 0,
+			aggregateStatus: 'not_applicable',
+			wafMode: 'block',
+			redirectConfig: { target: 'https://new.example.com', statusCode: 301, preservePath: true }
+		} as Partial<Route>);
+	}
+
+	it('shows the redirect target in the Upstream column', async () => {
+		apiMock.listRoutes.mockResolvedValue([redirectRoute()]);
+		render(Page);
+		const target = await screen.findByTestId('redirect-target-cell');
+		expect(target.textContent).toBe('https://new.example.com');
+	});
+
+	it('shows a dash instead of UNKNOWN in the State column', async () => {
+		apiMock.listRoutes.mockResolvedValue([redirectRoute()]);
+		render(Page);
+		const dash = await screen.findByTestId('route-status-dash');
+		expect(dash.textContent).toBe('—');
+		expect(screen.queryByText('UNKNOWN')).not.toBeInTheDocument();
+	});
+
+	it('shows no WAF chip although wafMode is block', async () => {
+		apiMock.listRoutes.mockResolvedValue([redirectRoute()]);
+		render(Page);
+		await screen.findByText('old.example.com');
+		expect(screen.getByTestId('posture-inert')).toBeInTheDocument();
+	});
+
+	it('finds the route by its redirect target in the search box', async () => {
+		apiMock.listRoutes.mockResolvedValue([
+			redirectRoute(),
+			makeRoute({ id: 'other', host: 'app.example.com' })
+		]);
+		render(Page);
+		await screen.findByText('old.example.com');
+		const search = screen.getByLabelText(/filter routes/i);
+		await userEvent.type(search, 'new.example.com');
+		await tick();
+		expect(screen.getByText('old.example.com')).toBeInTheDocument();
+		expect(screen.queryByText('app.example.com')).not.toBeInTheDocument();
+	});
+
+	it('does not count a redirecting route as active, nor as WAF-protected', async () => {
+		apiMock.listRoutes.mockResolvedValue([
+			redirectRoute(),
+			makeRoute({ id: 'live', host: 'app.example.com', wafMode: 'block' })
+		]);
+		render(Page);
+		await screen.findByText('app.example.com');
+		// Two routes total, one active, one with a WAF that runs.
+		const cards = screen.getAllByTestId(/^stat-card-/);
+		const byId = (suffix: string) =>
+			cards.find((c) => c.getAttribute('data-testid') === `stat-card-${suffix}`);
+		expect(byId('total')?.textContent).toContain('2');
+		expect(byId('active')?.textContent).toContain('1');
+		expect(byId('waf')?.textContent).toContain('1');
 	});
 });

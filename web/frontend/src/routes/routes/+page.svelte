@@ -29,6 +29,7 @@
 	import { hostMatchesSAN } from '$lib/utils/san-match';
 	import { pathRuleContentChecks, sanitizePathRules } from '$lib/utils/path-rules';
 	import { manualCertDisplayName } from '$lib/utils/manual-cert-name';
+	import { gateApplies } from '$lib/utils/route-gates';
 	import type {
 		SecLangError,
 		WafCustomRule,
@@ -119,17 +120,18 @@
 	let formError = $state<string | null>(null);
 
 	// Phase 1 split layout (2026-06-02) — list filter state.
-	// The search input filters by host / matcher / upstream URL
-	// substring. The segmented tab is a UX placeholder for the
-	// per-route health filter; "All" is the only functional
-	// option in Phase 1.
+	// The search input filters on host / aliases / upstream URL /
+	// redirect target; the segmented tab filters on the per-route
+	// aggregateStatus.
 	//
-	// TODO Phase 2: wire "Healthy" / "Alerts" once the API
-	// surfaces a per-route health field (today the data plane
-	// only tracks health per UPSTREAM via Caddy's active health
-	// checks; there is no per-route aggregated rollup on the
-	// wire). Until then, the two non-default tabs are no-ops
-	// with a tooltip explaining the deferral.
+	// The comment here used to say the two non-default tabs were
+	// "visual stubs" and "no-ops with a tooltip explaining the
+	// deferral", with a TODO Phase 2. That stopped being true when
+	// Critique 11 Pack A put aggregateStatus on the wire and
+	// filteredRoutes started reading it (2026-06-05) — the tabs
+	// work. The stub tooltip stayed attached to both buttons for
+	// four months, telling the operator a working control was
+	// unfinished. Removed in v2.59 along with its i18n key.
 	type ListTab = 'all' | 'healthy' | 'alerts';
 	let listFilter = $state('');
 	let listTab = $state<ListTab>('all');
@@ -3359,11 +3361,19 @@
 		}
 	}
 
+	// v2.59 — "Active" counted routes.length, so it was a second
+	// copy of "Total" that no state could ever change: a disabled
+	// route, one in maintenance and one redirecting all counted as
+	// active. "With WAF" had the subtler version of the same bug —
+	// it counted a stored wafMode on routes whose WAF is never
+	// emitted (see lib/utils/route-gates.ts), so turning the WAF on
+	// for a redirecting route moved a number on the dashboard while
+	// changing nothing about the traffic.
 	const stats = $derived({
 		total: routes.length,
-		active: routes.length,
+		active: routes.filter((r) => routeState(r) === 'active').length,
 		tls: routes.filter((r) => r.tlsEnabled).length,
-		waf: routes.filter((r) => r.wafMode !== 'off').length
+		waf: routes.filter((r) => r.wafMode !== 'off' && gateApplies(r, 'waf')).length
 	});
 
 	// Filtered list view. Two independent filters that AND
@@ -3397,6 +3407,12 @@
 			for (const u of r.upstreams ?? []) {
 				if (u.url.toLowerCase().includes(q)) return true;
 			}
+			// v2.59 — a redirecting route has no upstream, so until
+			// now the only thing matching it was its own host. Its
+			// target is the other half of "where does this name go",
+			// and it is what the Upstream column now displays.
+			const target = r.redirectConfig?.target;
+			if (target && target.toLowerCase().includes(q)) return true;
 			return false;
 		});
 	});
@@ -3412,12 +3428,35 @@
 	// operator's smoke surfaced the dot-alone was ambiguous to
 	// scan, so the polish round swapped it for an explicit
 	// uppercase text badge matching the existing pill style.
+	// v2.59 — the two tooltips here were hard-coded French string
+	// literals, so an operator on the English locale read them in
+	// French. They go through i18n like every other string in this
+	// file now. The four status LABELS stay as uppercase literals:
+	// HEALTHY / DEGRADED / DOWN / UNKNOWN are codes shared with the
+	// topology badges, not prose — but HC INACTIF was French, so it
+	// moved too.
 	function aggregateToBadge(s: Route['aggregateStatus']): {
 		label: string;
 		variant: 'status-up' | 'status-warn' | 'status-down' | 'neutral';
 		tooltip?: string;
+		/** Render as a muted dash instead of a pill — "there is no
+		 *  state here", as opposed to a state we don't know yet. */
+		dash?: boolean;
 	} {
 		switch (s) {
+			case 'not_applicable':
+				// v2.59 — a redirecting route answers from Caddy and
+				// has no backend to probe. It used to fall into the
+				// default arm below and read UNKNOWN, promising a
+				// warm-up window that can never close. A dash is the
+				// same idiom the TLS column already uses for "this
+				// column does not apply to this row".
+				return {
+					label: '—',
+					variant: 'neutral',
+					tooltip: language.current ? t('routes.list.statusNotApplicableTooltip') : undefined,
+					dash: true
+				};
 			case 'healthy':
 				return { label: 'HEALTHY', variant: 'status-up' };
 			case 'degraded':
@@ -3430,17 +3469,15 @@
 				// on this route ; surface the choice explicitly
 				// rather than leaving an ambiguous gray badge.
 				return {
-					label: 'HC INACTIF',
+					label: language.current ? t('routes.list.statusNotMonitored') : 'HC INACTIF',
 					variant: 'neutral',
-					tooltip:
-						'Active health check non configuré pour cette route. Activez le HC dans la section "Health check" pour surveiller l’état des upstreams.'
+					tooltip: language.current ? t('routes.list.statusNotMonitoredTooltip') : undefined
 				};
 			default:
 				return {
 					label: 'UNKNOWN',
 					variant: 'neutral',
-					tooltip:
-						'HC activé mais aucun signal reçu pour le moment (warm-up window). Le badge va se mettre à jour aux prochaines probes.'
+					tooltip: language.current ? t('routes.list.statusUnknownTooltip') : undefined
 				};
 		}
 	}
@@ -3509,10 +3546,10 @@
 	</div>
 {:else}
 	<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6">
-		<StatCard label={language.current && t('routes.stats.total')} value={stats.total} />
-		<StatCard label={language.current && t('routes.stats.active')} value={stats.active} />
-		<StatCard label={language.current && t('routes.stats.withTLS')} value={stats.tls} />
-		<StatCard label={language.current && t('routes.stats.withWAF')} value={stats.waf} />
+		<StatCard label={language.current && t('routes.stats.total')} value={stats.total} testid="stat-card-total" />
+		<StatCard label={language.current && t('routes.stats.active')} value={stats.active} testid="stat-card-active" />
+		<StatCard label={language.current && t('routes.stats.withTLS')} value={stats.tls} testid="stat-card-tls" />
+		<StatCard label={language.current && t('routes.stats.withWAF')} value={stats.waf} testid="stat-card-waf" />
 	</div>
 
 	<!-- Phase 1 split layout (2026-06-02) — replaces the Step I/J
@@ -3543,10 +3580,12 @@
 						class="flex-1 bg-transparent outline-none text-sm text-primary placeholder-muted"
 					/>
 				</div>
-				<!-- Segmented tabs. "All" is the only functional filter
-				     in Phase 1; the other two are visual stubs pending
-				     a per-route health field on the API surface.
-				     TODO Phase 2: wire Healthy/Alerts. -->
+				<!-- Segmented tabs, filtering on aggregateStatus. All
+				     three work; they stopped being stubs when Pack A
+				     put the per-route rollup on the wire. Note that a
+				     route with no health (redirect: not_applicable)
+				     appears under All only, which is now the honest
+				     answer rather than a side effect of 'unknown'. -->
 				<div class="inline-flex gap-0.5 p-0.5 rounded-full bg-surface border border-border-default text-xs">
 					<button
 						type="button"
@@ -3559,7 +3598,6 @@
 					<button
 						type="button"
 						onclick={() => (listTab = 'healthy')}
-						title={language.current && t('routes.list.tabPhase2Tooltip')}
 						class="px-3 py-1 rounded-full transition-colors"
 						class:bg-hover={listTab === 'healthy'}
 						class:text-primary={listTab === 'healthy'}
@@ -3568,7 +3606,6 @@
 					<button
 						type="button"
 						onclick={() => (listTab = 'alerts')}
-						title={language.current && t('routes.list.tabPhase2Tooltip')}
 						class="px-3 py-1 rounded-full transition-colors"
 						class:bg-hover={listTab === 'alerts'}
 						class:text-primary={listTab === 'alerts'}
@@ -3643,7 +3680,13 @@
 											title={language.current && `${t('routes.list.aliasesTooltip')}\n${r.aliases.join('\n')}`}
 										>+{r.aliases.length}</span>
 									{/if}
-									{#if r.authMode === 'basic'}
+									<!-- v2.59 — gated on gateApplies: the lock /
+									     arrow icon claims "this host asks for
+									     credentials". On a route that proxies
+									     nothing (redirect, maintenance) no auth
+									     handler is emitted, so the icon was
+									     promising a gate that does not exist. -->
+									{#if gateApplies(r, 'auth') && r.authMode === 'basic'}
 										<span
 											class="ml-1.5 inline-flex items-center text-muted cursor-help"
 											title={language.current && t('routes.list.basicAuthTooltip', { username: r.basicAuth?.username ?? '' })}
@@ -3664,7 +3707,7 @@
 												<path d="M7 11V7a5 5 0 0 1 10 0v4" />
 											</svg>
 										</span>
-									{:else if r.authMode === 'forward_auth'}
+									{:else if gateApplies(r, 'auth') && r.authMode === 'forward_auth'}
 										<span
 											class="ml-1.5 inline-flex items-center text-muted cursor-help"
 											title={language.current && t('routes.list.forwardAuthTooltip', { provider: r.forwardAuth?.providerName ?? '' })}
@@ -3690,11 +3733,25 @@
 								</td>
 								<td
 									class="px-4 py-3 font-mono text-secondary truncate max-w-[14rem]"
-									title={r.upstreams[0]?.url ?? ''}
+									title={r.redirectConfig?.target ?? r.upstreams[0]?.url ?? ''}
 								>
-									{r.upstreams[0]?.url ?? ''}{r.upstreams.length > 1
-										? ` (+${r.upstreams.length - 1})`
-										: ''}
+									{#if r.redirectConfig}
+										<!-- v2.59 — a redirecting route has no
+										     upstream, so this cell was simply
+										     blank: the one fact that matters
+										     about the route — where it sends
+										     the visitor — appeared nowhere in
+										     the list, and was not searchable
+										     either. The column answers "where
+										     does this traffic go", and for a
+										     redirect the answer is the target. -->
+										<span class="text-muted">→</span>
+										<span data-testid="redirect-target-cell">{r.redirectConfig.target}</span>
+									{:else}
+										{r.upstreams[0]?.url ?? ''}{r.upstreams.length > 1
+											? ` (+${r.upstreams.length - 1})`
+											: ''}
+									{/if}
 									<!-- Critique 11 Pack A: "N/M sains" counter on
 									     multi-upstream routes whose HC tracker has
 									     a verdict. Hidden for single-upstream
@@ -3753,7 +3810,12 @@
 									     pointer + hover tint + selected accent),
 									     matching the mock and avoiding the
 									     double-action anti-pattern. -->
-									{#if statusBadge.tooltip}
+									{#if statusBadge.dash}
+										<span
+											title={statusBadge.tooltip}
+											class="text-muted cursor-help"
+											data-testid="route-status-dash">{statusBadge.label}</span>
+									{:else if statusBadge.tooltip}
 										<span title={statusBadge.tooltip} class="inline-block cursor-help">
 											<Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
 										</span>
