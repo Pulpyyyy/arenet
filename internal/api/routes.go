@@ -1216,7 +1216,9 @@ func (h *Handler) createRoute(w http.ResponseWriter, r *http.Request) {
 			req.Upstreams[i].Weight = 1
 		}
 	}
-	if err := validateUpstreamPool(req.Upstreams); err != nil {
+	// A redirecting route proxies nothing: an empty pool is valid for it.
+	// See validateUpstreamPoolAllowingEmpty.
+	if err := validateUpstreamPoolAllowingEmpty(req.Upstreams, req.RedirectConfig != nil); err != nil {
 		writeErrorFrom(w, http.StatusBadRequest, err)
 		return
 	}
@@ -1732,7 +1734,9 @@ func (h *Handler) updateRoute(w http.ResponseWriter, r *http.Request) {
 			req.Upstreams[i].Weight = 1
 		}
 	}
-	if err := validateUpstreamPool(req.Upstreams); err != nil {
+	// A redirecting route proxies nothing: an empty pool is valid for it.
+	// See validateUpstreamPoolAllowingEmpty.
+	if err := validateUpstreamPoolAllowingEmpty(req.Upstreams, req.RedirectConfig != nil); err != nil {
 		writeErrorFrom(w, http.StatusBadRequest, err)
 		return
 	}

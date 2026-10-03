@@ -721,3 +721,118 @@ func TestAuditRecordsThePathAuthExemption(t *testing.T) {
 		t.Errorf("a path-rule password leaked into the audit log: %s", up.AfterJSON)
 	}
 }
+
+// v2.58.4 — a redirecting route needs no upstream, through the API.
+//
+// Operator report, 2026-10-03, on v2.58.3: State = redirect, a target URL, 301,
+// keep-path on, a host — and saving answered "upstreams must contain at least
+// one entry". They could not act on it: the Upstreams field is deliberately
+// hidden for a redirect, so the form told them nothing was missing while the
+// server said something was.
+//
+// v2.45.2 had already settled that a redirecting route proxies nothing. It
+// fixed the form and the storage validator and missed the API in between —
+// the same N-places defect that cost v2.44, v2.56.1 and v2.56.2, except this
+// time the two fixed layers hid the broken one.
+func redirectRouteBody(host, extra string) string {
+	return `{` +
+		`"host":"` + host + `",` +
+		`"upstreams":[],` +
+		`"lbPolicy":"round_robin","tlsEnabled":false,"redirectToHttps":false,` +
+		`"aliases":[],"authMode":"none","requestHeaders":{},"responseHeaders":{},` +
+		`"wafMode":"off",` +
+		// A pathless target, because Arenet refuses "target has a path" +
+		// preservePath together (the visitor's path would be appended to the
+		// target's own). That rule is separate from this one and still holds.
+		`"redirectConfig":{"target":"https://example.org","statusCode":301,"preservePath":true}` +
+		extra + `}`
+}
+
+func TestCreateRoute_RedirectingRouteNeedsNoUpstream(t *testing.T) {
+	env := newTestEnv(t, false)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/routes",
+		strings.NewReader(redirectRouteBody("redir.example.com", "")))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST status=%d; want 201.\n\nA redirecting route proxies nothing, and the "+
+			"form hides the Upstreams field for it — so a 400 here is an error the operator "+
+			"cannot act on.\nbody=%s", rec.Code, rec.Body)
+	}
+	var created routeResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if created.RedirectConfig == nil || created.RedirectConfig.Target != "https://example.org" {
+		t.Errorf("redirectConfig did not survive: %s", rec.Body)
+	}
+	if len(created.Upstreams) != 0 {
+		t.Errorf("upstreams = %v; want none — nothing should be invented", created.Upstreams)
+	}
+}
+
+func TestUpdateRoute_RedirectingRouteNeedsNoUpstream(t *testing.T) {
+	env := newTestEnv(t, false)
+	// Start from an ordinary proxying route, then convert it to a redirect
+	// and drop the pool — the realistic edit.
+	create := httptest.NewRequest(http.MethodPost, "/api/v1/routes",
+		strings.NewReader(pathRulesRouteBody("convert.example.com", "")))
+	create.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	env.router.ServeHTTP(createRec, create)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("seed POST status=%d body=%s", createRec.Code, createRec.Body)
+	}
+	var seeded routeResponse
+	if err := json.Unmarshal(createRec.Body.Bytes(), &seeded); err != nil {
+		t.Fatalf("decode seed: %v", err)
+	}
+
+	put := httptest.NewRequest(http.MethodPut, "/api/v1/routes/"+seeded.ID,
+		strings.NewReader(redirectRouteBody("convert.example.com", "")))
+	put.Header.Set("Content-Type", "application/json")
+	putRec := httptest.NewRecorder()
+	env.router.ServeHTTP(putRec, put)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d; want 200 — converting a proxying route to a redirect must "+
+			"not demand a backend it will never dial.\nbody=%s", putRec.Code, putRec.Body)
+	}
+}
+
+// The exemption covers an EMPTY pool only. A redirecting route that somehow
+// carries a malformed upstream is still rejected, so the relaxation cannot be
+// used to smuggle a bad pool past validation.
+func TestCreateRoute_RedirectingRouteStillValidatesEntriesItHas(t *testing.T) {
+	env := newTestEnv(t, false)
+	body := strings.Replace(redirectRouteBody("redir-bad.example.com", ""),
+		`"upstreams":[]`, `"upstreams":[{"url":"not-a-url","weight":1}]`, 1)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/routes", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("POST status=%d; want 400 — allowing an empty pool must not stop a present "+
+			"entry from being checked (body=%s)", rec.Code, rec.Body)
+	}
+}
+
+// And a NON-redirecting route still needs one, so the rule did not simply
+// disappear.
+func TestCreateRoute_ProxyingRouteStillNeedsAnUpstream(t *testing.T) {
+	env := newTestEnv(t, false)
+	body := `{"host":"plain.example.com","upstreams":[],` +
+		`"lbPolicy":"round_robin","tlsEnabled":false,"redirectToHttps":false,` +
+		`"aliases":[],"authMode":"none","requestHeaders":{},"responseHeaders":{},"wafMode":"off"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/routes", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("POST status=%d; want 400 — a route that proxies still needs somewhere to "+
+			"proxy to (body=%s)", rec.Code, rec.Body)
+	}
+}
