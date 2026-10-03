@@ -1510,6 +1510,8 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 			ProbeHost:          r.Host,
 			UsesHTTPS:          r.PoolUsesHTTPS(),
 			InsecureSkipVerify: r.InsecureSkipVerify,
+			// v2.60 — the route's TLS identity for its own pool.
+			UpstreamTLSServerName: r.UpstreamTLSServerName,
 		}, sharedHandleResponse, r.UploadStreamingMode)
 		if err != nil {
 			return nil, fmt.Errorf("route %s (%s): %w", r.ID, r.Host, err)
@@ -1881,6 +1883,11 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 					ProbeHost:          r.Host,
 					UsesHTTPS:          poolUsesHTTPS(pr.Upstreams),
 					InsecureSkipVerify: pr.InsecureSkipVerify,
+					// v2.60 — the path pool's OWN TLS identity, never the
+					// route's: a pool that dials a different address has a
+					// different certificate, so inheriting would verify the
+					// wrong backend. Same autonomy as InsecureSkipVerify.
+					UpstreamTLSServerName: pr.UpstreamTLSServerName,
 				}, sharedHandleResponse, r.UploadStreamingMode)
 			}
 			sub, err := buildPathRulesSubroute(r.ID, r.PathRules, proxyHandler, func(c storage.BasicAuthRouteConfig) map[string]any {

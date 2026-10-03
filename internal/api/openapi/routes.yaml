@@ -219,6 +219,7 @@ paths:
         `basicAuth.password` ("" keeps the stored hash; same per path rule,
         matched by `pathPrefix`), and the pointer fields `healthCheck`,
         `countryBlock`, `ipFilter`, `insecureSkipVerify`,
+        `upstreamTlsServerName`,
         `uploadStreamingMode`, `wafDisableCRS`, `wafExcludeRules`,
         `wafExcludeTags`, `wafTargetedExclusions`, `wafCustomRules`,
         `wafSecLang`, `rateLimit` (omitted = keep; present = replace; an
@@ -1347,7 +1348,8 @@ components:
       description: |
         Override for a URL prefix: its own Basic Auth and / or IP filter,
         and optionally its own upstream pool (empty `upstreams` = the
-        route's pool; `lbPolicy` / `healthCheck` / `insecureSkipVerify` only
+        route's pool; `lbPolicy` / `healthCheck` / `insecureSkipVerify` /
+        `upstreamTlsServerName` only
         apply with a pool). On responses `basicAuth.password` is always "".
       required: [pathPrefix]
       properties:
@@ -1367,6 +1369,7 @@ components:
           $ref: '#/components/schemas/RoutesLBPolicy'
         healthCheck: { $ref: '#/components/schemas/RoutesHealthCheck' }
         insecureSkipVerify: { type: boolean }
+        upstreamTlsServerName: { type: string }
         rateLimit:
           allOf:
             - $ref: '#/components/schemas/RoutesRateLimit'
@@ -1588,6 +1591,15 @@ components:
         insecureSkipVerify:
           type: boolean
           description: Skip upstream certificate verification (https pools only; forced false otherwise). Omitted on PUT = keep.
+        upstreamTlsServerName:
+          type: string
+          description: >-
+            TLS server name presented in SNI and verified against the backend
+            certificate, so a pool addressed by IP can still be authenticated
+            (https pools only; normalised to "" otherwise). Must be a plain
+            hostname - no scheme, port or path. Omitted on PUT = keep; an
+            explicit "" clears it.
+          example: backend.example.com
         uploadStreamingMode:
           type: boolean
           description: Stream request bodies (skips WAF body inspection, no buffering). Omitted on PUT = keep.
@@ -1643,6 +1655,7 @@ components:
       description: A route as returned by the API. Secrets are never returned.
       required: [id, host, upstreams, lbPolicy, tlsEnabled, redirectToHttps, aliases, authMode, basicAuth, forwardAuth,
         requestHeaders, responseHeaders, wafMode, acmeChallenge, healthCheck, countryBlock, insecureSkipVerify,
+        upstreamTlsServerName,
         uploadStreamingMode, wafDisableCRS, wafExcludeRules, wafExcludeTags, wafTargetedExclusions, wafCustomRules,
         wafSecLang, aggregateStatus, healthyUpstreamCount, totalUpstreamCount, createdAt, updatedAt]
       properties:
@@ -1685,6 +1698,7 @@ components:
         healthCheck: { $ref: '#/components/schemas/RoutesHealthCheck' }
         countryBlock: { $ref: '#/components/schemas/RoutesCountryBlock' }
         insecureSkipVerify: { type: boolean }
+        upstreamTlsServerName: { type: string }
         uploadStreamingMode: { type: boolean }
         wafDisableCRS: { type: boolean }
         wafExcludeRules: { type: array, items: { type: integer } }

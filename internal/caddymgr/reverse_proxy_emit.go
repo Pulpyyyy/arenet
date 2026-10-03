@@ -52,6 +52,11 @@ type proxyPoolParams struct {
 	// InsecureSkipVerify sets transport.tls.insecure_skip_verify. Only
 	// consulted when UsesHTTPS is true.
 	InsecureSkipVerify bool
+	// UpstreamTLSServerName sets transport.tls.server_name — the name
+	// presented in SNI and verified against the backend's certificate.
+	// Empty leaves Caddy's default (both derived from the dial
+	// address). Only consulted when UsesHTTPS is true.
+	UpstreamTLSServerName string
 }
 
 // probeHeaders builds health_checks.active.headers.
@@ -270,6 +275,15 @@ func buildReverseProxyHandler(p proxyPoolParams, sharedHandleResponse []map[stri
 		tlsCfg := map[string]any{}
 		if p.InsecureSkipVerify {
 			tlsCfg["insecure_skip_verify"] = true
+		}
+		// v2.60 — server_name sets BOTH the SNI Caddy sends and the
+		// name it verifies the backend's certificate against, which
+		// is exactly what dialing an IP with a real certificate
+		// needs. Emitted only when non-empty, so a route that does
+		// not use it keeps the byte-identical `"tls": {}` the
+		// strict-default has always produced.
+		if p.UpstreamTLSServerName != "" {
+			tlsCfg["server_name"] = p.UpstreamTLSServerName
 		}
 		proxyHandler["transport"] = map[string]any{
 			"protocol": "http",

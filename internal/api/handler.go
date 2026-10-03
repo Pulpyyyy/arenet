@@ -1208,6 +1208,10 @@ type pathRuleReq struct {
 	LBPolicy           string          `json:"lbPolicy,omitempty"`
 	HealthCheck        *healthCheckReq `json:"healthCheck,omitempty"`
 	InsecureSkipVerify bool            `json:"insecureSkipVerify,omitempty"`
+	// UpstreamTLSServerName (v2.60) — this path pool's own TLS
+	// identity. Full-replacement like the rest of the path-rule
+	// wire: path rules ship whole, so no pointer is needed.
+	UpstreamTLSServerName string `json:"upstreamTlsServerName,omitempty"`
 	// MatchExact (v2.44) matches the whole path instead of the
 	// sub-tree. Required for a "/" rule, whose prefix form would also
 	// match the redirect's own target.
@@ -1360,6 +1364,7 @@ func mapPathRuleReqs(reqs []pathRuleReq, existing []storage.PathRule) ([]storage
 				}
 			}
 			pr.InsecureSkipVerify = r.InsecureSkipVerify
+			pr.UpstreamTLSServerName = r.UpstreamTLSServerName
 		}
 		out[i] = pr
 	}
@@ -1514,6 +1519,17 @@ type routeRequest struct {
 	// 1273-1275). A warn-log surfaces the normalisation so an
 	// operator typo doesn't silently persist.
 	InsecureSkipVerify *bool `json:"insecureSkipVerify,omitempty"`
+	// UpstreamTLSServerName (v2.60) sets the name Caddy presents in
+	// SNI and verifies the backend certificate against, so a pool
+	// addressed by IP can still be authenticated. Pointer for the
+	// same reason as InsecureSkipVerify above: nil preserves the
+	// stored value on PUT, and an explicit "" clears it. A plain
+	// string would make "clear it" indistinguishable from "I did
+	// not mention it", and an operator could never remove one.
+	//
+	// Normalised away on an http-only pool, where no transport.tls
+	// block is emitted and the value would be stored but never read.
+	UpstreamTLSServerName *string `json:"upstreamTlsServerName,omitempty"`
 	// UploadStreamingMode (Phase 4.5) flips the route into
 	// streaming-upload mode: WAF body inspection is skipped
 	// AND Caddy emits flush_interval:-1 so neither layer
@@ -1874,6 +1890,10 @@ type routeResponse struct {
 	// certificat upstream" toggle in the advanced TLS
 	// disclosure (commit 2).
 	InsecureSkipVerify bool `json:"insecureSkipVerify"`
+	// UpstreamTLSServerName (v2.60) — echoed on every GET, without
+	// omitempty, so a GET→PUT roundtrip carries it back instead of
+	// silently clearing it. "" means Caddy's default.
+	UpstreamTLSServerName string `json:"upstreamTlsServerName"`
 	// UploadStreamingMode (Phase 4.5) — echoed on every GET so
 	// the frontend toggle starts from the persisted value. No
 	// omitempty: the GET→PUT echo must carry the field even
@@ -2053,6 +2073,7 @@ func toResponse(r storage.Route) routeResponse {
 		},
 		CountryBlock:          toCountryBlockResp(r.CountryBlock),
 		InsecureSkipVerify:    r.InsecureSkipVerify,
+		UpstreamTLSServerName: r.UpstreamTLSServerName,
 		UploadStreamingMode:   r.UploadStreamingMode,
 		WAFDisableCRS:         r.WAFDisableCRS,
 		WAFExcludeRules:       emptyIntSliceIfNil(r.WAFExcludeRules),
@@ -2160,6 +2181,7 @@ func toPathRulesResp(rules []storage.PathRule) []pathRuleReq {
 				}
 			}
 			out[i].InsecureSkipVerify = pr.InsecureSkipVerify
+			out[i].UpstreamTLSServerName = pr.UpstreamTLSServerName
 		}
 	}
 	return out

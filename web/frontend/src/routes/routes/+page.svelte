@@ -167,7 +167,7 @@
 	// server takes the preserve-previous path (J.2 decision: PUT
 	// without healthCheck preserves the stored value). When true,
 	// we ship the complete 9-field block (full replacement).
-	type FormData = Omit<RouteRequest, 'healthCheck' | 'countryBlock' | 'insecureSkipVerify' | 'uploadStreamingMode' | 'wafDisableCRS' | 'wafExcludeRules' | 'wafExcludeTags' | 'wafTargetedExclusions' | 'wafCustomRules' | 'wafSecLang' | 'rateLimit' | 'errorPageTemplateId' | 'errorPageOverrides' | 'disabled' | 'cert_source' | 'cert_id' | 'ipFilter' | 'pathRules'> & {
+	type FormData = Omit<RouteRequest, 'healthCheck' | 'countryBlock' | 'insecureSkipVerify' | 'upstreamTlsServerName' | 'uploadStreamingMode' | 'wafDisableCRS' | 'wafExcludeRules' | 'wafExcludeTags' | 'wafTargetedExclusions' | 'wafCustomRules' | 'wafSecLang' | 'rateLimit' | 'errorPageTemplateId' | 'errorPageOverrides' | 'disabled' | 'cert_source' | 'cert_id' | 'ipFilter' | 'pathRules'> & {
 		healthCheck: HealthCheck;
 		// v2.14.3 — narrowed to a non-optional boolean, same
 		// pattern as insecureSkipVerify/uploadStreamingMode: the
@@ -189,6 +189,10 @@
 		// (preserve-on-omit semantic) is reapplied at
 		// payload-assembly time below.
 		insecureSkipVerify: boolean;
+		// v2.60 — same narrowing: the form holds a definite string
+		// ('' = Caddy's default), and the wire's optional-pointer
+		// semantic is reapplied at payload time.
+		upstreamTlsServerName: string;
 		// Phase 4.5 — same narrowing pattern as
 		// insecureSkipVerify: form holds a definite bool,
 		// payload re-introduces undefined for preserve-on-
@@ -409,6 +413,7 @@
 			// scheme transition so the on-screen + storage
 			// states stay aligned.
 			insecureSkipVerify: false,
+		upstreamTlsServerName: '',
 			// Phase 4.5 — strict default. Opt-in only: the
 			// toggle is visible in the WAF settings block and
 			// the operator must tick it explicitly to skip
@@ -1485,6 +1490,7 @@
 			// false here is a safety net rather than the
 			// expected path.
 			insecureSkipVerify: r.insecureSkipVerify ?? false,
+			upstreamTlsServerName: r.upstreamTlsServerName ?? '',
 			// Phase 4.5 — load the persisted streaming-mode
 			// state so the toggle on the form reflects what's
 			// actually saved. The API response is non-omitempty
@@ -1613,6 +1619,7 @@
 				// editing a route with an https path-pool and clicking Save
 				// would silently reset it.
 				insecureSkipVerify: rule.insecureSkipVerify,
+				upstreamTlsServerName: rule.upstreamTlsServerName ?? '',
 				// v2.45.3 — same reasoning as the pool above, which this
 				// block already warns about: the submit payload re-sends
 				// pathRules from formData, so a field not hydrated here
@@ -2544,6 +2551,12 @@
 		if (poolScheme !== 'https' && formData.insecureSkipVerify) {
 			formData.insecureSkipVerify = false;
 		}
+		// v2.60 — same reset for the server name: the backend
+		// normalises it away on an http pool, so leaving it in the
+		// form would display a value the next save silently drops.
+		if (poolScheme !== 'https' && formData.upstreamTlsServerName !== '') {
+			formData.upstreamTlsServerName = '';
+		}
 	});
 
 	// Per-row "private IP + https" hint. Recognises RFC 1918
@@ -2974,7 +2987,8 @@
 											weight: u.weight
 										})),
 										lbPolicy: rule.lbPolicy ?? 'round_robin',
-										insecureSkipVerify: !!rule.insecureSkipVerify
+										insecureSkipVerify: !!rule.insecureSkipVerify,
+										upstreamTlsServerName: (rule.upstreamTlsServerName ?? '').trim()
 									}
 								: {}),
 							...(rule.healthCheck ? { healthCheck: { ...rule.healthCheck } } : {}),
@@ -3036,6 +3050,10 @@
 			// always-ship pattern.
 			if (poolScheme === 'https') {
 				payload.insecureSkipVerify = formData.insecureSkipVerify;
+				// v2.60 — shipped even when empty, so clearing the field
+				// reaches the server: the API reads "" as an explicit
+				// clear and an absent key as "preserve what you have".
+				payload.upstreamTlsServerName = formData.upstreamTlsServerName.trim();
 			}
 			// Phase 4.5 — always ship uploadStreamingMode. No
 			// scheme-dependent self-heal applies (the toggle
@@ -4374,6 +4392,25 @@
 									/>
 									<p class="text-xs text-muted ml-6">
 										{language.current && t('routes.form.tlsAdvancedHelper')}
+									</p>
+								</div>
+								<!--
+									v2.60 — the TLS server name sits beside the
+									skip-verify checkbox because they answer the same
+									question in opposite directions: when the pool is
+									addressed by IP, one gives up on verifying and the
+									other says what to verify against.
+								-->
+								<div class="mt-3 flex flex-col gap-1">
+									<Input
+										id="route-upstream-tls-server-name"
+										label={language.current && t('routes.form.upstreamTlsServerNameLabel')}
+										placeholder={language.current && t('routes.form.upstreamTlsServerNamePlaceholder')}
+										bind:value={formData.upstreamTlsServerName}
+										data-testid="upstream-tls-server-name"
+									/>
+									<p class="text-xs text-muted">
+										{language.current && t('routes.form.upstreamTlsServerNameHelper')}
 									</p>
 								</div>
 							</details>
