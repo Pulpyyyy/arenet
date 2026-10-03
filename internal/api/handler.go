@@ -1927,6 +1927,12 @@ type routeResponse struct {
 	//   "unknown"   — HC disabled, OR at least one upstream
 	//                 unobserved (warm-up window) without any
 	//                 unhealthy signal yet
+	//   "not_monitored" — HC deliberately disabled on the route
+	//   "not_applicable" (v2.59) — the route proxies nothing, so
+	//                 there is no health to report. Today that is
+	//                 a redirecting route: no upstream, no probe,
+	//                 ever. Distinct from "unknown", which promises
+	//                 an answer once the warm-up window closes.
 	// See computeRouteAggregateHealth's docstring for the full
 	// precedence table.
 	AggregateStatus      string `json:"aggregateStatus"`

@@ -318,12 +318,16 @@
 			"withWAF": "Avec WAF"
 		},
 		"list": {
-			"filterPlaceholder": "Filtrer par hôte, alias, upstream…",
+			"filterPlaceholder": "Filtrer par hôte, alias, upstream, cible de redirection…",
+			"statusNotMonitored": "HC INACTIF",
+			"statusNotMonitoredTooltip": "Aucun health check actif sur cette route, donc aucun état d’upstream observé.",
+			"statusUnknownTooltip": "Health check activé, aucun signal reçu pour le moment (fenêtre de démarrage). Le badge se met à jour aux prochaines sondes.",
+			"statusNotApplicableTooltip": "Cette route ne relaie rien, elle n’a donc pas d’état d’upstream : elle répond elle-même la redirection.",
+			"postureInertTooltip": "Cette route ne relaie rien : aucune des gardes par route n’est appliquée à son trafic.",
 			"filterAriaLabel": "Filtrer les routes",
 			"tabAll": "Toutes",
 			"tabHealthy": "Saines",
 			"tabAlerts": "Alertes",
-			"tabPhase2Tooltip": "Phase 2 — nécessite un champ santé par route",
 			"colHost": "Hôte / chemin",
 			"colUpstream": "Upstream",
 			"colTLS": "TLS",

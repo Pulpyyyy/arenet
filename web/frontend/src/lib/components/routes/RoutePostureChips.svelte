@@ -20,12 +20,20 @@
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
 	import type { Route } from '$lib/api/types';
+	import { proxiesNothing } from '$lib/utils/route-gates';
 
 	interface Props {
 		route: Route;
 	}
 
 	let { route }: Props = $props();
+
+	// v2.59 — a route that proxies nothing (redirect, maintenance,
+	// disabled) has none of these gates in its emitted Caddy chain,
+	// so showing their stored values here was a claim about traffic
+	// that no handler backed. See lib/utils/route-gates.ts for the
+	// manager.go citations.
+	const inert = $derived(proxiesNothing(route));
 
 	const cb = $derived(route.countryBlock);
 	const geoActive = $derived(cb?.mode === 'allow' || cb?.mode === 'deny');
@@ -39,17 +47,25 @@
 
 	const rl = $derived(route.rateLimit ?? null);
 
-	const empty = $derived(route.wafMode === 'off' && !geoActive && !ipActive && rl === null);
+	const empty = $derived(
+		inert || (route.wafMode === 'off' && !geoActive && !ipActive && rl === null)
+	);
 </script>
 
-<div class="chips">
-	{#if route.wafMode === 'detect'}
-		<Badge variant="status-warn">{language.current && t('routes.list.wafDetect')}</Badge>
-	{:else if route.wafMode === 'block'}
-		<Badge variant="status-down">{language.current && t('routes.list.wafBlock')}</Badge>
+<div class="chips" data-testid="posture-chips-root">
+	{#if !inert}
+		<!-- The guard wraps BOTH arms deliberately. Putting `!inert`
+		     on the `detect` arm alone leaves the `block` arm live, so
+		     an inert route in block mode keeps the red chip — the
+		     exact bug this component is being fixed for. -->
+		{#if route.wafMode === 'detect'}
+			<Badge variant="status-warn">{language.current && t('routes.list.wafDetect')}</Badge>
+		{:else if route.wafMode === 'block'}
+			<Badge variant="status-down">{language.current && t('routes.list.wafBlock')}</Badge>
+		{/if}
 	{/if}
 
-	{#if geoActive}
+	{#if !inert && geoActive}
 		<span
 			class="cursor-help"
 			data-testid="posture-geo"
@@ -64,7 +80,7 @@
 		</span>
 	{/if}
 
-	{#if ipActive}
+	{#if !inert && ipActive}
 		<span
 			class="cursor-help"
 			data-testid="posture-ip"
@@ -79,7 +95,7 @@
 		</span>
 	{/if}
 
-	{#if rl !== null}
+	{#if !inert && rl !== null}
 		<span
 			class="cursor-help"
 			data-testid="posture-rate-limit"
@@ -91,7 +107,12 @@
 	{/if}
 
 	{#if empty}
-		<span class="text-muted">—</span>
+		{#if inert}
+			<span class="text-muted cursor-help" data-testid="posture-inert"
+				title={language.current && t('routes.list.postureInertTooltip')}>—</span>
+		{:else}
+			<span class="text-muted">—</span>
+		{/if}
 	{/if}
 </div>
 

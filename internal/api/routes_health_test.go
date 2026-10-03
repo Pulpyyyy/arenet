@@ -211,10 +211,47 @@ func TestComputeRouteAggregateHealth_SingleUpstreamUnhealthy(t *testing.T) {
 	}
 }
 
+func TestComputeRouteAggregateHealth_RedirectRouteNotApplicable(t *testing.T) {
+	// v2.59 — a redirecting route answers from Caddy itself and
+	// carries no upstream (storage permits the empty pool for it
+	// since v2.45.2). It used to fall into the zero-pool branch
+	// and come back "unknown", which the UI renders as "HC enabled
+	// but no signal yet (warm-up window)": a warm-up that can
+	// never close, on a route with neither HC nor backend.
+	//
+	// HealthCheck.Enabled is deliberately true here: even an
+	// operator who left the HC block on gets "not applicable",
+	// because the redirect state is what makes health meaningless,
+	// not the HC toggle.
+	r := storage.Route{
+		ID:       "r",
+		Host:     "old.example.com",
+		LBPolicy: "round_robin",
+		RedirectConfig: &storage.RedirectConfig{
+			Target: "https://new.example.com",
+		},
+		HealthCheck: storage.HealthCheck{Enabled: true},
+	}
+	got, healthy, total := computeRouteAggregateHealth(r, stubHCStatus{})
+	if got != routeStatusNotApplicable {
+		t.Errorf("status = %q, want %q (redirecting route)", got, routeStatusNotApplicable)
+	}
+	if healthy != 0 || total != 0 {
+		t.Errorf("counts = (%d, %d), want (0, 0)", healthy, total)
+	}
+}
+
 func TestComputeRouteAggregateHealth_EmptyUpstreams(t *testing.T) {
-	// Defensive: storage validation forbids empty pools, but
-	// the helper must not panic on the degenerate case. Total
-	// is 0; no point talking about "healthy/0".
+	// Defensive, and genuinely so: since v2.45.2 storage accepts
+	// an empty pool on a REDIRECTING route (covered above), so
+	// this branch now means "no upstream and no redirect either" —
+	// a shape no endpoint can produce. The helper must not panic
+	// on it. Total is 0; no point talking about "healthy/0".
+	//
+	// The comment here used to read "storage validation forbids
+	// empty pools", which stopped being true in v2.45.2 and would
+	// have sent the next reader looking for a guarantee that no
+	// longer exists.
 	r := storage.Route{
 		ID:        "r",
 		Host:      "h.example",

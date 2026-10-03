@@ -36,6 +36,19 @@ const (
 	// "HC inactif" label + tooltip for the deliberate-off case
 	// while keeping "unknown" for the genuine warm-up case.
 	routeStatusNotMonitored = "not_monitored"
+	// routeStatusNotApplicable (v2.59) — a route that proxies
+	// nothing has no health to report. A redirecting route is the
+	// case that exists today: it answers a 301/302 from Caddy
+	// itself, it carries no upstream (storage permits an empty pool
+	// for it since v2.45.2) and nothing will ever probe anything.
+	//
+	// It used to return routeStatusUnknown, which the UI renders as
+	// "HC enabled but no signal yet (warm-up window)" — a warm-up
+	// that can never end, on a route with no HC and no backend. The
+	// enum was lying, so every consumer of it lied too; fixing the
+	// frontend alone would have left the same wrong value on the
+	// wire for the next caller.
+	routeStatusNotApplicable = "not_applicable"
 )
 
 // computeRouteAggregateHealth derives the per-route health rollup
@@ -53,7 +66,10 @@ const (
 //      (the C13 gate: don't paint green or red on an upstream
 //      the operator chose not to monitor, regardless of any
 //      stale state the tracker might be carrying.)
-//   2. No upstreams (defensive — storage validation forbids it)  → "unknown"
+//   2. Route proxies nothing (redirect)             → "not_applicable"
+//      (no upstream by design, nothing to probe, ever. A route
+//      with no upstream and no redirect either — a shape no
+//      endpoint can produce — keeps the old "unknown" fallback.)
 //   3. unhealthyCount == total AND no warm-up        → "down"
 //      (every upstream observed AND every one unhealthy.)
 //   4. unhealthyCount > 0                            → "degraded"
@@ -74,6 +90,13 @@ const (
 // configured" (collapses to unknown).
 func computeRouteAggregateHealth(r storage.Route, status HCStatusReader) (string, int, int) {
 	total := len(r.Upstreams)
+	// v2.59 — a redirecting route is checked FIRST, and on the
+	// redirect itself rather than on the empty pool: the state is
+	// what makes health inapplicable, not the arithmetic. The
+	// zero-pool branch below stays a genuine defensive fallback.
+	if r.RedirectConfig != nil {
+		return routeStatusNotApplicable, 0, 0
+	}
 	if total == 0 {
 		return routeStatusUnknown, 0, 0
 	}

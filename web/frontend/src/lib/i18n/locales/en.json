@@ -318,12 +318,16 @@
 			"withWAF": "With WAF"
 		},
 		"list": {
-			"filterPlaceholder": "Filter by host, alias, upstream…",
+			"filterPlaceholder": "Filter by host, alias, upstream, redirect target…",
+			"statusNotMonitored": "HC INACTIVE",
+			"statusNotMonitoredTooltip": "No active health check on this route, so no upstream state is observed.",
+			"statusUnknownTooltip": "Health check enabled, no signal received yet (warm-up window). The badge updates on the next probes.",
+			"statusNotApplicableTooltip": "This route proxies nothing, so it has no upstream state: it answers the redirect itself.",
+			"postureInertTooltip": "This route proxies nothing, so none of the per-route gates are applied to its traffic.",
 			"filterAriaLabel": "Filter routes",
 			"tabAll": "All",
 			"tabHealthy": "Healthy",
 			"tabAlerts": "Alerts",
-			"tabPhase2Tooltip": "Phase 2 — needs per-route health field",
 			"colHost": "Host / path",
 			"colUpstream": "Upstream",
 			"colTLS": "TLS",

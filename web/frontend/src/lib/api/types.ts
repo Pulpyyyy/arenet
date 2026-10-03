@@ -226,7 +226,21 @@ export interface Route {
 	 * `computeRouteAggregateHealth` docstring for the full
 	 * precedence table.
 	 */
-	aggregateStatus: 'healthy' | 'degraded' | 'down' | 'unknown' | 'not_monitored';
+	aggregateStatus:
+		| 'healthy'
+		| 'degraded'
+		| 'down'
+		| 'unknown'
+		| 'not_monitored'
+		/**
+		 * v2.59 — the route proxies nothing, so it has no health to
+		 * report. Today that is a redirecting route: it answers from
+		 * Caddy itself, carries no upstream, and nothing will ever
+		 * probe anything. It used to arrive as 'unknown', which the
+		 * list renders as a warm-up window — one that can never
+		 * close on a route with neither HC nor backend.
+		 */
+		| 'not_applicable';
 	/**
 	 * Step W — per-route country-block gate state.
 	 * Always present (storage zero-value reads back as
