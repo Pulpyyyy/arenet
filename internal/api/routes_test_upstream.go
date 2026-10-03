@@ -118,6 +118,19 @@ const (
 type testUpstreamRequest struct {
 	URL                string `json:"url"`
 	InsecureSkipVerify bool   `json:"insecureSkipVerify,omitempty"`
+	// UpstreamTLSServerName (v2.60.1) mirrors the route field of the
+	// same name, and exists because v2.60.0 shipped without it: the
+	// probe built its own tls.Config, left ServerName empty, and Go
+	// then verified the certificate against the DIAL ADDRESS. On a
+	// pool addressed by IP that is always a failure —
+	//
+	//   x509: cannot validate certificate for 194.163.129.255
+	//   because it doesn't contain any IP SANs
+	//
+	// — reported for a configuration that works, which is the worst
+	// kind of diagnostic: one that sends the operator to fix
+	// something that is not broken.
+	UpstreamTLSServerName string `json:"upstreamTlsServerName,omitempty"`
 	// HostHeader (v2.55) is the Host the probe should send — the route's
 	// own host, or whatever the health check overrides it with.
 	//
@@ -232,7 +245,11 @@ func (h *Handler) testUpstream(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), testUpstreamDeadline)
 	defer cancel()
 
-	resp := probeUpstream(ctx, parsed, req.InsecureSkipVerify, req.HostHeader)
+	resp := probeUpstream(ctx, parsed, probeOpts{
+		InsecureSkipVerify: req.InsecureSkipVerify,
+		HostHeader:         req.HostHeader,
+		TLSServerName:      req.UpstreamTLSServerName,
+	})
 
 	h.logger.Info("test-upstream probed",
 		"url", parsed.Redacted(),
@@ -262,7 +279,24 @@ func (h *Handler) testUpstream(w http.ResponseWriter, r *http.Request) {
 // probeUpstream performs the actual outbound probe. Split
 // from the HTTP handler so tests can drive it directly
 // without a router.
-func probeUpstream(ctx context.Context, target *url.URL, insecureSkipVerify bool, hostHeader string) testUpstreamResponse {
+// probeOpts carries the route's TLS and Host posture into the probe.
+// It is a struct rather than three trailing parameters because two of
+// them are strings that sit next to each other — hostHeader and
+// tlsServerName — and a positional mix-up between them would produce a
+// probe that passes while the real proxy fails, or the reverse.
+type probeOpts struct {
+	InsecureSkipVerify bool
+	// HostHeader is the Host the probe sends (v2.55).
+	HostHeader string
+	// TLSServerName is the name presented in SNI and verified against
+	// the backend's certificate (v2.60.1). Empty leaves Go's default,
+	// which derives it from the dial address.
+	TLSServerName string
+}
+
+func probeUpstream(ctx context.Context, target *url.URL, opts probeOpts) testUpstreamResponse {
+	insecureSkipVerify := opts.InsecureSkipVerify
+	hostHeader := opts.HostHeader
 	resp := testUpstreamResponse{}
 
 	// TLS handshake timing — captured via the
@@ -284,6 +318,11 @@ func probeUpstream(ctx context.Context, target *url.URL, insecureSkipVerify bool
 		// drift from surprising us.
 		MinVersion:         tls.VersionTLS12,
 		InsecureSkipVerify: insecureSkipVerify, //nolint:gosec // operator-controlled, matches saved route TLS posture
+		// v2.60.1 — ServerName sets BOTH the SNI sent and the name the
+		// certificate is verified against, which is what makes a probe
+		// of an IP-addressed pool mean the same thing as the traffic
+		// Caddy will send. Empty keeps Go's default.
+		ServerName: opts.TLSServerName,
 	}
 
 	transport := &http.Transport{

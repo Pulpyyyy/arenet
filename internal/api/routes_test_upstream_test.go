@@ -45,7 +45,7 @@ func TestProbeUpstream_HTTP_ReachableWithStatusAndPreview(t *testing.T) {
 	defer srv.Close()
 
 	u, _ := url.Parse(srv.URL)
-	got := probeUpstream(context.Background(), u, false, "")
+	got := probeUpstream(context.Background(), u, probeOpts{})
 
 	if !got.Reachable {
 		t.Errorf("Reachable = false; want true (200 OK)")
@@ -82,7 +82,7 @@ func TestProbeUpstream_HTTP_PreservesNonSuccessStatusAsReachable(t *testing.T) {
 			}))
 			defer srv.Close()
 			u, _ := url.Parse(srv.URL)
-			got := probeUpstream(context.Background(), u, false, "")
+			got := probeUpstream(context.Background(), u, probeOpts{})
 			if !got.Reachable {
 				t.Errorf("Reachable = false on %d; want true (handshake completed)", sc)
 			}
@@ -105,7 +105,7 @@ func TestProbeUpstream_HTTP_DoesNotFollowRedirects(t *testing.T) {
 	defer srv.Close()
 
 	u, _ := url.Parse(srv.URL)
-	got := probeUpstream(context.Background(), u, false, "")
+	got := probeUpstream(context.Background(), u, probeOpts{})
 	if got.StatusCode != 301 {
 		t.Errorf("StatusCode = %d; want 301 (no auto-follow)", got.StatusCode)
 	}
@@ -124,7 +124,7 @@ func TestProbeUpstream_HTTPS_CertCaptured_StrictRejectsSelfSigned(t *testing.T) 
 	// Strict mode: insecureSkipVerify=false. The httptest
 	// TLS server uses a self-signed cert by default, so
 	// the probe must FAIL verification.
-	got := probeUpstream(context.Background(), u, false, "")
+	got := probeUpstream(context.Background(), u, probeOpts{})
 	if got.Reachable {
 		t.Errorf("Reachable = true on strict probe of self-signed; want false")
 	}
@@ -151,7 +151,7 @@ func TestProbeUpstream_HTTPS_InsecureSkipVerify_AcceptsSelfSigned(t *testing.T) 
 	// insecureSkipVerify=true → the self-signed httptest
 	// cert is accepted, handshake completes, GET / returns
 	// 200 + the body.
-	got := probeUpstream(context.Background(), u, true, "")
+	got := probeUpstream(context.Background(), u, probeOpts{InsecureSkipVerify: true})
 	if !got.Reachable {
 		t.Errorf("Reachable = false with insecureSkipVerify=true; want true (got %+v)", got)
 	}
@@ -182,7 +182,7 @@ func TestProbeUpstream_BodyPreviewRespectsCap(t *testing.T) {
 	}))
 	defer srv.Close()
 	u, _ := url.Parse(srv.URL)
-	got := probeUpstream(context.Background(), u, false, "")
+	got := probeUpstream(context.Background(), u, probeOpts{})
 	// Cap is 200 runes; ASCII so chars == bytes.
 	if got.BodyPreview == "" {
 		t.Fatal("BodyPreview empty; want trimmed content")
@@ -201,7 +201,7 @@ func TestProbeUpstream_BodyPreviewStripsControlChars(t *testing.T) {
 	}))
 	defer srv.Close()
 	u, _ := url.Parse(srv.URL)
-	got := probeUpstream(context.Background(), u, false, "")
+	got := probeUpstream(context.Background(), u, probeOpts{})
 	for _, r := range got.BodyPreview {
 		if r < 0x20 && r != ' ' { // tab collapses to space
 			t.Errorf("control char 0x%02x leaked into BodyPreview: %q", r, got.BodyPreview)
@@ -229,7 +229,7 @@ func TestProbeUpstream_Timeout_ReturnsHumanError(t *testing.T) {
 	u, _ := url.Parse(srv.URL)
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	got := probeUpstream(ctx, u, false, "")
+	got := probeUpstream(ctx, u, probeOpts{})
 	if got.Reachable {
 		t.Error("Reachable = true on timeout; want false")
 	}
@@ -246,7 +246,7 @@ func TestProbeUpstream_ConnectionRefused_HumanError(t *testing.T) {
 	srv.Close()
 
 	u, _ := url.Parse(addr)
-	got := probeUpstream(context.Background(), u, false, "")
+	got := probeUpstream(context.Background(), u, probeOpts{})
 	if got.Reachable {
 		t.Error("Reachable = true on refused conn; want false")
 	}

@@ -995,6 +995,13 @@ export interface TestHealthCheckRequest {
 	/** The route's primary host, used as the probe Host unless overridden. */
 	routeHost?: string;
 	insecureSkipVerify?: boolean;
+	/**
+	 * v2.60.1 — mirrors the route field so the probe verifies the
+	 * certificate against the same name the emitted config does.
+	 * Without it Go uses the dial address, and an IP-addressed pool
+	 * always failed the probe while the real proxy worked.
+	 */
+	upstreamTlsServerName?: string;
 	/** v2.56.2 — recorded in the audit row's structured target. */
 	routeId?: string;
 }
@@ -1041,6 +1048,13 @@ export interface TestHealthCheckResponse {
 export interface TestUpstreamRequest {
 	url: string;
 	insecureSkipVerify?: boolean;
+	/**
+	 * v2.60.1 — mirrors the route field so the probe verifies the
+	 * certificate against the same name the emitted config does.
+	 * Without it Go uses the dial address, and an IP-addressed pool
+	 * always failed the probe while the real proxy worked.
+	 */
+	upstreamTlsServerName?: string;
 	/**
 	 * v2.55 — the Host to probe with, so the test asks the question a
 	 * visitor asks. Without it the probe carried the upstream address
