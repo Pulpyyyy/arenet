@@ -19,9 +19,30 @@ const config: Config = {
 	content: ['./src/**/*.{html,js,ts,svelte}'],
 	theme: {
 		extend: {
+			// v2.58.4 — `base` lives here and NOT in `colors`, on purpose.
+			//
+			// In `colors` it generated `.text-base { color: var(--bg-base) }`
+			// alongside the font-size utility of the same name. So
+			// `class="text-base"` — which every developer writes for a 1rem
+			// font — silently painted the text the colour of the page
+			// background. Invisible in light AND dark, which is what made it
+			// hard to recognise as a colour bug at all.
+			//
+			// Ten of the eleven `text-base` call sites happened to carry an
+			// explicit `text-primary` after it and were saved by luck of the
+			// cascade. Two headings in Settings did not, and an operator
+			// reported them unreadable.
+			//
+			// Only `bg-base` is ever wanted (17 call sites); no `border-base`,
+			// `ring-base` or any other `-base` utility is used anywhere. So
+			// the token belongs to backgroundColor alone, and `text-base`
+			// goes back to meaning a font size.
+			backgroundColor: {
+				base: 'var(--bg-base)'
+			},
 			colors: {
-				// Background surfaces (§2.1)
-				base: 'var(--bg-base)',
+				// Background surfaces (§2.1) — `base` is in backgroundColor
+				// above; see the note there.
 				sidebar: 'var(--bg-sidebar)',
 				elevated: 'var(--bg-elevated)',
 				surface: 'var(--bg-surface)',
