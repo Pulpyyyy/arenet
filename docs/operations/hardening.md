@@ -201,6 +201,49 @@ automatic polling carries `X-Arenet-Background: 1`, and the server still
 enforces the lock on it but does not refresh the session. Nothing to
 configure — just don't expect an open, untouched tab to stay unlocked.
 
+## 12. Know what the access log keeps
+
+The access log records every request's headers. Three layers decide what of
+that reaches disk, and the gaps between them are worth knowing:
+
+| Redacted by | What |
+| ----------- | ---- |
+| Caddy, always | `Cookie`, `Set-Cookie`, `Authorization`, `Proxy-Authorization` |
+| Arenet, always (v2.58.4) | any header whose **name** contains `key`, `token`, `secret`, `password`, `credential` or `signature`, case-insensitive, in requests **and** responses |
+| Arenet, if you list them | query-string parameters (Settings → Access log) |
+
+The middle row exists because the first is narrower than it looks. Caddy
+redacts four header names; a homelab authenticates with names it has never
+heard of. An operator's log held a live Dolibarr key under `Dolapikey`, one
+field away from a `Cookie` that had been dutifully replaced.
+
+Matching is on the name, by substring, and the value is replaced rather than
+the header removed — so you still see *that* a caller presented an API key,
+which is what makes "the backend started refusing them" diagnosable, without
+seeing the key.
+
+Two consequences to accept rather than discover:
+
+- **A header named after a secret is redacted even when it is not one.**
+  `X-Monkey-Business` ends with `key`. No substring rule catches `Dolapikey`
+  — one word, no separator — while sparing it. Losing a field of a log line
+  is cheaper than leaving a credential on disk through every rotation.
+- **`api` and `auth` are deliberately NOT patterns.** `Api-Version` is not a
+  secret, and `X-authentik-username` is an identity you want to read.
+  Credentials spelled with "api" carry "key" or "token" anyway.
+
+```bash
+# What is actually on disk right now — check before trusting the above.
+sudo grep -oE '"[A-Za-z-]*[Kk]ey"[^,]*' /var/log/arenet/access.log | sort -u | head
+# expected: every match reads "REDACTED"
+```
+
+If you find a plaintext credential from a version before v2.58.4, **rotate
+it**: the log is rolled and kept, and it may be in a backup or shipped to a
+log collector. Upgrading stops new ones; it does not rewrite history.
+
+---
+
 ---
 
 ## Quick scorecard

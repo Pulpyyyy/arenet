@@ -24,6 +24,7 @@ import (
 
 	"github.com/caddyserver/caddy/v2"
 
+	"github.com/barto95100/arenet/internal/logredact"
 	"github.com/barto95100/arenet/internal/metrics"
 
 	"github.com/barto95100/arenet/internal/storage"
@@ -129,22 +130,47 @@ func TestAccessLogRedact_QuotesOperatorInput(t *testing.T) {
 	}
 }
 
-// An empty list emits no filter, so the encoder stays the bare `json` it
-// was before v2.56.
-func TestAccessLogRedact_EmptyListLeavesTheEncoderAlone(t *testing.T) {
+// An empty query-param list emits no URI filter — but the encoder is no
+// longer the bare `json` it was in v2.56.
+//
+// v2.58.4 deliberately ended that: header redaction is unconditional, so the
+// filter encoder is always present once the access log is on. The old
+// assertion ("no filter at all") was a real non-regression for the v2.56
+// feature, which was opt-in by its list. A secret in a header is not
+// something to opt into protecting, so the contract changed rather than
+// drifted — and this test now pins the new one instead of being deleted,
+// including the half that still holds: no URI filter without a list.
+func TestAccessLogRedact_EmptyListEmitsNoURIFilterButStillRedactsHeaders(t *testing.T) {
 	if f := buildURIRedactFilter(nil); f != nil {
-		t.Errorf("a filter was emitted for an empty list: %v", f)
+		t.Errorf("a URI filter was emitted for an empty list: %v", f)
 	}
 	cfg := storage.AccessLogConfig{
 		Enabled: true, RollSizeMB: 10, RollKeep: 5, RedactQueryParams: []string{},
 	}
-	logging := buildAccessLogging(cfg, "/tmp/a.log")
-	raw, _ := json.Marshal(logging)
-	if strings.Contains(string(raw), "filter") {
-		t.Errorf("a filter encoder was emitted with no parameters to mask: %s", raw)
+	raw, err := json.Marshal(buildAccessLogging(cfg, "/tmp/a.log"))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
-	if !strings.Contains(string(raw), `"format":"json"`) {
-		t.Errorf("the plain json encoder is gone: %s", raw)
+	var full map[string]any
+	if err := json.Unmarshal(raw, &full); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	logs, _ := full["logs"].(map[string]any)
+	enc, _ := logs[accessLogName].(map[string]any)["encoder"].(map[string]any)
+	fields, _ := enc["fields"].(map[string]any)
+
+	if _, present := fields[accessLogURIField]; present {
+		t.Errorf("a URI filter was emitted with no parameters to mask: %s", raw)
+	}
+	for _, want := range []string{accessLogReqHeadersField, accessLogRespHeadersField} {
+		if _, present := fields[want]; !present {
+			t.Errorf("%s has no filter even though header redaction is unconditional: %s",
+				want, raw)
+		}
+	}
+	// The json encoder is still in there, wrapped rather than replaced.
+	if wrap, _ := enc["wrap"].(map[string]any); wrap["format"] != "json" {
+		t.Errorf("the json encoder is no longer the wrapped format: %s", raw)
 	}
 }
 
@@ -197,5 +223,115 @@ func TestAccessLogRedact_LoadsCleanly(t *testing.T) {
 	}
 	if err := caddy.Validate(&parsed); err != nil {
 		t.Fatalf("caddy.Validate with the redaction filter: %v\n%s", err, raw)
+	}
+}
+
+// v2.58.4 — secret-looking request AND response headers are redacted in the
+// access log, by an Arenet filter module.
+//
+// An operator's access log held a live Dolibarr API key under `Dolapikey`,
+// one field away from a `Cookie` that Caddy had replaced with REDACTED.
+// Caddy redacts exactly four header names of its own accord; everything else
+// is written verbatim, and homelab APIs authenticate with names it has never
+// heard of.
+//
+// This asserts the wiring, which is where a secret escapes: the filter has to
+// be named on both header fields, with the short name Caddy expects, and the
+// whole thing has to survive Caddy's own provisioning — a filter module that
+// does not resolve leaves the field unfiltered WITHOUT failing validation.
+// accessLogRoutes is the minimal route the log tests need: one host, one
+// backend. Shared so a change to the shape lands in one place.
+func accessLogRoutes() []storage.Route {
+	return []storage.Route{{
+		ID: "r1", Host: "app.local",
+		Upstreams: []storage.Upstream{{URL: "http://127.0.0.1:9000", Weight: 1}},
+		LBPolicy:  storage.LBPolicyRoundRobin,
+	}}
+}
+
+func TestAccessLog_RedactsSecretHeaders_BothDirections(t *testing.T) {
+	metrics.SetRegistry(metrics.NewRegistry())
+
+	cfg := storage.AccessLogConfig{
+		Enabled: true, RollSizeMB: 10, RollKeep: 5,
+	}
+	raw, err := buildConfigJSON(accessLogRoutes(), buildOpts{
+		DevMode: true, AccessLog: cfg, AccessLogPath: "/tmp/arenet-hdr-test.log",
+	})
+	if err != nil {
+		t.Fatalf("buildConfigJSON: %v", err)
+	}
+
+	var full map[string]any
+	if err := json.Unmarshal(raw, &full); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	logs, _ := full["logging"].(map[string]any)["logs"].(map[string]any)
+	sink, ok := logs[accessLogName].(map[string]any)
+	if !ok {
+		t.Fatalf("no %q sink in the emitted config:\n%s", accessLogName, raw)
+	}
+	enc, _ := sink["encoder"].(map[string]any)
+	if got := enc["format"]; got != "filter" {
+		t.Fatalf("encoder format = %v; want filter — header redaction is unconditional, so "+
+			"the bare json encoder can no longer appear once the log is on", got)
+	}
+	fields, _ := enc["fields"].(map[string]any)
+
+	for _, field := range []string{accessLogReqHeadersField, accessLogRespHeadersField} {
+		f, ok := fields[field].(map[string]any)
+		if !ok {
+			t.Errorf("%s carries no filter; a secret in that table would be written "+
+				"verbatim. fields=%v", field, fields)
+			continue
+		}
+		if got := f["filter"]; got != logredact.FilterName {
+			t.Errorf("%s filter = %v; want %q", field, got, logredact.FilterName)
+		}
+	}
+
+	// And Caddy has to be able to load it. A filter module that does not
+	// resolve leaves the field unfiltered without failing anything, which
+	// is the quiet way this feature would stop working.
+	var parsed caddy.Config
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("unmarshal into caddy.Config: %v", err)
+	}
+	if err := caddy.Validate(&parsed); err != nil {
+		t.Fatalf("caddy.Validate rejected the access-log config: %v\n\nThis pins that %q "+
+			"resolves and provisions. Config:\n%s", err, logredact.ModuleID, raw)
+	}
+}
+
+// The URI redaction from v2.56 still works beside it: two filters on three
+// fields of one encoder.
+func TestAccessLog_HeaderAndURIRedactionCoexist(t *testing.T) {
+	metrics.SetRegistry(metrics.NewRegistry())
+
+	raw, err := buildConfigJSON(accessLogRoutes(), buildOpts{
+		DevMode: true,
+		AccessLog: storage.AccessLogConfig{
+			Enabled: true, RollSizeMB: 10, RollKeep: 5,
+			RedactQueryParams: storage.DefaultRedactQueryParams(),
+		},
+		AccessLogPath: "/tmp/arenet-hdr-test2.log",
+	})
+	if err != nil {
+		t.Fatalf("buildConfigJSON: %v", err)
+	}
+	var full map[string]any
+	if err := json.Unmarshal(raw, &full); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	logs, _ := full["logging"].(map[string]any)["logs"].(map[string]any)
+	enc, _ := logs[accessLogName].(map[string]any)["encoder"].(map[string]any)
+	fields, _ := enc["fields"].(map[string]any)
+
+	for _, want := range []string{
+		accessLogURIField, accessLogReqHeadersField, accessLogRespHeadersField,
+	} {
+		if _, ok := fields[want]; !ok {
+			t.Errorf("%s lost its filter when the other was configured; fields=%v", want, fields)
+		}
 	}
 }

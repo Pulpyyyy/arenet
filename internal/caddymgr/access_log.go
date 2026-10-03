@@ -22,6 +22,8 @@ import (
 	"strings"
 
 	"github.com/barto95100/arenet/internal/storage"
+
+	"github.com/barto95100/arenet/internal/logredact"
 )
 
 // v2.50 — the HTTP access log, emitted so CrowdSec can parse it.
@@ -72,6 +74,14 @@ type accessLogWriter struct {
 // Caddy addresses a nested field with `>`, and the access log's shape is
 // {"request":{"uri":"…"}}.
 const accessLogURIField = "request>uri"
+
+// The two header tables the access log writes. Caddy nests the request's
+// under `request`, and puts the response's at the top level — the shape an
+// operator sees in a log line, not a symmetry we chose.
+const (
+	accessLogReqHeadersField  = "request>headers"
+	accessLogRespHeadersField = "resp_headers"
+)
 
 // redactPlaceholder is what replaces a masked value. Spelled like the
 // Cookie header Caddy already redacts, so an operator reading a line
@@ -179,12 +189,24 @@ func buildAccessLogging(cfg storage.AccessLogConfig, path string) map[string]any
 	// v2.56 — wrap the JSON encoder in a filter when there is something
 	// to mask. With no list the encoder stays the bare `json` it was, so
 	// the emitted config is unchanged for anyone who clears it.
+	//
+	// v2.58.4 — the header filter is unconditional, so the encoder is now
+	// always the `filter` form once the access log is on. Before this, an
+	// operator who cleared the query-param list got the bare `json`
+	// encoder; that non-regression was deliberate then and is gone on
+	// purpose now, because a secret in a header is not something to opt
+	// into protecting.
+	fields := map[string]any{
+		accessLogReqHeadersField:  map[string]any{"filter": logredact.FilterName},
+		accessLogRespHeadersField: map[string]any{"filter": logredact.FilterName},
+	}
 	if filter := buildURIRedactFilter(cfg.RedactQueryParams); filter != nil {
-		sink.Encoder = map[string]any{
-			"format": "filter",
-			"wrap":   map[string]any{"format": "json"},
-			"fields": map[string]any{accessLogURIField: filter},
-		}
+		fields[accessLogURIField] = filter
+	}
+	sink.Encoder = map[string]any{
+		"format": "filter",
+		"wrap":   map[string]any{"format": "json"},
+		"fields": fields,
 	}
 	return map[string]any{"logs": map[string]any{accessLogName: sink}}
 }
