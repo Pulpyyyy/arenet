@@ -46,15 +46,34 @@ import type {
 
 /** Three-column layout: FQDN → Caddy hub → BackendCluster. The
  *  cluster column was 900px in the four-column service view; with
- *  the consumer column removed (C6b-i) everything shifts left,
- *  the canvas occupies 0..800 horizontally instead of 0..900. */
-const COL_X = {
+ *  the consumer column removed (C6b-i) everything shifted left.
+ *
+ *  The columns were 400 px apart until the operator pointed out how
+ *  much empty canvas sat between them: an FQDN card is FQDN_WIDTH
+ *  (200 px) wide, so a 400 px pitch left 200 px of nothing before
+ *  the hub. 280 keeps 80 px of breathing room on each side of the
+ *  hub card — which is CSS-sized, NOT laid out from a constant here
+ *  (buildCaddyNode sets x/y only), so this pitch is the one layout
+ *  number that cannot be checked by arithmetic alone. */
+export const COL_X = {
         FQDN: 0,
-        CADDY: 400,
-        BACKEND: 800,
+        CADDY: 280,
+        BACKEND: 560,
 } as const;
 
-const ROW_SPACING_Y = 150;
+/** Vertical gap inserted between two stacked rows, on top of each
+ *  row's own height (see computeStackYsForHeights).
+ *
+ *  Was 150 px from the first three-column layout through v2.58, when
+ *  rows were taller. Against a 70 px FQDN_HEIGHT card that is more
+ *  than twice as much air as content, which is exactly what the
+ *  operator saw on a canvas of a dozen routes. 56 px still reads as
+ *  "a different route" — it is ~9× UPSTREAM_GAP_Y, the gap between
+ *  two cards INSIDE one cluster — while fitting ~2.7× more rows on
+ *  screen. Safe to shrink because no edge carries a mid-span label:
+ *  AnimatedFlowEdge draws the stroke and its animation, nothing
+ *  else, so tighter rows cannot collide with edge text. */
+export const ROW_SPACING_Y = 56;
 
 // Col-0 height model (Sujet 1 Phase 3.b). The FQDN node height
 // is empirically ~70 px (3 text rows at 12-13 px font + 10 px
@@ -90,7 +109,7 @@ const ROW_SPACING_Y = 150;
 const Z_ROUTE_GROUP = 0; // chrome, behind everything it surrounds
 const Z_CARD = 1; // FQDN + alias cards
 
-const FQDN_HEIGHT = 70;
+export const FQDN_HEIGHT = 70;
 const ALIAS_HEIGHT = 44;
 const FQDN_TO_ALIAS_GAP = 16;
 const ALIAS_TO_ALIAS_GAP = 8;

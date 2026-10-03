@@ -26,7 +26,7 @@
 //     active aliases emit edges, sort preserved end-to-end.
 
 import { describe, it, expect } from 'vitest';
-import { buildTopologyGraph } from './_layout';
+import { buildTopologyGraph, FQDN_HEIGHT, ROW_SPACING_Y } from './_layout';
 import type {
 	AliasNodeData,
 	FlowEdgeData,
@@ -940,7 +940,23 @@ describe('buildTopologyGraph — alias integration', () => {
 		const c1 = nodes.find((n) => n.id === 'cluster-r1')!;
 		const c2 = nodes.find((n) => n.id === 'cluster-r2')!;
 		const gap = c2.position.y - (c1.position.y + (c1.height ?? 0));
-		expect(gap).toBe(150); // ROW_SPACING_Y, uniform stacker restored
+		// v2.59 — asserted against the constant, not against 150. The
+		// property under test is "the stacker is uniform"; the pitch
+		// itself is a visual-density decision that moved once (150 →
+		// 56) and may move again. A literal here failed the change
+		// for no reason and told us nothing about the stacker.
+		expect(gap).toBe(ROW_SPACING_Y);
+	});
+
+	it('the row pitch leaves less air than content — the canvas is not mostly empty', () => {
+		// v2.59 — the decision the previous test can no longer hold,
+		// now that it reads the constant: the gap BETWEEN two rows
+		// must stay smaller than the card it separates. At 150 px
+		// against a 70 px FQDN card the canvas was more than two
+		// thirds empty vertically, which is what the operator saw
+		// and reported. This assertion fails on any future bump
+		// past FQDN_HEIGHT; it is the intent, not the number.
+		expect(ROW_SPACING_Y).toBeLessThan(FQDN_HEIGHT);
 	});
 
 	// -------------------------------------------------------
