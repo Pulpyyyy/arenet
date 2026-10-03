@@ -110,7 +110,30 @@ func validateUpstreamURL(s string) error {
 // existing message with the row index so operators can locate the
 // offending pool element in a multi-upstream payload.
 func validateUpstreamPool(pool []upstreamReq) error {
+	return validateUpstreamPoolAllowingEmpty(pool, false)
+}
+
+// validateUpstreamPoolAllowingEmpty is validateUpstreamPool with the
+// "at least one entry" rule made conditional.
+//
+// v2.58.4 — a redirecting route proxies nothing, so demanding a backend for
+// it asks the operator to invent an address that will never be dialled.
+// v2.45.2 established that and fixed it in two of the three places that
+// enforce it: storage (routes.go, `len(r.Upstreams) == 0 && r.RedirectConfig
+// == nil`) and the form (+page.svelte, `needsUpstream = stateChoice !==
+// 'redirect'`). This layer, sitting between them, kept refusing — so the form
+// let the operator save and the API answered 400 "upstreams must contain at
+// least one entry", a message they could not act on because the field is
+// deliberately hidden for a redirect.
+//
+// An empty pool is still the ONLY thing the exemption covers: entries that
+// are present are validated exactly as before, so a redirecting route with a
+// malformed upstream is still rejected.
+func validateUpstreamPoolAllowingEmpty(pool []upstreamReq, allowEmpty bool) error {
 	if len(pool) == 0 {
+		if allowEmpty {
+			return nil
+		}
 		return errors.New("upstreams must contain at least one entry")
 	}
 	for i, u := range pool {
