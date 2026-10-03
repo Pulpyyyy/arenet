@@ -208,6 +208,7 @@ function makeRoute(overrides: Partial<Route> = {}): Route {
 		// exercising the disclosure / toggle override via the
 		// partial Route overrides.
 		insecureSkipVerify: false,
+		upstreamTlsServerName: '',
 		// Phase 4.5 — strict default; tests that exercise the
 		// streaming toggle override via the partial Route
 		// overrides parameter.
@@ -5482,5 +5483,112 @@ describe('Routes page — a redirecting route reads as a redirect', () => {
 		expect(byId('total')?.textContent).toContain('2');
 		expect(byId('active')?.textContent).toContain('1');
 		expect(byId('waf')?.textContent).toContain('1');
+	});
+});
+
+// -----------------------------------------------------------------
+// v2.60 — the upstream TLS server name.
+//
+// It exists so a pool addressed by IP can still be authenticated,
+// which until now cost either an invisible /etc/hosts pin on the
+// Arenet host or turning certificate verification off. The pin, left
+// out by one step during a DNS cutover, put Arenet in a self-proxy
+// loop in production on 2026-10-03 — so this field's whole value is
+// that the backend address and its identity are both on screen.
+// -----------------------------------------------------------------
+describe('Routes page — upstream TLS server name', () => {
+	function firstURL(): HTMLInputElement {
+		return upstreamURLInputs()[0];
+	}
+
+	it('is offered only on an https pool, and disappears with the scheme', async () => {
+		render(Page);
+		await openCreateForm();
+		await userEvent.clear(firstURL());
+		await userEvent.type(firstURL(), 'https://10.0.0.5');
+		await tick();
+		expect(screen.getByTestId('upstream-tls-server-name')).toBeInTheDocument();
+
+		await userEvent.clear(firstURL());
+		await userEvent.type(firstURL(), 'http://10.0.0.5');
+		await tick();
+		expect(screen.queryByTestId('upstream-tls-server-name')).not.toBeInTheDocument();
+	});
+
+	it('ships the name in the POST payload on an https pool', async () => {
+		apiMock.createRoute.mockResolvedValue(makeRoute());
+		render(Page);
+		await openCreateForm();
+		await userEvent.type(hostInput(), 'forum.example.com');
+		await userEvent.clear(firstURL());
+		await userEvent.type(firstURL(), 'https://194.163.129.255');
+		await tick();
+		await userEvent.type(screen.getByTestId('upstream-tls-server-name'), 'forum.example.com');
+		await tick();
+		await userEvent.click(screen.getByRole('button', { name: /^Create$/i }));
+		await tick();
+
+		expect(apiMock.createRoute).toHaveBeenCalledTimes(1);
+		const payload = apiMock.createRoute.mock.calls[0][0] as Record<string, unknown>;
+		expect(payload.upstreamTlsServerName).toBe('forum.example.com');
+	});
+
+	it('omits the name from the payload on an http-only pool', async () => {
+		// The server normalises it away there, so sending it would only
+		// invite the two layers to disagree.
+		apiMock.createRoute.mockResolvedValue(makeRoute());
+		render(Page);
+		await openCreateForm();
+		await userEvent.type(hostInput(), 'plain.example.com');
+		await userEvent.clear(firstURL());
+		await userEvent.type(firstURL(), 'http://10.0.0.10:8123');
+		await tick();
+		await userEvent.click(screen.getByRole('button', { name: /^Create$/i }));
+		await tick();
+
+		const payload = apiMock.createRoute.mock.calls[0][0] as Record<string, unknown>;
+		expect('upstreamTlsServerName' in payload).toBe(false);
+	});
+
+	it('loads a stored name back into the form when editing', async () => {
+		// The hydration gap this guards: a field absent from openEdit is
+		// wiped by the next save, silently.
+		apiMock.listRoutes.mockResolvedValue([
+			makeRoute({
+				id: 'r-sni',
+				host: 'forum.example.com',
+				upstreams: [{ url: 'https://194.163.129.255', weight: 1 }],
+				upstreamTlsServerName: 'forum.example.com'
+			})
+		]);
+		render(Page);
+		const row = (await screen.findByText('forum.example.com')).closest('tr')!;
+		await userEvent.click(row);
+		await tick();
+		const input = screen.getByTestId('upstream-tls-server-name') as HTMLInputElement;
+		expect(input.value).toBe('forum.example.com');
+	});
+
+	it('an emptied field ships as "" so a name can be removed', async () => {
+		const seeded = makeRoute({
+			id: 'r-sni',
+			host: 'forum.example.com',
+			upstreams: [{ url: 'https://194.163.129.255', weight: 1 }],
+			upstreamTlsServerName: 'forum.example.com'
+		});
+		apiMock.listRoutes.mockResolvedValue([seeded]);
+		apiMock.updateRoute.mockResolvedValue(seeded);
+		render(Page);
+		const row = (await screen.findByText('forum.example.com')).closest('tr')!;
+		await userEvent.click(row);
+		await tick();
+		await userEvent.clear(screen.getByTestId('upstream-tls-server-name'));
+		await tick();
+		await userEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+		await tick();
+
+		expect(apiMock.updateRoute).toHaveBeenCalled();
+		const payload = apiMock.updateRoute.mock.calls[0][1] as Record<string, unknown>;
+		expect(payload.upstreamTlsServerName).toBe('');
 	});
 });

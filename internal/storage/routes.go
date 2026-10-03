@@ -118,6 +118,13 @@ type PathRule struct {
 	// when the pool is https (transport.tls is emitted). omitempty →
 	// migration-free.
 	InsecureSkipVerify bool `json:"insecure_skip_verify,omitempty"`
+	// UpstreamTLSServerName (v2.60) applies ONLY to this path's own
+	// pool, and is autonomous for the same reason InsecureSkipVerify
+	// is: a path pool that dials a different address than the route's
+	// has, by definition, a different certificate identity. Inheriting
+	// the route's name would verify the wrong backend. Empty = Caddy's
+	// default. See the Route field for the full rationale.
+	UpstreamTLSServerName string `json:"upstream_tls_server_name,omitempty"`
 	// MatchExact (v2.44) matches PathPrefix as the WHOLE path instead
 	// of a sub-tree. Without it, "/" is a prefix that matches every
 	// request — including the redirect's own target — so this is what
@@ -273,6 +280,11 @@ func (p PathRule) Validate() error {
 	}
 	if err := p.validateRedirect(); err != nil {
 		return err
+	}
+	// v2.60 — same check as the route's, with the path named so the
+	// operator knows which of their rules to look at.
+	if err := ValidateUpstreamTLSServerName(p.UpstreamTLSServerName); err != nil {
+		return fmt.Errorf("path_rule %q: %w", p.PathPrefix, err)
 	}
 	if p.BasicAuth != nil && p.BasicAuth.Username == "" {
 		return fmt.Errorf("path_rule %q: basic auth requires a username", p.PathPrefix)
@@ -799,6 +811,39 @@ type Route struct {
 	// byte-equal with pre-fix snapshots for HTTP routes,
 	// minimising diff noise during backup/restore.
 	InsecureSkipVerify bool `json:"insecure_skip_verify,omitempty"`
+	// UpstreamTLSServerName (v2.60) sets Caddy's
+	// `transport.tls.server_name` on the route's reverse-proxy
+	// handler: dial the address in the pool, but present THIS name
+	// in the TLS handshake and verify the backend's certificate
+	// against it. Empty = Caddy's default, which derives both from
+	// the upstream address.
+	//
+	// It exists because of the case the default cannot serve: a
+	// backend reached by IP whose certificate is issued for a
+	// hostname. Without it the operator has exactly two options,
+	// and both are bad — pin the name in the host's /etc/hosts,
+	// which is invisible configuration that outlives everyone's
+	// memory of it, or tick InsecureSkipVerify, which encrypts
+	// without authenticating. With it, `https://10.0.0.5` plus a
+	// server name of `forum.example.com` keeps full verification.
+	//
+	// It is also what makes a backend migration a form edit: the
+	// address changes, the identity does not.
+	//
+	// Only consulted when the pool is https (same discriminant as
+	// InsecureSkipVerify — Caddy's transport.tls block is only
+	// emitted then). The API normalises it away on an http-only
+	// pool rather than storing a value that nothing reads.
+	//
+	// Validated as a DNS hostname: no scheme, no port, no path. A
+	// server name that Caddy would reject, or quietly fail to match
+	// against any certificate, is worse than no server name at all
+	// because the failure surfaces as a 502 with no stated cause.
+	//
+	// Pre-v2.60 rows decode with the empty string, which is exactly
+	// "Caddy's default" — no boot migration needed, same reasoning
+	// as InsecureSkipVerify above.
+	UpstreamTLSServerName string `json:"upstream_tls_server_name,omitempty"`
 	// UploadStreamingMode (Phase 4.5, #R-WAF-BUFFER-OOM-ON-
 	// LARGE-UPLOADS, 2026-06-14) is a per-route toggle that
 	// neutralises the two RAM-buffering surfaces hit by big
@@ -1188,6 +1233,71 @@ func validateSameSchemePool(pool []Upstream) error {
 	return nil
 }
 
+// ValidateUpstreamTLSServerName checks an UpstreamTLSServerName is a
+// plain DNS hostname. Empty is valid and means "Caddy's default".
+//
+// This is stricter than the rest of this file's posture, and
+// deliberately so: the field's whole purpose is to make certificate
+// verification succeed against a name. A value Caddy cannot match —
+// a URL pasted whole, a host:port, a trailing slash — produces a
+// handshake failure that reaches the operator as a bare 502 with no
+// stated cause. Refusing it at save is the only place the operator
+// can still see what they typed.
+//
+// An IP literal is refused too. SNI carries names, and verifying a
+// certificate against an IP is what the pool address already does —
+// so an IP here is either a no-op or a misunderstanding, and both are
+// better answered than stored.
+func ValidateUpstreamTLSServerName(name string) error {
+	if name == "" {
+		return nil
+	}
+	if name != strings.TrimSpace(name) {
+		return fmt.Errorf("upstream TLS server name %q: leading or trailing whitespace", name)
+	}
+	if strings.Contains(name, "://") {
+		return fmt.Errorf(
+			"upstream TLS server name %q: a hostname is expected, not a URL "+
+				"(drop the scheme)", name)
+	}
+	if strings.ContainsAny(name, ":/?#@ ") {
+		return fmt.Errorf(
+			"upstream TLS server name %q: a hostname is expected — no port, "+
+				"no path, no credentials", name)
+	}
+	if net.ParseIP(name) != nil {
+		return fmt.Errorf(
+			"upstream TLS server name %q: an IP address cannot be a TLS server "+
+				"name; use the hostname the certificate was issued for", name)
+	}
+	if len(name) > 253 {
+		return fmt.Errorf("upstream TLS server name %q: longer than 253 characters", name)
+	}
+	// A trailing dot is a legal FQDN, and Go's TLS stack strips it
+	// before matching, so accept it and validate the labels without it.
+	labels := strings.Split(strings.TrimSuffix(name, "."), ".")
+	for _, l := range labels {
+		if l == "" {
+			return fmt.Errorf("upstream TLS server name %q: empty label", name)
+		}
+		if len(l) > 63 {
+			return fmt.Errorf("upstream TLS server name %q: label %q is longer than 63 characters", name, l)
+		}
+		if l[0] == '-' || l[len(l)-1] == '-' {
+			return fmt.Errorf("upstream TLS server name %q: label %q starts or ends with a hyphen", name, l)
+		}
+		for _, c := range l {
+			isAlnum := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+			if !isAlnum && c != '-' && c != '_' {
+				return fmt.Errorf(
+					"upstream TLS server name %q: label %q contains %q, which is not "+
+						"allowed in a hostname", name, l, c)
+			}
+		}
+	}
+	return nil
+}
+
 // PoolUsesHTTPS reports whether the route's upstream pool
 // requires Caddy to negotiate TLS toward the upstreams.
 // Returns true iff every Upstream URL uses the https://
@@ -1254,6 +1364,12 @@ func (r *Route) validate() error {
 	// with a friendlier error.
 	if err := validateSameSchemePool(r.Upstreams); err != nil {
 		return err
+	}
+	// v2.60 — the TLS server name, checked here as the last line of
+	// defence. The API normalises it away on an http-only pool, so
+	// storage only has to care that the value itself is a hostname.
+	if err := ValidateUpstreamTLSServerName(r.UpstreamTLSServerName); err != nil {
+		return fmt.Errorf("route: %w", err)
 	}
 	// Step J.1: LBPolicy must be one of the six enum values. Empty is
 	// rejected here because the API layer is responsible for

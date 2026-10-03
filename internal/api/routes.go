@@ -1463,6 +1463,23 @@ func (h *Handler) createRoute(w http.ResponseWriter, r *http.Request) {
 			"host", req.Host)
 		skipVerify = false
 	}
+	// v2.60 — UpstreamTLSServerName on POST, same shape: absent means
+	// "Caddy's default", and a name on an http-only pool is dead
+	// config (no transport.tls block is emitted) so it is normalised
+	// away with a warning rather than stored where nothing reads it.
+	tlsServerName := ""
+	if req.UpstreamTLSServerName != nil {
+		tlsServerName = strings.TrimSpace(*req.UpstreamTLSServerName)
+	}
+	if tlsServerName != "" && !tempForSchemeCheck.PoolUsesHTTPS() {
+		h.logger.Warn("upstream_tls_server_name ignored on http-only upstream pool; normalising to empty",
+			"host", req.Host)
+		tlsServerName = ""
+	}
+	if err := storage.ValidateUpstreamTLSServerName(tlsServerName); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	// Phase 4.5 — UploadStreamingMode on POST: default false,
 	// nil-pointer accepted (no preserve-on-omit semantics on
 	// create — there's no previous value), non-nil overrides.
@@ -1610,6 +1627,7 @@ func (h *Handler) createRoute(w http.ResponseWriter, r *http.Request) {
 		HealthCheck:           storeHC,
 		CountryBlock:          newCountryBlock,
 		InsecureSkipVerify:    skipVerify,
+		UpstreamTLSServerName: tlsServerName,
 		UploadStreamingMode:   streamingMode,
 		WAFDisableCRS:         disableCRS,
 		WAFExcludeRules:       excludeRules,
@@ -2041,6 +2059,22 @@ func (h *Handler) updateRoute(w http.ResponseWriter, r *http.Request) {
 			"id", id, "host", req.Host)
 		skipVerify = false
 	}
+	// v2.60 — UpstreamTLSServerName on PUT: nil preserves, non-nil
+	// replaces (an explicit "" is how an operator removes one), and
+	// the http-only self-heal mirrors createRoute.
+	tlsServerName := previous.UpstreamTLSServerName
+	if req.UpstreamTLSServerName != nil {
+		tlsServerName = strings.TrimSpace(*req.UpstreamTLSServerName)
+	}
+	if tlsServerName != "" && !tempForSchemeCheck.PoolUsesHTTPS() {
+		h.logger.Warn("upstream_tls_server_name ignored on http-only upstream pool; normalising to empty",
+			"id", id, "host", req.Host)
+		tlsServerName = ""
+	}
+	if err := storage.ValidateUpstreamTLSServerName(tlsServerName); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	// Phase 4.5 — UploadStreamingMode on PUT: nil pointer
 	// preserves the previously stored value (same shape as
 	// InsecureSkipVerify above); non-nil pointer is a full
@@ -2238,6 +2272,7 @@ func (h *Handler) updateRoute(w http.ResponseWriter, r *http.Request) {
 		HealthCheck:           storeHC,
 		CountryBlock:          newCountryBlock,
 		InsecureSkipVerify:    skipVerify,
+		UpstreamTLSServerName: tlsServerName,
 		UploadStreamingMode:   streamingMode,
 		WAFDisableCRS:         disableCRS,
 		WAFExcludeRules:       excludeRules,

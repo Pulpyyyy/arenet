@@ -264,6 +264,13 @@ export interface Route {
 	 */
 	insecureSkipVerify: boolean;
 	/**
+	 * v2.60 — the name Caddy presents in SNI and verifies the
+	 * backend certificate against. '' means Caddy's default (both
+	 * derived from the upstream address). Always present on a
+	 * route response so a GET→PUT roundtrip carries it back.
+	 */
+	upstreamTlsServerName: string;
+	/**
 	 * Phase 4.5 (#R-WAF-BUFFER-OOM-ON-LARGE-UPLOADS) — when
 	 * true, the route bypasses the two RAM-buffering surfaces
 	 * that explode on big request bodies (Docker registry
@@ -708,6 +715,12 @@ export interface RouteRequest {
 	 */
 	insecureSkipVerify?: boolean;
 	/**
+	 * v2.60 — absent preserves the stored name on PUT; an
+	 * explicit '' clears it. Normalised away by the server on an
+	 * http-only pool.
+	 */
+	upstreamTlsServerName?: string;
+	/**
 	 * Phase 4.5 — uploadStreamingMode toggle on the wire.
 	 * Same preserve-on-omit semantic as insecureSkipVerify:
 	 *   - omitted on POST → strict default (false)
@@ -878,6 +891,12 @@ export interface PathRule {
 	/** Per-path TLS skip-verify (v2.23.1). Autonomous — does not inherit the
 	 *  route's posture. Only meaningful when the path pool is https. */
 	insecureSkipVerify?: boolean;
+	/**
+	 * v2.60 — this path pool's own TLS server name. Autonomous:
+	 * it is never inherited from the route, because a pool that
+	 * dials a different address has a different certificate.
+	 */
+	upstreamTlsServerName?: string;
 	/**
 	 * v2.44 — match the WHOLE path instead of the sub-tree. Required
 	 * for a "/" rule, whose prefix form also matches the redirect's

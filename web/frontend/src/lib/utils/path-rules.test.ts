@@ -206,14 +206,16 @@ describe('sanitizePathRules — rate-limit-only rules', () => {
 		// content (with a sample below) or as a modifier (excluded here).
 		//
 		// pathPrefix is the rule's identity; matchExact changes how the
-		// prefix matches; lbPolicy, healthCheck and insecureSkipVerify
-		// only qualify an upstream pool and are meaningless alone.
+		// prefix matches; lbPolicy, healthCheck, insecureSkipVerify and
+		// upstreamTlsServerName only qualify an upstream pool and are
+		// meaningless alone.
 		type NonContentField =
 			| 'pathPrefix'
 			| 'matchExact'
 			| 'lbPolicy'
 			| 'healthCheck'
-			| 'insecureSkipVerify';
+			| 'insecureSkipVerify'
+			| 'upstreamTlsServerName';
 		type ContentField = Exclude<keyof PathRule, NonContentField>;
 
 		const byField: Record<ContentField, PathRule> = {
