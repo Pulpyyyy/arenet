@@ -180,6 +180,24 @@ function upstreamsBlockHeight(n: number): number {
         return n * UPSTREAM_HEIGHT + (n - 1) * UPSTREAM_GAP_Y;
 }
 
+/** One line of the source list inside a grouped redirect cluster.
+ *  Matches `.redirect-source` in BackendClusterNode. */
+const REDIRECT_SOURCE_LINE_HEIGHT = 17;
+
+/** Extra height a redirect cluster needs for the routes that arrive
+ *  at it.
+ *
+ *  Zero for a single source, so a one-route redirect keeps EXACTLY
+ *  the height it had before grouping existed — the destination line
+ *  alone has always fitted in the padding, and changing that would
+ *  move every other cluster on the canvas for no reason.
+ *
+ *  Grouped nodes pay for the lines beyond the first. */
+function redirectSourcesBlockHeight(sourceCount: number): number {
+        if (sourceCount <= 1) return 0;
+        return (sourceCount - 1) * REDIRECT_SOURCE_LINE_HEIGHT;
+}
+
 /** Total cluster group height for N upstream children. When a warning
  *  is present, reserve extra bottom space so the absolute-positioned
  *  warning footer in BackendClusterNode doesn't overlap the last
@@ -256,6 +274,12 @@ type ClusterSpec = {
         /** v2.61 — set on a redirecting route; the cluster draws the
          *  destination instead of an empty pool. */
         redirectTarget?: string;
+        /** Every route that redirects to `redirectTarget`, in canvas
+         *  order. Set only on a redirect spec, where ONE node stands
+         *  for a destination rather than for a route. `route` above is
+         *  then the first of these — kept so the existing per-route
+         *  plumbing (ids, flow data) still has a representative. */
+        redirectSources?: TopologyRoute[];
 };
 
 // ===========================================================================
@@ -533,22 +557,71 @@ export function buildTopologyGraph(
         // a running Y cursor. A route with zero pathPools contributes
         // zero sections — non-regression: identical to the pre-
         // v2.24.0 single-cluster shape.
-        const clusterSpecs: ClusterSpec[] = routes.map((route) => ({
-                route,
-                clusterId: `cluster-${route.id}`,
-                rootUpstreams: route.upstreams,
-                pathSections: (route.pathPools ?? []).map((pp) => ({
-                        prefix: pp.pathPrefix,
-                        upstreams: pp.upstreams,
-                })),
-                lbPolicy: route.lbPolicy,
-                hasHealthCheck: route.hasHealthCheck,
-                warning: deriveClusterWarning(route),
-                redirectTarget: route.redirectTarget,
-        }));
+        // One spec per PROXY route, as ever — and one spec per distinct
+        // REDIRECT DESTINATION.
+        //
+        // The operator's words: "sinon ça fait trop de node". Before
+        // this, three routes pointing at one Discord invite drew three
+        // nodes carrying the same URL, side by side, which says
+        // "three destinations" when there is one. Grouping makes the
+        // convergence the thing you see: one node, three inbound
+        // edges.
+        //
+        // Route ORDER is preserved rather than partitioned: a group
+        // takes the slot of its first member. A proxy-only route list
+        // therefore produces byte-identical specs to the pre-grouping
+        // build, which is what the layout non-regression tests pin.
+        const redirectGroups = groupRoutesByRedirectTarget(routes);
+        const emittedGroups = new Set<string>();
+        const clusterSpecs: ClusterSpec[] = [];
+        routes.forEach((route) => {
+                const groupKey = route.redirectTarget ? redirectTargetKey(route.redirectTarget) : undefined;
+                if (groupKey !== undefined) {
+                        // Only the first member of a group emits the node.
+                        if (emittedGroups.has(groupKey)) return;
+                        emittedGroups.add(groupKey);
+                        const sources = redirectGroups.get(groupKey) ?? [route];
+                        clusterSpecs.push({
+                                route,
+                                // Keyed by the destination, URL-encoded rather than
+                                // slugified: a lossy slug could map two genuinely
+                                // different destinations onto one id and merge them
+                                // silently. Stable across rebuilds too, so Svelte
+                                // Flow keeps the node's identity (and the position
+                                // the operator dragged it to) when routes are added.
+                                clusterId: `redirect-to-${encodeURIComponent(groupKey)}`,
+                                rootUpstreams: [],
+                                pathSections: [],
+                                lbPolicy: route.lbPolicy,
+                                hasHealthCheck: false,
+                                warning: deriveClusterWarning(route),
+                                // The first source's spelling wins as the label. The
+                                // key normalises away a trailing slash and case, so
+                                // the raw string is the honest thing to show.
+                                redirectTarget: route.redirectTarget,
+                                redirectSources: sources,
+                        });
+                        return;
+                }
+                clusterSpecs.push({
+                        route,
+                        clusterId: `cluster-${route.id}`,
+                        rootUpstreams: route.upstreams,
+                        pathSections: (route.pathPools ?? []).map((pp) => ({
+                                prefix: pp.pathPrefix,
+                                upstreams: pp.upstreams,
+                        })),
+                        lbPolicy: route.lbPolicy,
+                        hasHealthCheck: route.hasHealthCheck,
+                        warning: deriveClusterWarning(route),
+                        redirectTarget: route.redirectTarget,
+                });
+        });
 
-        const clusterHeights = clusterSpecs.map((spec) =>
-                singleClusterHeight(spec.rootUpstreams.length, spec.pathSections, spec.warning !== undefined),
+        const clusterHeights = clusterSpecs.map(
+                (spec) =>
+                        singleClusterHeight(spec.rootUpstreams.length, spec.pathSections, spec.warning !== undefined)
+                        + redirectSourcesBlockHeight(spec.redirectSources?.length ?? 0),
         );
         const clusterYs = computeStackYsForHeights(clusterHeights);
         clusterSpecs.forEach((spec, i) => {
@@ -560,7 +633,15 @@ export function buildTopologyGraph(
                 const totalCount = allUpstreams.length;
                 const clusterData: BackendClusterNodeData = {
                         kind: 'backend-cluster',
-                        clusterLabel: spec.route.clusterLabel ?? deriveClusterLabel(spec.route.host),
+                        // A redirect node IS the destination, so it is labelled
+                        // by the destination's host. Labelling it with the first
+                        // source's host — which is what happened before grouping
+                        // — named the node after one of the things pointing AT
+                        // it, and became plainly wrong as soon as two routes
+                        // converged.
+                        clusterLabel: spec.redirectSources
+                                ? deriveRedirectLabel(spec.redirectTarget)
+                                : (spec.route.clusterLabel ?? deriveClusterLabel(spec.route.host)),
                         runtime: dominantRuntime(allUpstreams),
                         lbPolicy: spec.lbPolicy,
                         healthyCount,
@@ -569,6 +650,7 @@ export function buildTopologyGraph(
                         hasHealthCheck: spec.hasHealthCheck,
                         warning: spec.warning,
                         redirectTarget: spec.redirectTarget,
+                        redirectSourceHosts: spec.redirectSources?.map((r) => r.host),
                 };
                 nodes.push({
                         id: spec.clusterId,
@@ -723,12 +805,25 @@ export function buildTopologyGraph(
         // per-path metrics yet.
         clusterSpecs.forEach((spec) => {
                 if (spec.rootUpstreams.length === 0) {
-                        edges.push(makeFlowEdge(
-                                `e-caddy-cluster-${spec.route.id}`,
-                                'caddy-hub',
-                                spec.clusterId,
-                                routeFlowData(spec.route),
-                        ));
+                        // ONE edge per source route, even when several share
+                        // the destination node. The edge id still carries the
+                        // route id, so nothing collides and a grouped node
+                        // reads as "three routes arrive here" rather than
+                        // flattening three flows into one.
+                        //
+                        // A degenerate proxy route (no upstream, no redirect)
+                        // has no redirectSources, falls back to its own single
+                        // edge, and is byte-identical to the pre-grouping
+                        // build.
+                        const sources = spec.redirectSources ?? [spec.route];
+                        sources.forEach((src) => {
+                                edges.push(makeFlowEdge(
+                                        `e-caddy-cluster-${src.id}`,
+                                        'caddy-hub',
+                                        spec.clusterId,
+                                        routeFlowData(src),
+                                ));
+                        });
                 } else {
                         spec.rootUpstreams.forEach((upstream) => {
                                 edges.push(makeFlowEdge(
@@ -883,6 +978,71 @@ function computeStackYsForHeights(heights: number[]): number[] {
 function deriveClusterLabel(host: string): string {
         const parts = host.split('.');
         return parts[0] || host;
+}
+
+/**
+ * Grouping key for a redirect destination.
+ *
+ * Normalises only what cannot change where traffic lands: the case of
+ * the scheme and host (both case-insensitive per RFC 3986 §3.1 / §3.2.2)
+ * and a single trailing slash on an otherwise-empty path, since
+ * `https://x` and `https://x/` are the same resource.
+ *
+ * Deliberately conservative beyond that. The path, the query and the
+ * fragment are compared verbatim: `/a` and `/A` are different paths on
+ * most servers, and over-normalising would merge two destinations into
+ * one node, which is a worse error than drawing two nodes for one
+ * destination — the operator can see duplicates, they cannot see a
+ * merge.
+ *
+ * A target the URL parser rejects is keyed by its trimmed raw string,
+ * so a malformed redirect still groups with its identical twin instead
+ * of throwing.
+ */
+function redirectTargetKey(target: string): string {
+        const raw = target.trim();
+        try {
+                const u = new URL(raw);
+                const path = u.pathname === '/' ? '' : u.pathname;
+                return `${u.protocol.toLowerCase()}//${u.host.toLowerCase()}${path}${u.search}${u.hash}`;
+        } catch {
+                return raw;
+        }
+}
+
+/**
+ * Index every redirecting route by its destination key, preserving the
+ * order routes arrive in so the canvas order is the route-list order.
+ */
+function groupRoutesByRedirectTarget(routes: TopologyRoute[]): Map<string, TopologyRoute[]> {
+        const groups = new Map<string, TopologyRoute[]>();
+        routes.forEach((route) => {
+                if (!route.redirectTarget) return;
+                const key = redirectTargetKey(route.redirectTarget);
+                const existing = groups.get(key);
+                if (existing) existing.push(route);
+                else groups.set(key, [route]);
+        });
+        return groups;
+}
+
+/**
+ * Header label for a redirect destination node: the destination's host,
+ * which is what the node stands for.
+ *
+ * Unlike deriveClusterLabel this keeps the whole host rather than the
+ * first label. `discord` tells the operator nothing; `discord.gg` is
+ * the destination. Falls back to the raw string when the target does
+ * not parse, and to 'redirection' when there is no target at all —
+ * never an empty header.
+ */
+function deriveRedirectLabel(target: string | undefined): string {
+        if (!target) return 'redirection';
+        try {
+                return new URL(target).host || target;
+        } catch {
+                return target;
+        }
 }
 
 function dominantRuntime(upstreams: TopologyUpstream[]): string | undefined {

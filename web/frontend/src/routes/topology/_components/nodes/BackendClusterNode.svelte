@@ -57,8 +57,18 @@
                 return 'neutral';
         }
 
+        // Routes arriving at a redirect destination. A grouped node must
+        // say how many and which: without this it would stand for an
+        // unknown number of routes and read exactly like a single one.
+        let redirectSources = $derived(data.redirectSourceHosts ?? []);
+
         function formatHeaderCountLine(d: BackendClusterNodeData): string {
-                if (d.redirectTarget) return 'redirection';
+                if (d.redirectTarget) {
+                        const n = d.redirectSourceHosts?.length ?? 0;
+                        // 1 is the common case and needs no count — the single
+                        // source host is already named below.
+                        return n > 1 ? `${n} redirections` : 'redirection';
+                }
                 if (d.totalCount === 0) return '0 upstream';
                 // v1.1.0 norm: every upstream reports unknown. Drop the
                 // "sains" qualifier entirely — claiming X-of-Y sains
@@ -122,6 +132,16 @@
                         <span class="redirect-arrow" aria-hidden="true">→</span>
                         <span class="redirect-target">{data.redirectTarget}</span>
                 </div>
+                <!-- Who arrives here. One node per destination means the
+                     node can no longer be identified by its source, so it
+                     names them instead. -->
+                {#if redirectSources.length > 0}
+                        <ul class="redirect-sources" data-testid="cluster-redirect-sources">
+                                {#each redirectSources as host (host)}
+                                        <li class="redirect-source">{host}</li>
+                                {/each}
+                        </ul>
+                {/if}
         {/if}
 
         {#if data.warning}
@@ -137,6 +157,26 @@
 </div>
 
 <style>
+        .redirect-sources {
+                list-style: none;
+                margin: 2px 0 0;
+                padding: 0 10px;
+                display: flex;
+                flex-direction: column;
+                gap: 1px;
+        }
+
+        .redirect-source {
+                /* Must match REDIRECT_SOURCE_LINE_HEIGHT in _layout.ts,
+                   which reserves the group node's extra height. */
+                line-height: 17px;
+                font-size: 10px;
+                color: var(--text-muted);
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+        }
+
         .cluster-node {
                 width: 100%;
                 height: 100%;

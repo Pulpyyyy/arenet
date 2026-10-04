@@ -1047,18 +1047,162 @@ describe('buildTopologyGraph — redirecting routes', () => {
 		} as TopologyRoute;
 	}
 
+	// A redirect node is keyed by its DESTINATION, not by a route: the
+	// id is `redirect-to-<encoded destination key>`, so several routes
+	// pointing at one place are one node. Tests find it by its data
+	// rather than by spelling the id out, which keeps them honest about
+	// what the node is for.
+	function redirectNodes(nodes: ReturnType<typeof buildTopologyGraph>['nodes']) {
+		return nodes.filter((n) => n.id.startsWith('redirect-to-'));
+	}
+
 	it('carries no empty-pool warning', () => {
 		const { nodes } = buildTopologyGraph([redirectRoute()]);
-		const cluster = nodes.find((n) => n.id === 'cluster-r-redirect')!;
+		const cluster = redirectNodes(nodes)[0]!;
 		const data = cluster.data as BackendClusterNodeData;
 		expect(data.warning).toBeUndefined();
 	});
 
 	it('carries its destination so the graph can draw where traffic goes', () => {
 		const { nodes } = buildTopologyGraph([redirectRoute()]);
-		const cluster = nodes.find((n) => n.id === 'cluster-r-redirect')!;
+		const cluster = redirectNodes(nodes)[0]!;
 		const data = cluster.data as BackendClusterNodeData;
 		expect(data.redirectTarget).toBe('https://new.example.com');
+	});
+
+	// --- Grouping by destination -------------------------------------
+	//
+	// The operator: "sinon ça fait trop de node". Three routes pointing
+	// at one Discord invite used to draw three nodes carrying the same
+	// URL, which says "three destinations" when there is one.
+
+	it('draws ONE node for several routes sharing a destination', () => {
+		const { nodes } = buildTopologyGraph([
+			redirectRoute({ id: 'r-1', host: 'a.example.com' }),
+			redirectRoute({ id: 'r-2', host: 'b.example.com' }),
+			redirectRoute({ id: 'r-3', host: 'c.example.com' })
+		]);
+		expect(redirectNodes(nodes)).toHaveLength(1);
+	});
+
+	it('names every route that arrives at the destination', () => {
+		// Without this the grouped node stands for an unknown number of
+		// routes and reads exactly like a single one.
+		const { nodes } = buildTopologyGraph([
+			redirectRoute({ id: 'r-1', host: 'a.example.com' }),
+			redirectRoute({ id: 'r-2', host: 'b.example.com' })
+		]);
+		const data = redirectNodes(nodes)[0]!.data as BackendClusterNodeData;
+		expect(data.redirectSourceHosts).toEqual(['a.example.com', 'b.example.com']);
+	});
+
+	it('keeps one inbound edge per source route', () => {
+		// Flattening three flows into one edge would lose which route
+		// actually carries the traffic.
+		const { edges } = buildTopologyGraph([
+			redirectRoute({ id: 'r-1', host: 'a.example.com' }),
+			redirectRoute({ id: 'r-2', host: 'b.example.com' })
+		]);
+		const ids = edges.map((e) => e.id).filter((id) => id.startsWith('e-caddy-cluster-'));
+		expect(ids).toEqual(['e-caddy-cluster-r-1', 'e-caddy-cluster-r-2']);
+		const targets = new Set(edges.filter((e) => ids.includes(e.id)).map((e) => e.target));
+		expect(targets.size).toBe(1);
+	});
+
+	it('still draws separate nodes for different destinations', () => {
+		// The guard against over-grouping: the whole point is lost if
+		// two destinations merge.
+		const { nodes } = buildTopologyGraph([
+			redirectRoute({ id: 'r-1', redirectTarget: 'https://one.example.com' }),
+			redirectRoute({ id: 'r-2', redirectTarget: 'https://two.example.com' })
+		]);
+		expect(redirectNodes(nodes)).toHaveLength(2);
+	});
+
+	it('treats a trailing slash on an empty path as the same destination', () => {
+		// https://x and https://x/ are the same resource.
+		const { nodes } = buildTopologyGraph([
+			redirectRoute({ id: 'r-1', redirectTarget: 'https://new.example.com' }),
+			redirectRoute({ id: 'r-2', redirectTarget: 'https://new.example.com/' })
+		]);
+		expect(redirectNodes(nodes)).toHaveLength(1);
+	});
+
+	it('treats host case as the same destination', () => {
+		const { nodes } = buildTopologyGraph([
+			redirectRoute({ id: 'r-1', redirectTarget: 'https://New.Example.com' }),
+			redirectRoute({ id: 'r-2', redirectTarget: 'https://new.example.com' })
+		]);
+		expect(redirectNodes(nodes)).toHaveLength(1);
+	});
+
+	it('does NOT merge destinations that differ only in path case', () => {
+		// /a and /A are different paths on most servers. Merging them
+		// would be an error the operator cannot see; drawing two nodes
+		// for one destination is one they can.
+		const { nodes } = buildTopologyGraph([
+			redirectRoute({ id: 'r-1', redirectTarget: 'https://x.example.com/a' }),
+			redirectRoute({ id: 'r-2', redirectTarget: 'https://x.example.com/A' })
+		]);
+		expect(redirectNodes(nodes)).toHaveLength(2);
+	});
+
+	it('does NOT merge destinations that differ only in query', () => {
+		const { nodes } = buildTopologyGraph([
+			redirectRoute({ id: 'r-1', redirectTarget: 'https://x.example.com/?a=1' }),
+			redirectRoute({ id: 'r-2', redirectTarget: 'https://x.example.com/?a=2' })
+		]);
+		expect(redirectNodes(nodes)).toHaveLength(2);
+	});
+
+	it('groups identical malformed targets instead of throwing', () => {
+		const { nodes } = buildTopologyGraph([
+			redirectRoute({ id: 'r-1', redirectTarget: 'not a url' }),
+			redirectRoute({ id: 'r-2', redirectTarget: 'not a url' })
+		]);
+		expect(redirectNodes(nodes)).toHaveLength(1);
+	});
+
+	it('labels the node by the destination, not by one of its sources', () => {
+		// Before grouping the node was labelled with the first source's
+		// host — naming it after one of the things pointing AT it, which
+		// becomes plainly wrong as soon as two routes converge.
+		const { nodes } = buildTopologyGraph([
+			redirectRoute({
+				id: 'r-1',
+				host: 'join.example.com',
+				redirectTarget: 'https://discord.gg/abc'
+			})
+		]);
+		const data = redirectNodes(nodes)[0]!.data as BackendClusterNodeData;
+		expect(data.clusterLabel).toBe('discord.gg');
+		expect(data.clusterLabel).not.toBe('join');
+	});
+
+	it('gives a grouped node room for its extra source lines', () => {
+		// The source list is real content; without the height the names
+		// would render outside the node box.
+		const one = buildTopologyGraph([redirectRoute({ id: 'r-1', host: 'a.example.com' })]);
+		const three = buildTopologyGraph([
+			redirectRoute({ id: 'r-1', host: 'a.example.com' }),
+			redirectRoute({ id: 'r-2', host: 'b.example.com' }),
+			redirectRoute({ id: 'r-3', host: 'c.example.com' })
+		]);
+		const h1 = redirectNodes(one.nodes)[0]!.height!;
+		const h3 = redirectNodes(three.nodes)[0]!.height!;
+		expect(h3).toBeGreaterThan(h1);
+	});
+
+	it('leaves a single-source redirect at the height it always had', () => {
+		// Non-regression: a one-route redirect must not move every other
+		// cluster on the canvas.
+		const { nodes } = buildTopologyGraph([redirectRoute()]);
+		const proxy = buildTopologyGraph([makeRoute({ id: 'r-empty', upstreams: [] })]);
+		const redirectH = redirectNodes(nodes)[0]!.height!;
+		const emptyProxyH = proxy.nodes.find((n) => n.id === 'cluster-r-empty')!.height!;
+		// Same geometry: both are a header over an empty pool. The proxy
+		// one additionally reserves its warning footer.
+		expect(redirectH).toBeLessThan(emptyProxyH);
 	});
 
 	it('still warns a route that has no upstream AND no redirect', () => {

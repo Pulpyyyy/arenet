@@ -262,6 +262,18 @@ export type BackendClusterNodeData = {
          * backend, it is a route whose destination is not a backend.
          */
         redirectTarget?: string;
+        /**
+         * Hosts of every route that redirects to `redirectTarget`, in
+         * canvas order. Set only on a redirect cluster.
+         *
+         * A redirect cluster is keyed by its DESTINATION, not by a
+         * route: several routes sending traffic to one place are one
+         * node with several inbound edges, not N identical nodes side
+         * by side. The list is what lets the node name who arrives —
+         * without it, a grouped node would silently stand for an
+         * unknown number of routes.
+         */
+        redirectSourceHosts?: string[];
 } & Record<string, unknown>;
 
 /** A per-path section header rendered INSIDE a route's single backend
