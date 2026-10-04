@@ -970,6 +970,61 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /metrics/route-summary:
+    get:
+      summary: One route's traffic over the last 24 h
+      description: |
+        Requests, 4xx, 5xx and weighted p95 latency for a single route over
+        the last 24 full hours, on the same window `/metrics/summary`
+        aggregates over.
+
+        Separate from `/metrics/summary` because that endpoint's `topRoutes`
+        keeps only the five busiest routes: a per-route surface fed from it
+        would report zeros for every quieter route.
+
+        `p95LatencyMs` is the request-weighted mean of the hourly p95
+        samples, not a true 24 h p95 (which cannot be recovered from
+        pre-aggregated percentiles). It is null when the route served no
+        traffic with a recorded latency — null means "not measured", which
+        is not the same as 0 ms. `disabled: true` when the metrics store is
+        unavailable; the counters are then zero and mean "unknown".
+      tags: [Observability]
+      x-arenet-role: viewer
+      parameters:
+        - name: route
+          in: query
+          required: true
+          description: |
+            Route ID. Unknown route → 404. The `all` sentinel accepted by
+            `/metrics/timeseries` is refused here with 400 — use
+            `/metrics/summary` for the global totals.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Route traffic summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [routeId, generatedAt, windowSeconds, reqs, fourxx, fivexx, p95LatencyMs]
+                properties:
+                  routeId: { type: string }
+                  generatedAt: { type: string, format: date-time }
+                  windowSeconds: { type: integer }
+                  disabled: { type: boolean }
+                  reqs: { type: integer }
+                  fourxx: { type: integer }
+                  fivexx: { type: integer }
+                  p95LatencyMs: { type: [number, 'null'] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503':
+          description: Storage or metrics history unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   # --------------------------------------------------------------------- Geo
   /geo/lookup-batch:
     post:

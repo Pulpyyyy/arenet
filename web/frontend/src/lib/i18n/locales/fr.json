@@ -367,7 +367,14 @@
 			"metricsLink": "Métriques de cette route →",
 			"pivotsAfterSave": "Métriques et sécurité s’ouvrent après le premier enregistrement",
 			"securityLink": "Sécurité de cette route →",
-			"deleteButton": "Supprimer"
+			"deleteButton": "Supprimer",
+			"stripWindow": "24 h glissantes",
+			"stripReqs": "requêtes",
+			"stripFourxx": "4xx",
+			"stripFivexx": "5xx",
+			"stripP95": "p95",
+			"stripNoData": "aucune donnée",
+			"stripUnavailable": "mesures indisponibles"
 		},
 		"delete": {
 			"title": "Supprimer la route",
@@ -408,9 +415,9 @@
 			"upstreamsTestAll": "Tester tous",
 			"upstreamsPlaceholder": "http://127.0.0.1:8080",
 			"upstreamsWeightPlaceholder": "1",
-			"upstreamTlsServerNameLabel": "Nom TLS de l\u2019upstream",
+			"upstreamTlsServerNameLabel": "Nom TLS de l’upstream",
 			"upstreamTlsServerNamePlaceholder": "backend.example.com",
-			"upstreamTlsServerNameHelper": "Pr\u00e9sent\u00e9 en SNI et v\u00e9rifi\u00e9 contre le certificat du backend. Vide : l\u2019adresse de l\u2019upstream est utilis\u00e9e.",
+			"upstreamTlsServerNameHelper": "Présenté en SNI et vérifié contre le certificat du backend. Vide : l’adresse de l’upstream est utilisée.",
 			"upstreamsInsecureSkipVerifyLabel": "Ignorer la vérification du certificat upstream",
 			"lbPolicyLabel": "Politique de load balancing",
 			"lbSectionLabel": "Répartition de charge",

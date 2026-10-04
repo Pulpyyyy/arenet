@@ -2041,6 +2041,42 @@ export interface SummaryRoute {
 	wafDetected: number;
 }
 
+/**
+ * Wire shape of GET /metrics/route-summary?route=<id> — the
+ * 24h traffic aggregate for ONE route.
+ *
+ * Why not read `SummaryResponse.topRoutes`: that list is
+ * truncated server-side to the five busiest routes
+ * (metrics_handlers.go, `top = top[:5]`). A per-route surface
+ * fed from it would show real numbers for five routes and
+ * silent zeros for every other one.
+ *
+ * The window is the same one `SummaryResponse` aggregates over
+ * (`windowSeconds`, 86400), computed from the same boundaries,
+ * so the route panel and the dashboard can never disagree
+ * about what "last 24 hours" means.
+ */
+export interface RouteSummaryResponse {
+	routeId: string;
+	generatedAt: string;
+	windowSeconds: number;
+	/** True when the observability subsystem failed at boot: the
+	 *  counters below are all zero and mean "unknown", not "none". */
+	disabled?: boolean;
+	reqs: number;
+	/** Independent of `fivexx` — never collapsed into one
+	 *  "errors" number (AC #6). */
+	fourxx: number;
+	fivexx: number;
+	/** Request-weighted mean of the hourly p95 samples, the same
+	 *  statistic as `SummaryResponse.globalP95LatencyMs`. NOT a
+	 *  true 24h p95 — that cannot be recovered from
+	 *  pre-aggregated percentiles. null when the route served no
+	 *  traffic with a recorded latency: render "—", never 0 ms,
+	 *  which would read as "instant". */
+	p95LatencyMs: number | null;
+}
+
 export interface SummaryResponse {
 	generatedAt: string;
 	/**

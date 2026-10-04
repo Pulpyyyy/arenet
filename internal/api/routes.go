@@ -199,6 +199,10 @@ func NewRouter(h *Handler, dev bool, ipExtractor *auth.IPExtractor, ws *WSTopolo
 			// aggregator, never accepted via the API).
 			r.Get("/metrics/timeseries", h.metricsTimeseries)
 			r.Get("/metrics/summary", h.metricsSummary)
+			// Per-route 24h traffic aggregate for the route
+			// panel strip. /metrics/summary cannot serve this:
+			// its topRoutes list is truncated to five.
+			r.Get("/metrics/route-summary", h.metricsRouteSummary)
 			// Step M.2 — WAF event log. Read-only,
 			// viewer-accessible per AC #12. Same auth shape
 			// as /metrics; the data is event-shaped

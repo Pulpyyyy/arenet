@@ -53,7 +53,8 @@
 	} from '$lib/api/types';
 	import { countryName, matchCountries, type CountryMatch } from '$lib/data/countries';
 	import { secondsToParts, partsToSeconds, type DurationUnit } from '$lib/utils/duration';
-	import { ApiError, type TestHealthCheckResult } from '$lib/api/types';
+	import { ApiError, type TestHealthCheckResult, type RouteSummaryResponse } from '$lib/api/types';
+	import { fetchRouteSummary } from '$lib/api/metrics';
 	import { serverErrorMessage } from '$lib/api/server-errors';
 	import { pushToast } from '$lib/stores/toast';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -95,6 +96,51 @@
 	let formOpen = $state(false);
 	let formMode = $state<FormMode>('create');
 	let editingId = $state<string | null>(null);
+
+	// --- Panel header metrics strip ---------------------------------
+	// The operator's complaint about the per-route metrics was partly
+	// that the drill-down was hard to find (fixed in v2.61) and partly
+	// that you had to leave the panel to learn anything at all. Four
+	// numbers in the header answer "is this route alive and healthy?"
+	// without a navigation; the link beside them is still how you get
+	// the chart.
+	//
+	// Fetched once per panel open, NOT polled. Arenet has just spent a
+	// release removing background chatter it generated against its own
+	// API, and a figure that is at most a few minutes stale is worth
+	// nothing less than a live one over a 24h window.
+	//
+	// `null` while loading or after a failure: the strip renders
+	// nothing rather than zeros. A route whose metrics could not be
+	// read must never look like a route with no traffic.
+	let routeSummary = $state<RouteSummaryResponse | null>(null);
+	// Guards against a late response from a previously-selected route
+	// landing in the panel of the current one. Compared against
+	// editingId at resolve time rather than cancelling the request,
+	// which would need an AbortController per open for no gain.
+	let routeSummaryFor = $state<string | null>(null);
+
+	function clearRouteSummary() {
+		routeSummary = null;
+		routeSummaryFor = null;
+	}
+
+	async function loadRouteSummary(id: string) {
+		clearRouteSummary();
+		routeSummaryFor = id;
+		try {
+			const s = await fetchRouteSummary(id);
+			// Panel closed or moved to another route while in flight.
+			if (routeSummaryFor !== id) return;
+			routeSummary = s;
+		} catch {
+			// Deliberately silent. The strip is supplementary; a
+			// metrics read that fails must not raise a toast over a
+			// form the operator is editing, and it must not render a
+			// misleading zero either — so it renders nothing.
+			if (routeSummaryFor === id) routeSummary = null;
+		}
+	}
 	// v2.40 — Caddyfile import modal.
 	let importOpen = $state(false);
 
@@ -1130,6 +1176,7 @@
 		formSnapshot = '';
 		formMode = 'create';
 		editingId = null;
+		clearRouteSummary();
 		formError = null;
 		errors = {};
 		// Step #R-PROXMOX-HTTPS-LOOP commit 3 — clear per-row
@@ -1362,6 +1409,7 @@
 		secLangSaveErrors = [];
 		formMode = 'create';
 		editingId = null;
+		clearRouteSummary();
 		formData = emptyFormData();
 		basicAuthPasswordSet = false;
 		healthCheckTouched = false;
@@ -1450,6 +1498,7 @@
 		secLangSaveErrors = [];
 		formMode = 'edit';
 		editingId = r.id;
+		void loadRouteSummary(r.id);
 		// Step J.3: populate the pool from the stored route as-is.
 		// A one-upstream route (e.g. migrated from Step I) shows a
 		// single-row repeater; multi-upstream routes show every row.
@@ -3999,13 +4048,6 @@
 				     the route's identity, so they live in the header itself
 				     and stay reachable. Delete moved to the footer, away from
 				     Save: a destructive action does not share a row with the
-				     links you click to read a chart. -->
-				<!-- v2.41.1 — the two drill-down links used to sit in a row
-				     BELOW the sticky header, so they scrolled out of sight as
-				     soon as the operator moved down the form. They belong to
-				     the route's identity, so they live in the header itself
-				     and stay reachable. Delete moved to the footer, away from
-				     Save: a destructive action does not share a row with the
 				     links you click to read a chart.
 
 				     v2.61 — they were 11px text-secondary chips with no fill,
@@ -4044,6 +4086,72 @@
 							title={language.current && t('routes.panel.pivotsAfterSave')}>
 							{language.current && t('routes.panel.pivotsAfterSave')}
 						</span>
+					{/if}
+
+					<!-- Four numbers, same row as the link that explains
+					     them: the strip is for the glance, the link is for
+					     the chart. Rendered only once there is something
+					     true to say — no skeleton, no zeros while loading,
+					     because a zero here is indistinguishable from a
+					     real "this route served nothing". -->
+					{#if routeSummary}
+						<div
+							class="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted"
+							data-testid="panel-metrics-strip"
+						>
+							{#if routeSummary.disabled}
+								<span data-testid="panel-metrics-unavailable"
+									>{language.current && t('routes.panel.stripUnavailable')}</span
+								>
+							{:else if routeSummary.reqs === 0}
+								<span data-testid="panel-metrics-nodata"
+									>{language.current && t('routes.panel.stripNoData')}
+									<span class="text-secondary"
+										>· {language.current && t('routes.panel.stripWindow')}</span
+									></span
+								>
+							{:else}
+								<span data-testid="panel-metrics-reqs">
+									<span class="text-primary font-medium tabular-nums"
+										>{routeSummary.reqs.toLocaleString(language.current)}</span
+									>
+									{language.current && t('routes.panel.stripReqs')}
+								</span>
+								<span data-testid="panel-metrics-fourxx">
+									<span class="text-secondary tabular-nums"
+										>{routeSummary.fourxx.toLocaleString(language.current)}</span
+									>
+									{language.current && t('routes.panel.stripFourxx')}
+								</span>
+								<!-- Only the 5xx gets a colour. A 4xx is ordinary
+								     traffic on a public host (bots probing for
+								     /wp-login.php); tinting it would cry wolf on
+								     every route. A 5xx is the upstream failing. -->
+								<span data-testid="panel-metrics-fivexx">
+									<span
+										class="tabular-nums"
+										class:text-secondary={routeSummary.fivexx === 0}
+										class:text-down={routeSummary.fivexx > 0}
+										class:font-medium={routeSummary.fivexx > 0}
+										>{routeSummary.fivexx.toLocaleString(language.current)}</span
+									>
+									{language.current && t('routes.panel.stripFivexx')}
+								</span>
+								<span data-testid="panel-metrics-p95">
+									{language.current && t('routes.panel.stripP95')}
+									<!-- null is "never measured", which is not 0 ms.
+									     Rendering 0 would read as "instant". -->
+									<span class="text-secondary tabular-nums">
+										{routeSummary.p95LatencyMs === null
+											? '—'
+											: `${Math.round(routeSummary.p95LatencyMs)} ms`}
+									</span>
+								</span>
+								<span class="text-secondary" data-testid="panel-metrics-window"
+									>· {language.current && t('routes.panel.stripWindow')}</span
+								>
+							{/if}
+						</div>
 					{/if}
 				</div>
 				</div>
