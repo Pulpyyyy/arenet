@@ -114,7 +114,46 @@ export async function request<T>(
 	// interaction since the last activity must not keep the session
 	// awake.
 	const background = !idle.userActiveSinceReset;
+
+	// A locked session refuses background traffic, so asking is
+	// pointless. Short-circuit BEFORE the fetch.
+	//
+	// v2.32 taught the server to enforce the idle lock on background
+	// requests without refreshing the session (the fix for polls that
+	// defeated the lock). The consequence was never handled on this
+	// side: while locked, every poller kept firing on its own timer and
+	// every tick wrote a 403 to the access log. The operator's instance
+	// produced 233 of them in one day -- 117 on /system/version and 116
+	// on /observability/alert-events, the notification bell's two calls
+	// at 60s over about two hours of being locked. The notifications
+	// store swallows the error by design ("a version-check failure must
+	// not break the panel"), so nothing ever stopped.
+	//
+	// That noise is not cosmetic. CrowdSec parses this access log, and
+	// crowdsecurity/http-admin-interface-probing bans an IP for a
+	// handful of 403s on admin paths -- which is how two of the
+	// operator's blog editors were banned on 2026-10-04 by Ghost's own
+	// 403s. /api/v1/... is not in that scenario's path list today. That
+	// is luck, not safety: Arenet should not generate hundreds of 403s
+	// from its own idle interface.
+	//
+	// The layout heartbeat already had this gate, with the reasoning in
+	// its comment ("locked sessions get a 403 ... we skip to avoid the
+	// noise"). Putting it here covers every poller instead of three,
+	// and any poller added later inherits it.
+	//
+	// Only BACKGROUND requests are short-circuited. The unlock itself
+	// is user-initiated, so it never carries the header and always
+	// reaches the server.
 	try {
+		// Inside the try so the finally below clears the abort timer and
+		// closes the loading counter — the same cleanup every other
+		// exit path gets. Outside it, this would leak the setTimeout
+		// the line above just armed.
+		if (background && auth.state === 'locked') {
+			throw new ApiError('session locked', 403, 'forbidden');
+		}
+
 		const init: RequestInit = {
 			method,
 			credentials: 'include',
