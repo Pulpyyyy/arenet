@@ -124,6 +124,7 @@ func TestMetricsEndpoints_Viewer200(t *testing.T) {
 	for _, path := range []string{
 		"/api/v1/metrics/timeseries?route=" + m.routeID + "&metric=req_per_sec&window=24h",
 		"/api/v1/metrics/summary",
+		"/api/v1/metrics/route-summary?route=" + m.routeID,
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.AddCookie(cookie)
@@ -142,6 +143,7 @@ func TestMetricsEndpoints_Anon401(t *testing.T) {
 	for _, path := range []string{
 		"/api/v1/metrics/timeseries?route=" + m.routeID + "&metric=req_per_sec&window=24h",
 		"/api/v1/metrics/summary",
+		"/api/v1/metrics/route-summary?route=" + m.routeID,
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
@@ -1564,5 +1566,310 @@ func TestMetricsSummary_TotalRateLimitExceeded_RollingWindowIncludesCurrentHour(
 		if callTime.Sub(hourTs) > time.Second {
 			t.Errorf("captured `to` (%v) equals hour-truncated boundary — hour-alignment regression", capturedTo)
 		}
+	}
+}
+
+// --- /metrics/route-summary --------------------------------------------------
+
+// seedRouteSummaryHours inserts one bucket_1h row per entry,
+// walking backwards from the just-closed hour. Returns the
+// observability store so the caller can keep seeding.
+func seedRouteSummaryHours(t *testing.T, m *metricsTestEnv, rows []observability.MetricBucket) *observability.Store {
+	t.Helper()
+	obsStore, err := observability.Open(context.Background(), ":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = obsStore.Close() })
+	m.env.handler.SetMetricsReader(obsStore)
+
+	prevHour := time.Now().UTC().Truncate(time.Hour).Add(-time.Hour)
+	seeded := make([]observability.MetricBucket, 0, len(rows))
+	for i, row := range rows {
+		row.RouteID = m.routeID
+		row.Ts = prevHour.Add(-time.Duration(i) * time.Hour)
+		seeded = append(seeded, row)
+	}
+	if err := obsStore.InsertBatch(context.Background(), observability.Granularity1h, seeded); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	return obsStore
+}
+
+// TestMetricsRouteSummary_WireShape pins the literal JSON, not
+// the Go struct. A typed decode would pass just as happily
+// against a camelCase/snake_case mismatch the frontend cannot
+// read — the failure mode that shipped once already (13 typed
+// tests, one unreadable field).
+func TestMetricsRouteSummary_WireShape(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	seedRouteSummaryHours(t, m, []observability.MetricBucket{
+		{ReqCount: 100, FourxxCount: 4, FivexxCount: 1, LatencyP95Ms: 200},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/route-summary?route="+m.routeID, nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var wire map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, rec.Body.String())
+	}
+
+	// Every key the frontend reads, spelled exactly as the
+	// frontend spells it.
+	for _, key := range []string{"routeId", "generatedAt", "windowSeconds", "reqs", "fourxx", "fivexx", "p95LatencyMs"} {
+		if _, ok := wire[key]; !ok {
+			t.Errorf("wire key %q missing; got %s", key, rec.Body.String())
+		}
+	}
+	if got := wire["routeId"]; got != m.routeID {
+		t.Errorf("routeId = %v, want %q", got, m.routeID)
+	}
+	if got := wire["reqs"]; got != float64(100) {
+		t.Errorf("reqs = %v, want 100", got)
+	}
+	if got := wire["fourxx"]; got != float64(4) {
+		t.Errorf("fourxx = %v, want 4", got)
+	}
+	if got := wire["fivexx"]; got != float64(1) {
+		t.Errorf("fivexx = %v, want 1", got)
+	}
+	if got := wire["p95LatencyMs"]; got != float64(200) {
+		t.Errorf("p95LatencyMs = %v, want 200", got)
+	}
+	if got := wire["windowSeconds"]; got != float64(86400) {
+		t.Errorf("windowSeconds = %v, want 86400 — must match /metrics/summary's window", got)
+	}
+	// `disabled` carries omitempty: absent means "healthy", and
+	// the frontend's optional field reads undefined. Asserting
+	// its ABSENCE is what stops a future `json:"disabled"`
+	// without omitempty from quietly shipping `false`.
+	if _, present := wire["disabled"]; present {
+		t.Errorf("disabled present on the healthy path; want omitted, got %s", rec.Body.String())
+	}
+}
+
+// TestMetricsRouteSummary_NotTruncatedLikeTopRoutes is the
+// reason this endpoint exists. /metrics/summary ranks routes by
+// traffic and keeps five; a route outside that top five must
+// still get its own real numbers here.
+func TestMetricsRouteSummary_NotTruncatedLikeTopRoutes(t *testing.T) {
+	m := newMetricsTestEnv(t)
+
+	obsStore, err := observability.Open(context.Background(), ":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = obsStore.Close() })
+	m.env.handler.SetMetricsReader(obsStore)
+
+	prevHour := time.Now().UTC().Truncate(time.Hour).Add(-time.Hour)
+	ctx := context.Background()
+
+	// Six busier routes, so the seeded route ranks seventh and
+	// is guaranteed to fall outside topRoutes' five slots.
+	seeded := []observability.MetricBucket{
+		{RouteID: m.routeID, Ts: prevHour, ReqCount: 10, FourxxCount: 2, FivexxCount: 1, LatencyP95Ms: 50},
+	}
+	for i := 0; i < 6; i++ {
+		rt, cerr := m.env.store.CreateRoute(ctx, storage.Route{
+			Host:      "busy" + string(rune('a'+i)) + ".test",
+			Upstreams: []storage.Upstream{{URL: "http://127.0.0.1:1", Weight: 1}},
+			LBPolicy:  storage.LBPolicyRoundRobin,
+		})
+		if cerr != nil {
+			t.Fatalf("seed busy route: %v", cerr)
+		}
+		seeded = append(seeded, observability.MetricBucket{
+			RouteID: rt.ID, Ts: prevHour, ReqCount: int64(1000 + i), LatencyP95Ms: 10,
+		})
+	}
+	if err := obsStore.InsertBatch(ctx, observability.Granularity1h, seeded); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// First establish the premise: the route really is absent
+	// from /metrics/summary's topRoutes. Without this the test
+	// could pass for the wrong reason.
+	sreq := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/summary", nil)
+	srec := httptest.NewRecorder()
+	m.router.ServeHTTP(srec, sreq)
+	var summary summaryResponse
+	if err := json.NewDecoder(srec.Body).Decode(&summary); err != nil {
+		t.Fatalf("decode summary: %v", err)
+	}
+	for _, tr := range summary.TopRoutes {
+		if tr.RouteID == m.routeID {
+			t.Fatalf("premise broken: route %s is IN topRoutes (%d entries) — pick a quieter fixture", m.routeID, len(summary.TopRoutes))
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/route-summary?route="+m.routeID, nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp routeSummaryResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Reqs != 10 || resp.Fourxx != 2 || resp.Fivexx != 1 {
+		t.Errorf("reqs/4xx/5xx = %d/%d/%d, want 10/2/1 — a route outside topRoutes must still report its real counters", resp.Reqs, resp.Fourxx, resp.Fivexx)
+	}
+}
+
+func TestMetricsRouteSummary_SumsEveryHourInTheWindow(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	// Three consecutive closed hours. The response must be the
+	// sum, not the latest hour.
+	seedRouteSummaryHours(t, m, []observability.MetricBucket{
+		{ReqCount: 10, FourxxCount: 1, FivexxCount: 0, LatencyP95Ms: 100},
+		{ReqCount: 20, FourxxCount: 2, FivexxCount: 1, LatencyP95Ms: 100},
+		{ReqCount: 30, FourxxCount: 3, FivexxCount: 2, LatencyP95Ms: 100},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/route-summary?route="+m.routeID, nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	var resp routeSummaryResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Reqs != 60 {
+		t.Errorf("reqs = %d, want 60 (10+20+30)", resp.Reqs)
+	}
+	if resp.Fourxx != 6 {
+		t.Errorf("fourxx = %d, want 6 (1+2+3)", resp.Fourxx)
+	}
+	if resp.Fivexx != 3 {
+		t.Errorf("fivexx = %d, want 3 (0+1+2)", resp.Fivexx)
+	}
+}
+
+// TestMetricsRouteSummary_P95IsRequestWeighted guards the
+// statistic the field's doc comment claims. An unweighted mean
+// of {100, 400} is 250; weighted by {90, 10} requests it is
+// 130. A quiet hour with a terrible p95 must not drag the
+// headline number up to where it misreports the experience of
+// the requests that actually happened.
+func TestMetricsRouteSummary_P95IsRequestWeighted(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	seedRouteSummaryHours(t, m, []observability.MetricBucket{
+		{ReqCount: 90, LatencyP95Ms: 100},
+		{ReqCount: 10, LatencyP95Ms: 400},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/route-summary?route="+m.routeID, nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	var resp routeSummaryResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.P95LatencyMs == nil {
+		t.Fatalf("p95LatencyMs = null, want 130")
+	}
+	if got := *resp.P95LatencyMs; got < 129.9 || got > 130.1 {
+		t.Errorf("p95LatencyMs = %v, want 130 (request-weighted); 250 would mean an unweighted mean", got)
+	}
+}
+
+// TestMetricsRouteSummary_NoTrafficP95IsNull — 0 ms would read
+// as "instant" in the UI. The absence of a measurement has to
+// stay distinguishable from a measurement of zero.
+func TestMetricsRouteSummary_NoTrafficP95IsNull(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	seedRouteSummaryHours(t, m, []observability.MetricBucket{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/route-summary?route="+m.routeID, nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var wire map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if v, present := wire["p95LatencyMs"]; !present || v != nil {
+		t.Errorf("p95LatencyMs = %v (present=%v), want explicit null", v, present)
+	}
+	if got := wire["reqs"]; got != float64(0) {
+		t.Errorf("reqs = %v, want 0", got)
+	}
+}
+
+func TestMetricsRouteSummary_NilReader_DisabledResponse(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	// metrics reader intentionally left nil (boot-failed).
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/route-summary?route="+m.routeID, nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (degraded mode is OK, not 5xx)", rec.Code)
+	}
+	var resp routeSummaryResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Disabled {
+		t.Errorf("disabled = false, want true")
+	}
+	if resp.Reqs != 0 || resp.P95LatencyMs != nil {
+		t.Errorf("counters = %d/%v, want zero and null when disabled", resp.Reqs, resp.P95LatencyMs)
+	}
+}
+
+func TestMetricsRouteSummary_BadParams(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	for _, tc := range []struct {
+		name string
+		path string
+		want int
+	}{
+		{"missing route", "/api/v1/metrics/route-summary", http.StatusBadRequest},
+		{"empty route", "/api/v1/metrics/route-summary?route=", http.StatusBadRequest},
+		// The "all" sentinel is valid on /metrics/timeseries.
+		// Here it must be refused rather than silently treated
+		// as a route ID that does not exist (404 would be a
+		// lie about why).
+		{"all sentinel", "/api/v1/metrics/route-summary?route=all", http.StatusBadRequest},
+		{"unknown route", "/api/v1/metrics/route-summary?route=00000000-0000-0000-0000-000000000000", http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			m.router.ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Errorf("status = %d, want %d; body=%s", rec.Code, tc.want, rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestMetricsRouteSummary_QueryError_503 mirrors the summary's
+// AC #13 contract: a metrics.db read failure is a 503, not a
+// 200 full of zeros that the operator would read as "no
+// traffic".
+func TestMetricsRouteSummary_QueryError_503(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	m.env.handler.SetMetricsReader(&fakeMetricsReader{
+		queryFn: func(context.Context, observability.Granularity, string, time.Time, time.Time) ([]observability.MetricBucket, error) {
+			return nil, errors.New("disk on fire")
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/route-summary?route="+m.routeID, nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503 — a read failure must not look like zero traffic", rec.Code)
 	}
 }

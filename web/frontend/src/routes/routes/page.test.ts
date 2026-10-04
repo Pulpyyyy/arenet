@@ -143,6 +143,19 @@ const asnMock = vi.hoisted(() => ({
 	searchASN: vi.fn(),
 	namesASN: vi.fn()
 }));
+
+// The panel header metrics strip reads GET /metrics/route-summary
+// on every panel open. Unmocked, the real wrapper would reach for
+// `request` from the mocked client module, which does not export
+// it — the page would swallow the throw and the strip would simply
+// never render, so every strip test would pass for the wrong
+// reason. Default is a rejection: the common case in this file is
+// a test that does not care about the strip, and a rejection is
+// what "no metrics here" has to look like.
+const metricsMock = vi.hoisted(() => ({
+	fetchRouteSummary: vi.fn()
+}));
+vi.mock('$lib/api/metrics', () => metricsMock);
 vi.mock('$lib/api/security', () => asnMock);
 vi.mock('$lib/api/external-certs', () => ({
 	externalCertsApi: {
@@ -251,6 +264,7 @@ beforeEach(() => {
 	apiMock.exitMaintenance.mockReset();
 	settingsMock.listDNSProviders.mockReset();
 	externalCertsMock.list.mockReset();
+	metricsMock.fetchRouteSummary.mockReset();
 	// Day 13 — auth store defaults: every test starts in
 	// authenticated state. Tests exercising the lock-screen-
 	// during-save branch flip authMock.state = 'locked' before
@@ -265,6 +279,7 @@ beforeEach(() => {
 	apiMock.listRoutes.mockResolvedValue([]);
 	settingsMock.listDNSProviders.mockResolvedValue([]);
 	externalCertsMock.list.mockResolvedValue([]);
+	metricsMock.fetchRouteSummary.mockRejectedValue(new Error('no metrics in this test'));
 });
 
 // Opens the create form (clicks "+ Add route") and returns after
@@ -5660,5 +5675,172 @@ describe('Routes page — reaching metrics and security', () => {
 			'/security/r-nav'
 		);
 		expect(screen.queryByTestId('panel-pivot-pending')).not.toBeInTheDocument();
+	});
+});
+
+// --- Panel header metrics strip ---------------------------------------------
+//
+// Four numbers in the panel header so "is this route alive and
+// healthy?" is answerable without leaving the form. The tests
+// below are mostly about what the strip must NOT say: an absent
+// measurement and a measurement of zero are different facts, and
+// conflating them is the failure that matters here.
+describe('routes page: panel header metrics strip', () => {
+	function seededRoute() {
+		return makeRoute({ id: 'r-strip', host: 'strip.example.com' });
+	}
+
+	async function openStripPanel() {
+		apiMock.listRoutes.mockResolvedValue([seededRoute()]);
+		render(Page);
+		const row = (await screen.findByText('strip.example.com')).closest('tr')!;
+		await userEvent.click(row);
+		await tick();
+	}
+
+	function summary(over: Record<string, unknown> = {}) {
+		return {
+			routeId: 'r-strip',
+			generatedAt: '2026-10-04T12:00:00Z',
+			windowSeconds: 86400,
+			reqs: 1234,
+			fourxx: 12,
+			fivexx: 0,
+			p95LatencyMs: 184.4,
+			...over
+		};
+	}
+
+	it('shows the route traffic once the summary resolves', async () => {
+		metricsMock.fetchRouteSummary.mockResolvedValue(summary());
+		await openStripPanel();
+
+		const strip = await screen.findByTestId('panel-metrics-strip');
+		expect(within(strip).getByTestId('panel-metrics-reqs').textContent).toContain('1,234');
+		expect(within(strip).getByTestId('panel-metrics-fourxx').textContent).toContain('12');
+		// 184.4 ms rounds to 184 — a decimal of a millisecond is
+		// noise in a header.
+		expect(within(strip).getByTestId('panel-metrics-p95').textContent).toContain('184 ms');
+	});
+
+	it('asks for the summary of the route that was selected', async () => {
+		metricsMock.fetchRouteSummary.mockResolvedValue(summary());
+		await openStripPanel();
+		expect(metricsMock.fetchRouteSummary).toHaveBeenCalledWith('r-strip');
+	});
+
+	it('renders no strip at all while the summary is in flight', async () => {
+		// A skeleton of zeros would be read as "this route served
+		// nothing", which is a different fact from "we do not know
+		// yet". Never render a number we do not have.
+		metricsMock.fetchRouteSummary.mockReturnValue(new Promise(() => {}));
+		await openStripPanel();
+		expect(screen.queryByTestId('panel-metrics-strip')).not.toBeInTheDocument();
+	});
+
+	it('renders no strip when the summary request fails', async () => {
+		metricsMock.fetchRouteSummary.mockRejectedValue(new ApiError('boom', 503, 'system'));
+		await openStripPanel();
+		await tick();
+		expect(screen.queryByTestId('panel-metrics-strip')).not.toBeInTheDocument();
+		// And it must not shout about it over a form being edited.
+		expect(toastMock.pushToast).not.toHaveBeenCalled();
+	});
+
+	it('says the metrics are unavailable rather than showing zeros in degraded mode', async () => {
+		// disabled=true means the observability subsystem failed at
+		// boot. Its counters are all zero and they mean "unknown".
+		metricsMock.fetchRouteSummary.mockResolvedValue(
+			summary({ disabled: true, reqs: 0, fourxx: 0, fivexx: 0, p95LatencyMs: null })
+		);
+		await openStripPanel();
+
+		await screen.findByTestId('panel-metrics-unavailable');
+		expect(screen.queryByTestId('panel-metrics-reqs')).not.toBeInTheDocument();
+	});
+
+	it('distinguishes a route with no traffic from a route it cannot measure', async () => {
+		metricsMock.fetchRouteSummary.mockResolvedValue(
+			summary({ reqs: 0, fourxx: 0, fivexx: 0, p95LatencyMs: null })
+		);
+		await openStripPanel();
+
+		await screen.findByTestId('panel-metrics-nodata');
+		expect(screen.queryByTestId('panel-metrics-unavailable')).not.toBeInTheDocument();
+		expect(screen.queryByTestId('panel-metrics-reqs')).not.toBeInTheDocument();
+	});
+
+	it('renders a null p95 as a dash, never as 0 ms', async () => {
+		// The route served traffic but no latency was recorded. 0 ms
+		// would read as "instant"; the honest answer is "not
+		// measured".
+		metricsMock.fetchRouteSummary.mockResolvedValue(summary({ p95LatencyMs: null }));
+		await openStripPanel();
+
+		const p95 = await screen.findByTestId('panel-metrics-p95');
+		expect(p95.textContent).toContain('—');
+		expect(p95.textContent).not.toContain('0 ms');
+	});
+
+	it('tints the 5xx count only when there are 5xx', async () => {
+		metricsMock.fetchRouteSummary.mockResolvedValue(summary({ fivexx: 7 }));
+		await openStripPanel();
+
+		const fivexx = await screen.findByTestId('panel-metrics-fivexx');
+		expect(fivexx.querySelector('.text-down')).not.toBeNull();
+		// A 4xx is ordinary traffic on a public host — tinting it
+		// would cry wolf on every route that a bot ever probed.
+		const fourxx = screen.getByTestId('panel-metrics-fourxx');
+		expect(fourxx.querySelector('.text-down')).toBeNull();
+	});
+
+	it('leaves the 5xx count untinted at zero', async () => {
+		metricsMock.fetchRouteSummary.mockResolvedValue(summary({ fivexx: 0 }));
+		await openStripPanel();
+
+		const fivexx = await screen.findByTestId('panel-metrics-fivexx');
+		expect(fivexx.querySelector('.text-down')).toBeNull();
+	});
+
+	it('shows no strip in create mode', async () => {
+		metricsMock.fetchRouteSummary.mockResolvedValue(summary());
+		render(Page);
+		await openCreateForm();
+		expect(screen.queryByTestId('panel-metrics-strip')).not.toBeInTheDocument();
+		expect(metricsMock.fetchRouteSummary).not.toHaveBeenCalled();
+	});
+
+	it('drops a stale summary that lands after the operator moved on', async () => {
+		// Click route A, then B before A's request resolves. A's
+		// numbers must not appear under B's host — the bug class
+		// where a slow response overwrites a newer selection.
+		const a = makeRoute({ id: 'r-a', host: 'a.example.com' });
+		const b = makeRoute({ id: 'r-b', host: 'b.example.com' });
+		apiMock.listRoutes.mockResolvedValue([a, b]);
+
+		let resolveA: (v: unknown) => void = () => {};
+		metricsMock.fetchRouteSummary.mockImplementation((id: string) => {
+			if (id === 'r-a') return new Promise((res) => (resolveA = res));
+			return Promise.resolve(summary({ routeId: 'r-b', reqs: 42 }));
+		});
+
+		render(Page);
+		const rowA = (await screen.findByText('a.example.com')).closest('tr')!;
+		await userEvent.click(rowA);
+		await tick();
+
+		const rowB = (await screen.findByText('b.example.com')).closest('tr')!;
+		await userEvent.click(rowB);
+		await tick();
+		await waitFor(() =>
+			expect(screen.getByTestId('panel-metrics-reqs').textContent).toContain('42')
+		);
+
+		// A's response arrives late, for a route no longer shown.
+		resolveA(summary({ routeId: 'r-a', reqs: 999 }));
+		await tick();
+		await tick();
+		expect(screen.getByTestId('panel-metrics-reqs').textContent).toContain('42');
+		expect(screen.getByTestId('panel-metrics-reqs').textContent).not.toContain('999');
 	});
 });

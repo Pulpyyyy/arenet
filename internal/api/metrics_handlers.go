@@ -163,12 +163,12 @@ type summaryRoute struct {
 //     reaches the traffic top-5. Nullable when no WAF
 //     activity (operator sees an honest zero).
 type summaryResponse struct {
-	GeneratedAt    string `json:"generatedAt"`
-	WindowSeconds  int    `json:"windowSeconds"`
-	Disabled       bool   `json:"disabled,omitempty"`
-	TotalReq       uint64 `json:"totalReq"`
-	TotalFourXx    uint64 `json:"totalFourXx"`
-	TotalFiveXx    uint64 `json:"totalFiveXx"`
+	GeneratedAt     string `json:"generatedAt"`
+	WindowSeconds   int    `json:"windowSeconds"`
+	Disabled        bool   `json:"disabled,omitempty"`
+	TotalReq        uint64 `json:"totalReq"`
+	TotalFourXx     uint64 `json:"totalFourXx"`
+	TotalFiveXx     uint64 `json:"totalFiveXx"`
 	TotalWafBlocked uint64 `json:"totalWafBlocked"`
 	// #R-DASHBOARD-WAF-COUNTERS-ZERO — sibling counter
 	// sourced from waf_detect_count bucket column.
@@ -176,7 +176,7 @@ type summaryResponse struct {
 	// Step Q.3 / N.3 — independent counters. AC #15: a
 	// throttle / crowdsec event does NOT inflate the 4xx /
 	// 5xx / waf fields.
-	TotalThrottle           uint64 `json:"totalThrottle"`
+	TotalThrottle uint64 `json:"totalThrottle"`
 	// Step Z.2 — rate-limit (429) counter over the window.
 	// Sourced from a window-scoped COUNT(*) on the
 	// rate_limit_event table (NOT a bucket — the per-route
@@ -184,10 +184,10 @@ type summaryResponse struct {
 	// this dashboard total). Independent of the other counters
 	// per the same AC #15 principle : a 429 must NOT inflate
 	// totalFourXx or totalThrottle.
-	TotalRateLimitExceeded  uint64 `json:"totalRateLimitExceeded"`
-	TotalAuthFailures       uint64 `json:"totalAuthFailures"`
-	AttackerIpsUnique       int    `json:"attackerIpsUnique"` // union over WAF + throttle + audit + crowdsec
-	TotalCrowdSecDecisions  uint64 `json:"totalCrowdSecDecisions"`
+	TotalRateLimitExceeded uint64 `json:"totalRateLimitExceeded"`
+	TotalAuthFailures      uint64 `json:"totalAuthFailures"`
+	AttackerIpsUnique      int    `json:"attackerIpsUnique"` // union over WAF + throttle + audit + crowdsec
+	TotalCrowdSecDecisions uint64 `json:"totalCrowdSecDecisions"`
 	// ActiveCrowdSecIpsUnique counts distinct decision
 	// `value` strings (IP / CIDR / country / AS). No time
 	// projection involved — name unchanged.
@@ -406,10 +406,10 @@ func (h *Handler) metricsSummary(w http.ResponseWriter, r *http.Request) {
 	from := hourTs.Add(-summaryWindow)
 	to := hourTs
 	resp := summaryResponse{
-		GeneratedAt:         now.Format(time.RFC3339),
-		WindowSeconds:       int(summaryWindow / time.Second),
-		TopRoutes:           []summaryRoute{},
-		WafBlocksByCategory: map[string]uint64{},
+		GeneratedAt:          now.Format(time.RFC3339),
+		WindowSeconds:        int(summaryWindow / time.Second),
+		TopRoutes:            []summaryRoute{},
+		WafBlocksByCategory:  map[string]uint64{},
 		WafDetectsByCategory: map[string]uint64{},
 	}
 
@@ -960,4 +960,121 @@ func sortTopByReqs(s []summaryRoute) {
 			s[j], s[j-1] = s[j-1], s[j]
 		}
 	}
+}
+
+// routeSummaryResponse is the wire shape of
+// GET /api/v1/metrics/route-summary?route=<uuid> — the 24h
+// traffic aggregate for ONE route.
+//
+// Why this exists rather than reading metricsSummary's
+// TopRoutes: that list is hard-truncated to the five busiest
+// routes (see the `top = top[:5]` above). A per-route surface
+// fed from it would show real numbers for five routes and
+// silent zeros for every other one, which is worse than no
+// numbers at all. The aggregation itself is the same — one
+// indexed read of bucket_1h over at most 24 rows — so a
+// single-route endpoint costs one SELECT instead of one per
+// route plus the WAF, CrowdSec and audit work the full
+// summary also does.
+//
+// The window boundaries are computed exactly as metricsSummary
+// computes them (summaryWindow back from the top of the
+// current hour) so the two surfaces can never disagree about
+// what "last 24 hours" means.
+//
+// AC #6 carries forward: Fourxx and Fivexx stay independent
+// fields, never collapsed into one "errors" number.
+type routeSummaryResponse struct {
+	RouteID       string `json:"routeId"`
+	GeneratedAt   string `json:"generatedAt"`
+	WindowSeconds int    `json:"windowSeconds"`
+	// Disabled mirrors summaryResponse.Disabled: true when the
+	// observability subsystem failed at boot. Counters stay at
+	// zero and the UI renders "unavailable", not an error.
+	Disabled bool   `json:"disabled,omitempty"`
+	Reqs     uint64 `json:"reqs"`
+	Fourxx   uint64 `json:"fourxx"`
+	Fivexx   uint64 `json:"fivexx"`
+	// P95LatencyMs is the request-weighted mean of the hourly
+	// p95 samples in the window, using the same weighting as
+	// summaryResponse.GlobalP95LatencyMs. It is NOT a true 24h
+	// p95: that cannot be recovered from pre-aggregated
+	// percentiles. null when the route served no traffic with a
+	// recorded latency, so the UI shows "—" rather than 0 ms,
+	// which would read as "instant".
+	P95LatencyMs *float64 `json:"p95LatencyMs"`
+}
+
+// metricsRouteSummary handles
+// GET /api/v1/metrics/route-summary?route=<uuid>.
+//
+// Unlike metricsTimeseries it takes no `window` parameter:
+// the single window is summaryWindow, shared with
+// metricsSummary. Unlike metricsSummary it takes no "all"
+// sentinel — callers wanting the system-wide totals already
+// have /metrics/summary, and accepting the sentinel here would
+// duplicate that surface with a narrower shape.
+func (h *Handler) metricsRouteSummary(w http.ResponseWriter, r *http.Request) {
+	routeID := r.URL.Query().Get("route")
+	if routeID == "" {
+		writeError(w, http.StatusBadRequest, "route is required")
+		return
+	}
+	if routeID == routeAllSentinel {
+		writeError(w, http.StatusBadRequest, "route must be a route ID; use /metrics/summary for the global totals")
+		return
+	}
+
+	// 404 before touching metrics.db: an unknown route ID must
+	// not come back as a plausible row of zeros.
+	if _, err := h.store.GetRoute(r.Context(), routeID); err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "route not found")
+			return
+		}
+		h.logger.Error("metrics: route summary lookup failed", "err", err, "route", routeID)
+		writeError(w, http.StatusServiceUnavailable, "storage unavailable")
+		return
+	}
+
+	now := time.Now().UTC()
+	resp := routeSummaryResponse{
+		RouteID:       routeID,
+		GeneratedAt:   now.Format(time.RFC3339),
+		WindowSeconds: int(summaryWindow / time.Second),
+	}
+
+	if h.metrics == nil {
+		resp.Disabled = true
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	hourTs := now.Truncate(time.Hour)
+	from := hourTs.Add(-summaryWindow)
+	to := hourTs
+
+	rows, err := h.metrics.Query(r.Context(), observability.Granularity1h, routeID, from, to)
+	if err != nil {
+		h.logger.Error("metrics: route summary query failed", "err", err, "route", routeID)
+		writeError(w, http.StatusServiceUnavailable, "metrics history unavailable")
+		return
+	}
+
+	var latencyWeightedSum, latencyWeightDen uint64
+	for _, row := range rows {
+		resp.Reqs += uint64(row.ReqCount)
+		resp.Fourxx += uint64(row.FourxxCount)
+		resp.Fivexx += uint64(row.FivexxCount)
+		if row.LatencyP95Ms > 0 && row.ReqCount > 0 {
+			latencyWeightedSum += uint64(row.LatencyP95Ms) * uint64(row.ReqCount)
+			latencyWeightDen += uint64(row.ReqCount)
+		}
+	}
+	if latencyWeightDen > 0 {
+		p95 := float64(latencyWeightedSum) / float64(latencyWeightDen)
+		resp.P95LatencyMs = &p95
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }

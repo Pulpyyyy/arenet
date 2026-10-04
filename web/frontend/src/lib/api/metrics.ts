@@ -11,7 +11,8 @@ import type {
 	MetricName,
 	MetricWindow,
 	TimeseriesResponse,
-	SummaryResponse
+	SummaryResponse,
+	RouteSummaryResponse
 } from './types';
 
 /**
@@ -42,4 +43,23 @@ export function fetchTimeseries(
  */
 export function fetchSummary(): Promise<SummaryResponse> {
 	return request<SummaryResponse>('GET', '/metrics/summary');
+}
+
+/**
+ * Fetch one route's 24h traffic aggregate (requests, 4xx, 5xx,
+ * weighted p95).
+ *
+ * Deliberately a separate endpoint rather than a read of
+ * `fetchSummary().topRoutes`: that list keeps only the five
+ * busiest routes, so every quieter route would silently show
+ * zeros. Server-side this costs one indexed read of bucket_1h
+ * over at most 24 rows.
+ *
+ * On the degraded-mode path the response has disabled=true and
+ * every counter at zero — callers MUST treat that as "unknown"
+ * and render a placeholder, not as "no traffic".
+ */
+export function fetchRouteSummary(routeId: string): Promise<RouteSummaryResponse> {
+	const qs = new URLSearchParams({ route: routeId });
+	return request<RouteSummaryResponse>('GET', `/metrics/route-summary?${qs.toString()}`);
 }

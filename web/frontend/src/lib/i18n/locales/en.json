@@ -367,7 +367,14 @@
 			"metricsLink": "Metrics for this route →",
 			"pivotsAfterSave": "Metrics and security open after the first save",
 			"securityLink": "Security for this route →",
-			"deleteButton": "Delete"
+			"deleteButton": "Delete",
+			"stripWindow": "last 24 h",
+			"stripReqs": "requests",
+			"stripFourxx": "4xx",
+			"stripFivexx": "5xx",
+			"stripP95": "p95",
+			"stripNoData": "no data yet",
+			"stripUnavailable": "metrics unavailable"
 		},
 		"delete": {
 			"title": "Delete route",
@@ -410,7 +417,7 @@
 			"upstreamsWeightPlaceholder": "1",
 			"upstreamTlsServerNameLabel": "Upstream TLS server name",
 			"upstreamTlsServerNamePlaceholder": "backend.example.com",
-			"upstreamTlsServerNameHelper": "Presented in SNI and verified against the backend\u2019s certificate. Leave empty to use the upstream address.",
+			"upstreamTlsServerNameHelper": "Presented in SNI and verified against the backend’s certificate. Leave empty to use the upstream address.",
 			"upstreamsInsecureSkipVerifyLabel": "Skip upstream certificate verification",
 			"lbPolicyLabel": "Load balancing policy",
 			"lbSectionLabel": "Load balancing",
