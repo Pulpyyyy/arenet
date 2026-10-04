@@ -163,6 +163,13 @@ func buildRoute(r *storage.Route, metrics MetricsView, status StatusLookup) Rout
 		ClusterLabel:   r.Host,
 	}
 
+	// v2.61 — a redirecting route's destination, so the canvas can draw
+	// where the traffic goes instead of an empty cluster complaining
+	// that no upstream is configured.
+	if r.RedirectConfig != nil {
+		out.RedirectTarget = r.RedirectConfig.Target
+	}
+
 	// Build the upstream list via the shared conversion helper (also
 	// used by the path-pool loop below).
 	out.Upstreams = buildUpstreams(r.Upstreams, r.ID, agg, r.HealthCheck.Enabled, status)

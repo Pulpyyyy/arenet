@@ -2424,6 +2424,9 @@
 		"ipEnforcementHelper": "The full timeline of blocked IPs (auto + manual). Manual list management is deferred (see backlog)."
 	},
 	"topology": {
+		"viewProxy": "Proxy",
+		"viewRedirect": "Redirects",
+		"viewAriaLabel": "Topology view",
 		"emptyTitle": "Nothing to draw yet",
 		"emptyBody": "The graph shows your hostnames, the Arenet hub and the backends behind it, with live traffic on the links. Create a route and it appears here within seconds.",
 		"emptyAction": "Create a route",

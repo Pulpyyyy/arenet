@@ -39,6 +39,10 @@
         let headerCountLine = $derived(formatHeaderCountLine(data));
 
         function deriveClusterState(d: BackendClusterNodeData): 'healthy' | 'warn' | 'bad' | 'neutral' {
+                // v2.61 — a redirecting route legitimately has no upstream, so
+                // zero must not paint it red. It is neutral: configured, not
+                // monitored, and not broken.
+                if (d.redirectTarget) return 'neutral';
                 if (d.totalCount === 0) return 'bad';
                 // Strictly-unhealthy upstreams drive the bad/warn states.
                 // 'unknown' is now neutral — no green lie, no red panic.
@@ -54,6 +58,7 @@
         }
 
         function formatHeaderCountLine(d: BackendClusterNodeData): string {
+                if (d.redirectTarget) return 'redirection';
                 if (d.totalCount === 0) return '0 upstream';
                 // v1.1.0 norm: every upstream reports unknown. Drop the
                 // "sains" qualifier entirely — claiming X-of-Y sains
@@ -107,6 +112,17 @@
                         <span class="health-ratio">{headerCountLine}</span>
                 </div>
         </header>
+
+        {#if data.redirectTarget}
+                <!-- v2.61 — the destination, where an empty pool used to
+                     sit under a red warning. The graph's job is to say
+                     where traffic goes; for a redirect the answer is
+                     simply not a backend. -->
+                <div class="cluster-redirect" data-testid="cluster-redirect-target">
+                        <span class="redirect-arrow" aria-hidden="true">→</span>
+                        <span class="redirect-target">{data.redirectTarget}</span>
+                </div>
+        {/if}
 
         {#if data.warning}
                 <footer class="cluster-warning">
@@ -201,6 +217,26 @@
         .cluster-meta .sep {
                 margin: 0 6px;
                 color: var(--fg-dim, oklch(54% 0.011 250));
+        }
+
+        .cluster-redirect {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                padding: 8px 10px;
+                font-family: var(--font-mono);
+                font-size: var(--text-xs);
+                color: var(--text-secondary);
+                overflow: hidden;
+        }
+        .cluster-redirect .redirect-arrow {
+                color: var(--text-muted);
+                flex: 0 0 auto;
+        }
+        .cluster-redirect .redirect-target {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
         }
 
         .cluster-warning {

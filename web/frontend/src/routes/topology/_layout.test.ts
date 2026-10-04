@@ -29,6 +29,7 @@ import { describe, it, expect } from 'vitest';
 import { buildTopologyGraph, FQDN_HEIGHT, ROW_SPACING_Y } from './_layout';
 import type {
 	AliasNodeData,
+	BackendClusterNodeData,
 	FlowEdgeData,
 	FQDNNodeData,
 	RouteGroupNodeData,
@@ -1015,5 +1016,65 @@ describe('buildTopologyGraph — alias integration', () => {
 		// root edge(s) exist and are NOT structural
 		const rootEdges = edges.filter((e) => e.source === 'caddy-hub' && (e.data as any)?.structural !== true);
 		expect(rootEdges.length).toBeGreaterThanOrEqual(1);
+	});
+});
+
+// -----------------------------------------------------------------
+// v2.61 — a redirecting route on the canvas.
+//
+// It drew an EMPTY backend cluster carrying the red "Aucun upstream
+// configuré" warning, visually identical to a genuinely broken route.
+// The operator met it on 2026-10-03 and asked whether that was normal.
+// A redirect is not a route missing its backend; it is a route whose
+// destination is not a backend, and the graph now says so.
+// -----------------------------------------------------------------
+describe('buildTopologyGraph — redirecting routes', () => {
+	function redirectRoute(overrides: Partial<TopologyRoute> = {}): TopologyRoute {
+		return {
+			id: 'r-redirect',
+			host: 'old.example.com',
+			upstreams: [],
+			lbPolicy: 'round_robin',
+			reqPerSec: 0,
+			p99LatencyMs: 0,
+			errorRate5xx: 0,
+			tlsEnabled: true,
+			httpRedirect: false,
+			hasHealthCheck: false,
+			disabled: false,
+			redirectTarget: 'https://new.example.com',
+			...overrides
+		} as TopologyRoute;
+	}
+
+	it('carries no empty-pool warning', () => {
+		const { nodes } = buildTopologyGraph([redirectRoute()]);
+		const cluster = nodes.find((n) => n.id === 'cluster-r-redirect')!;
+		const data = cluster.data as BackendClusterNodeData;
+		expect(data.warning).toBeUndefined();
+	});
+
+	it('carries its destination so the graph can draw where traffic goes', () => {
+		const { nodes } = buildTopologyGraph([redirectRoute()]);
+		const cluster = nodes.find((n) => n.id === 'cluster-r-redirect')!;
+		const data = cluster.data as BackendClusterNodeData;
+		expect(data.redirectTarget).toBe('https://new.example.com');
+	});
+
+	it('still warns a route that has no upstream AND no redirect', () => {
+		// The guard must not swallow the real case it was written for.
+		const broken = redirectRoute({ id: 'r-broken', redirectTarget: undefined });
+		const { nodes } = buildTopologyGraph([broken]);
+		const data = nodes.find((n) => n.id === 'cluster-r-broken')!
+			.data as BackendClusterNodeData;
+		expect(data.warning).toBe('Aucun upstream configuré');
+	});
+
+	it('leaves a proxying route untouched', () => {
+		const { nodes } = buildTopologyGraph([makeRoute({ id: 'r-proxy' })]);
+		const data = nodes.find((n) => n.id === 'cluster-r-proxy')!
+			.data as BackendClusterNodeData;
+		expect(data.warning).toBeUndefined();
+		expect(data.redirectTarget).toBeUndefined();
 	});
 });
