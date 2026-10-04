@@ -291,9 +291,27 @@ func (h *Handler) ServeHTTP(
 		})
 	}
 
+	// v2.62 — name the refusal in the access log. Without this a
+	// country-block 403 is byte-indistinguishable from a backend's own
+	// 403, which is how an afternoon went on 2026-10-04. The value is
+	// read back by the log_append handler at the top of the chain; it
+	// is a Caddy var and not a response header deliberately, so a
+	// prober is not told which gate stopped them.
+	caddyhttp.SetVar(r.Context(), DeniedVarKey, DeniedReason)
+
 	w.WriteHeader(status)
 	return nil
 }
+
+// DeniedVarKey / DeniedReason mirror caddymgr's constants of the same
+// name. Duplicated rather than imported because countryblock must not
+// depend on caddymgr — the dependency runs the other way (caddymgr
+// emits the JSON that references this module). A test in caddymgr pins
+// that the two agree.
+const (
+	DeniedVarKey = "arenet_denied"
+	DeniedReason = "country"
+)
 
 // resolveSrcIP returns the trusted-proxy-aware client IP via
 // the GlobalClientIPFn seam, falling back to r.RemoteAddr

@@ -26,6 +26,7 @@ import (
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"go.uber.org/zap"
 )
 
 // Per spec §3.1 and §3.5: dotted module ID for Caddy's internal
@@ -303,8 +304,71 @@ func (h *RouteMetricsHandler) ServeHTTP(
 			sink.Submit(status, GlobalClientIPFn()(r), h.RouteID)
 		}
 	}()
-	return next.ServeHTTP(rec, r)
+	err = next.ServeHTTP(rec, r)
+	// v2.62 — copy the denying gate's verdict into the access log.
+	//
+	// This handler is already first in every route's chain and already
+	// wraps the response, so it is the natural place: no extra handler,
+	// no shift of the chain every other test pins, and one fewer
+	// middleware per route.
+	//
+	// It replaces a first attempt that emitted Caddy's own
+	// http.handlers.log_append. That worked, but it inserted a handler
+	// at position 1 and broke fifteen chain-order tests — and it wrote
+	// the field as an EMPTY value on every allowed request, because
+	// log_append adds the field unconditionally (logappend.go:158).
+	// Doing it here lets the field be absent when nothing denied,
+	// which is what an operator grepping their log actually wants.
+	_ = appendDenialLogField(r)
+	return err
 }
+
+// appendDenialLogField writes the arenet_denied field into the access
+// log when a gate set DeniedVarKey on this request, and writes nothing
+// otherwise.
+//
+// A LOG FIELD and not a response header, deliberately: a header would
+// be trivial but would tell a prober which gate stopped them, which is
+// information that helps them tune. Caddy installs the extra-log-field
+// holder on every request context (caddy/v2@v2.11.4
+// modules/caddyhttp/server.go:998) and the access log encoder reads it,
+// so nothing reaches the client.
+//
+// The need came from a production incident on 2026-10-04: two members
+// were banned by CrowdSec and establishing why took an afternoon,
+// because a 403 served by Arenet's WAF is byte-indistinguishable in the
+// access log from a 403 served by the backend.
+// It returns the reason it wrote, or "" when it wrote nothing, so the
+// decision is testable: caddyhttp.ExtraLogFields keeps its field slice
+// unexported, so a test cannot read back what Add received. The branches
+// are where the bugs would live anyway — var unset, wrong type, holder
+// missing — and Add itself is Caddy's, already covered upstream.
+func appendDenialLogField(r *http.Request) string {
+	ctx := r.Context()
+	reason, ok := caddyhttp.GetVar(ctx, DeniedVarKey).(string)
+	if !ok || reason == "" {
+		return ""
+	}
+	extra, ok := ctx.Value(caddyhttp.ExtraLogFieldsCtxKey).(*caddyhttp.ExtraLogFields)
+	if !ok || extra == nil {
+		// Defensive: only absent if something upstream replaced the
+		// request context. Losing a log field must never cost a
+		// request.
+		return ""
+	}
+	extra.Add(zap.String(DeniedLogField, reason))
+	return reason
+}
+
+// DeniedVarKey is the Caddy var an Arenet gate sets when it refuses a
+// request; DeniedLogField is the key it appears under in the access
+// log. Mirrored in internal/waf and internal/countryblock, which must
+// not import this package either — a test in caddymgr pins that every
+// copy agrees.
+const (
+	DeniedVarKey   = "arenet_denied"
+	DeniedLogField = "arenet_denied"
+)
 
 // statusSecurityBlock is the status recorded for a request ended by a
 // security block that owns its own counter (WAF): it counts in reqs
