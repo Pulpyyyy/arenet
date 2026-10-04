@@ -385,3 +385,81 @@ describe('enterMaintenance / exitMaintenance', () => {
 		expect(result).toEqual({ id: 'abc', maintenance: false });
 	});
 });
+
+// -----------------------------------------------------------------
+// v2.61.2 — a locked session refuses background traffic, so asking is
+// pointless.
+//
+// v2.32 taught the server to enforce the idle lock on background
+// requests without refreshing the session. The consequence was never
+// handled on this side: while locked, every poller kept firing and each
+// tick wrote a 403 to the access log. The operator's instance produced
+// 233 in one day — 117 on /system/version and 116 on
+// /observability/alert-events, the notification bell's two calls at 60s
+// over roughly two hours of being locked. The notifications store
+// swallows the error by design, so nothing ever stopped.
+//
+// Not cosmetic: CrowdSec parses that access log, and
+// http-admin-interface-probing bans an IP for a handful of 403s on
+// admin paths. /api/v1/... is not in that scenario's path list today —
+// luck, not safety.
+// -----------------------------------------------------------------
+describe('request: no background traffic while the session is locked', () => {
+	function spyFetch() {
+		const spy = vi.fn(
+			async () =>
+				new Response(JSON.stringify({}), {
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				})
+		);
+		(globalThis as { fetch?: unknown }).fetch = spy;
+		return spy;
+	}
+
+	it('does not even reach the network', async () => {
+		authMock.state = 'locked';
+		idleMock.userActiveSinceReset = false;
+		const spy = spyFetch();
+
+		await expect(request('GET', '/system/version')).rejects.toThrow(ApiError);
+		expect(spy).not.toHaveBeenCalled();
+	});
+
+	it('still lets a USER-triggered request through while locked', async () => {
+		// The unlock is user-initiated, so it never carries the
+		// background header. Short-circuiting it would lock the
+		// operator out of their own instance — the one failure mode
+		// this change must not have.
+		authMock.state = 'locked';
+		idleMock.userActiveSinceReset = true;
+		const spy = spyFetch();
+
+		await request('POST', '/auth/unlock', { passphrase: 'x' });
+		expect(spy).toHaveBeenCalledTimes(1);
+	});
+
+	it('lets background requests through once the session is authenticated again', async () => {
+		authMock.state = 'authenticated';
+		idleMock.userActiveSinceReset = false;
+		const spy = spyFetch();
+
+		await request('GET', '/system/version');
+		expect(spy).toHaveBeenCalledTimes(1);
+	});
+
+	it('reports it as a 403 so existing callers behave unchanged', async () => {
+		// The pollers already swallow a 403 from this path; the
+		// short-circuit must look the same to them, or a store that
+		// special-cases status 403 would start showing an error banner
+		// where it used to stay quiet.
+		authMock.state = 'locked';
+		idleMock.userActiveSinceReset = false;
+		spyFetch();
+
+		await expect(request('GET', '/observability/alert-events')).rejects.toMatchObject({
+			status: 403,
+			kind: 'forbidden'
+		});
+	});
+});
