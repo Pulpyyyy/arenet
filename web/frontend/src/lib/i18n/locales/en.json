@@ -331,6 +331,8 @@
 			"colHost": "Host / path",
 			"colUpstream": "Upstream",
 			"colTLS": "TLS",
+			"securityPivotTitle": "Open this route's security page",
+			"metricsPivotTitle": "Open this route's metrics page",
 			"colSecurity": "Security",
 			"geoChip": "Geo",
 			"ipChip": "IP",
@@ -363,6 +365,7 @@
 			"unsaved": "unsaved changes",
 			"idLabel": "id",
 			"metricsLink": "Metrics for this route →",
+			"pivotsAfterSave": "Metrics and security open after the first save",
 			"securityLink": "Security for this route →",
 			"deleteButton": "Delete"
 		},
