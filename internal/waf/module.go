@@ -822,6 +822,19 @@ func (h *ArenetWafHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, nex
 		// block the request, since the operator declared
 		// detect intent on this route).
 		if h.Mode == "block" {
+			// v2.62 — name the refusal in the access log. A WAF 403
+			// was byte-indistinguishable from a backend's own 403,
+			// which cost an afternoon on 2026-10-04 when two members
+			// were banned by CrowdSec and nothing in the log said who
+			// had refused them. Read back by the log_append handler at
+			// the top of the chain. A Caddy var, not a response
+			// header: a prober should not be told which gate stopped
+			// them.
+			//
+			// Set BEFORE returning the HandlerError, because the error
+			// path unwinds through log_append just as the normal path
+			// does.
+			caddyhttp.SetVar(r.Context(), DeniedVarKey, DeniedReason)
 			return caddyhttp.HandlerError{
 				StatusCode: obtainStatusCodeFromInterruptionOrDefault(it, http.StatusOK),
 				ID:         tx.ID(),
@@ -838,6 +851,15 @@ func (h *ArenetWafHandler) ServeHTTP(w http.ResponseWriter, r *http.Request, nex
 	}
 	return processResponse(tx, r)
 }
+
+// DeniedVarKey / DeniedReason mirror caddymgr's constants of the same
+// name. Duplicated rather than imported because waf must not depend on
+// caddymgr — the dependency runs the other way. A test in caddymgr
+// pins that the two agree.
+const (
+	DeniedVarKey = "arenet_denied"
+	DeniedReason = "waf"
+)
 
 // Interface guards.
 var (
