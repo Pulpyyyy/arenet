@@ -338,6 +338,7 @@
 				},
 				routeHost: formData.host?.trim() || undefined,
 				insecureSkipVerify: formData.insecureSkipVerify,
+				upstreamTlsServerName: formData.upstreamTlsServerName.trim() || undefined,
 				routeId: editingId ?? undefined
 			});
 			hcProbeResults = res.results;
@@ -613,6 +614,8 @@
 				// route's saved posture.
 				insecureSkipVerify:
 					poolScheme === 'https' ? formData.insecureSkipVerify : false,
+				upstreamTlsServerName:
+					poolScheme === 'https' ? formData.upstreamTlsServerName.trim() : undefined,
 				// v2.55 — probe with the Host a visitor sends, not the
 				// upstream's address. Behind a backend that routes on Host
 				// the old probe got a 404 for a service that serves this

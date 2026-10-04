@@ -90,6 +90,11 @@ type healthProbeRequest struct {
 	// InsecureSkipVerify mirrors the route's TLS posture so an https
 	// upstream with a self-signed certificate is testable.
 	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
+	// UpstreamTLSServerName (v2.60.1) mirrors the route field, for the
+	// same reason as on the upstream probe: without it Go verifies the
+	// certificate against the dial address, so a pool addressed by IP
+	// always failed the probe while the emitted config worked.
+	UpstreamTLSServerName string `json:"upstreamTlsServerName,omitempty"`
 	// RouteID (v2.56.2) is the route the probe was launched from, when
 	// there is one. Absent from the create form, where no route exists
 	// yet.
@@ -337,6 +342,9 @@ func probeHealthCheck(
 		TLSClientConfig: &tls.Config{
 			MinVersion:         tls.VersionTLS12,
 			InsecureSkipVerify: req.InsecureSkipVerify, //nolint:gosec // mirrors the route's saved TLS posture
+			// v2.60.1 — the name the certificate is verified against,
+			// so the probe asks the question the emitted config asks.
+			ServerName: req.UpstreamTLSServerName,
 		},
 		TLSHandshakeTimeout:   timeout,
 		ResponseHeaderTimeout: timeout,
