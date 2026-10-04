@@ -94,9 +94,29 @@
 	type TopoView = 'proxy' | 'redirect';
 	let topoView = $state<TopoView>('proxy');
 
+	// The counts on the selector labels. Read from the TEMPLATE, where
+	// a derived is exactly right.
 	const proxyRoutes = $derived(routes.filter((r) => !r.redirectTarget));
 	const redirectRoutes = $derived(routes.filter((r) => !!r.redirectTarget));
-	const visibleRoutes = $derived(topoView === 'redirect' ? redirectRoutes : proxyRoutes);
+
+	// v2.61.1 — a PLAIN function, not a $derived, because the graph
+	// rebuild happens inside untrack() and reading a derived in there
+	// is the bug this replaces: untrack suppresses the machinery that
+	// marks a derived dirty, so the effect could be handed the
+	// PREVIOUS view's list. The symptom was nodes vanishing on a view
+	// switch and reappearing ~2s later when the next WebSocket frame
+	// rebuilt with the correct set.
+	//
+	// Taking `routes` as a parameter also keeps the effect from
+	// registering it as a dependency, which is what the untrack was
+	// there to prevent in the first place: the WS handler owns the
+	// per-frame rebuild, and an effect that also fired on every frame
+	// would rebuild the graph twice a tick.
+	function filterForView(all: TopologyRoute[], view: TopoView): TopologyRoute[] {
+		return view === 'redirect'
+			? all.filter((r) => !!r.redirectTarget)
+			: all.filter((r) => !r.redirectTarget);
+	}
 	let nodes = $state.raw([] as ReturnType<typeof buildTopologyGraph>['nodes']);
 	let edges = $state.raw([] as ReturnType<typeof buildTopologyGraph>['edges']);
 
@@ -260,7 +280,7 @@
 		try {
 			const snap = await fetchSnapshot();
 			routes = snap.routes;
-			rebuildGraph(visibleRoutes);
+			rebuildGraph(filterForView(snap.routes, topoView));
 			pageStatus = 'connected';
 			// Now that we have the initial graph, open the live
 			// stream. The WS handler's initial-emit-on-connect
@@ -341,16 +361,19 @@
 	$effect(() => {
 		// Tracked deps : the trigger and the gate.
 		void collapsedRoutes.collapsed;
-		// v2.61 — the view selector is a tracked dep too, so switching
+		// v2.61 — the view selector is a tracked dep, so switching
 		// Proxy ↔ Redirections redraws immediately instead of waiting
-		// for the next WebSocket frame.
-		void topoView;
+		// for the next WebSocket frame. Captured into a local BEFORE
+		// the untrack: v2.61.1 learned that reading reactive state
+		// inside untrack can hand back a stale value.
+		const view = topoView;
 		if (pageStatus !== 'connected') return;
 		// Untracked body : rebuildGraph reads and writes nodes /
-		// edges / routes; isolating it here keeps those out of
-		// the effect's reactive graph.
+		// edges; isolating it here keeps those out of the effect's
+		// reactive graph, and keeps `routes` from becoming a
+		// dependency that would duplicate the WS handler's rebuild.
 		untrack(() => {
-			rebuildGraph(visibleRoutes);
+			rebuildGraph(filterForView(routes, view));
 		});
 	});
 
@@ -444,7 +467,7 @@
 	// dragged nodes back would make the graph unusable while reading
 	// it. This is a button because it has to be a decision.
 	function relayout(): void {
-		const graph = buildTopologyGraph(visibleRoutes, collapsedRoutes.collapsed);
+		const graph = buildTopologyGraph(filterForView(routes, topoView), collapsedRoutes.collapsed);
 		nodes = graph.nodes;
 		edges = graph.edges;
 		lastDragPosByNode.clear();

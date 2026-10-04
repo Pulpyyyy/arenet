@@ -428,15 +428,39 @@ export interface TopologyGraph {
 // Tier resolution — single source of truth for AnimatedFlowEdge
 // and the legend in the right sidebar.
 //
+// v2.61.1 — RESCALED. The brackets were taken from the original design
+// mock (≥400 / 150 / 20 req/s) and were never checked against a real
+// instance. On the operator's, which peaks around 24 req/s on its
+// busiest route, EVERY edge fell under 20 and rendered the same pale
+// grey. A colour scale that reports one colour is a decoration.
+//
+// The new brackets are roughly ×5 apart, because traffic is
+// log-distributed and a linear scale wastes its whole range on volumes
+// a homelab never reaches. Arenet calls itself a homelab-friendly
+// reverse proxy; 400 req/s per edge is a datacentre number.
+//
+// Deliberately NOT operator-configurable. It is a default that was
+// wrong, not a preference — and a threshold form field would ask every
+// operator to solve a problem the default should have solved.
+//
 // Precedence:
-//   1. errorRate5xx > 0  → 'bad'  (red, dashed)
-//   2. p99LatencyMs > 300 → 'warn' (amber)
-//   3. reqPerSec brackets matching the mock legend exactly:
-//        ≥ 400 req/s → 'high'
-//        150–400     → 'mid'
-//        20–150      → 'low'
-//        (0, 20)     → 'idle' (pale particles)
+//   1. errorRate5xx ≥ 1%   → 'bad'  (red, dashed)
+//   2. errorRate5xx > 0     → 'warn' (amber) — something, not an outage
+//   3. p99LatencyMs > 300   → 'warn' (amber)
+//   4. reqPerSec brackets:
+//        ≥ 25 req/s  → 'high'
+//        5–25        → 'mid'
+//        1–5         → 'low'
+//        (0, 1)      → 'idle' (pale particles)
 //        exactly 0   → 'dead' (no particles, line only)
+//
+// The 1% floor on 'bad' is the second half of the same lesson. It used
+// to be `> 0`, so a SINGLE 5xx painted an edge red permanently — and
+// a reverse proxy in front of a real site always has a background rate
+// of them (clients vanishing mid-response, a backend worker recycling).
+// The operator's forum sits at 0.8%: red for ever, which says no more
+// than grey for ever did. Anything non-zero still shows as amber, so
+// nothing is hidden; only the alarm colour now requires an alarm.
 //
 // The 'dead' tier (added 2026-06-03) carves out exactly-zero
 // traffic from 'idle'. Browser smoke surfaced the confusion:
@@ -445,17 +469,33 @@ export interface TopologyGraph {
 // traffic where there is none". 'dead' keeps the edge line
 // drawn so the operator still sees the route exists, but skips
 // the particle animation so silent routes look silent.
+
+/** Flow-tier thresholds. Exported so the sidebar legend and the tests
+ *  read the same numbers the resolver does — the legend used to restate
+ *  them as hardcoded strings in two locales, which is how a rescale
+ *  leaves the legend lying. */
+export const FLOW_TIER = {
+        /** errorRate5xx at or above this is an outage, not background noise. */
+        badErrorRate: 0.01,
+        /** p99 above this is slow enough to say so. */
+        warnLatencyMs: 300,
+        highReqPerSec: 25,
+        midReqPerSec: 5,
+        lowReqPerSec: 1,
+} as const;
+
 // ---------------------------------------------------------------------------
 
 export function resolveFlowTier(data: FlowEdgeData): FlowTier {
-        if (data.errorRate5xx > 0) return 'bad';
-        if (data.p99LatencyMs > 300) return 'warn';
-        if (data.reqPerSec >= 400) return 'high';
-        if (data.reqPerSec >= 150) return 'mid';
-        if (data.reqPerSec >= 20) return 'low';
+        if (data.errorRate5xx >= FLOW_TIER.badErrorRate) return 'bad';
+        if (data.errorRate5xx > 0) return 'warn';
+        if (data.p99LatencyMs > FLOW_TIER.warnLatencyMs) return 'warn';
+        if (data.reqPerSec >= FLOW_TIER.highReqPerSec) return 'high';
+        if (data.reqPerSec >= FLOW_TIER.midReqPerSec) return 'mid';
+        if (data.reqPerSec >= FLOW_TIER.lowReqPerSec) return 'low';
         // Exactly-zero traffic gets its own tier so AnimatedFlowEdge
-        // can suppress the particle render. Any positive sub-20
-        // value still falls into 'idle' (pale particles).
+        // can suppress the particle render. Any positive sub-1 value
+        // still falls into 'idle' (pale particles).
         if (data.reqPerSec > 0) return 'idle';
         return 'dead';
 }
