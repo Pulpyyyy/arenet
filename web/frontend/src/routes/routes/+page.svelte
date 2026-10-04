@@ -1388,6 +1388,9 @@
 		seedRetryParts();
 		stateChoice = 'active';
 		formOpen = true;
+		// v2.61 — same reveal as selecting a route: in create mode the
+		// panel is just as far down the page when the layout is stacked.
+		revealPanelIfStacked();
 		// v2.41 — reference point for the "unsaved changes" marker.
 		snapshotForm();
 		// Step J.4: refresh provider status whenever the form opens
@@ -1418,6 +1421,28 @@
 				return;
 			}
 			openEdit(r);
+			revealPanelIfStacked();
+		});
+	}
+
+	// v2.61 — below the `split` breakpoint the edit panel is not beside
+	// the list, it is stacked UNDERNEATH the whole table (see the
+	// .split grid: single column until 1280px). On a laptop window
+	// that is not maximised, clicking a route appeared to do nothing —
+	// the panel had opened, several screens down, past every other
+	// route. That is most of what "on ne voit pas comment y arriver"
+	// was about, and no amount of button styling would have fixed it.
+	//
+	// matchMedia rather than innerWidth so the query and the CSS can
+	// never drift apart on a resize.
+	function revealPanelIfStacked(): void {
+		if (typeof window === 'undefined' || !window.matchMedia) return;
+		if (!window.matchMedia('(max-width: 1279px)').matches) return;
+		// After the panel has actually rendered, not before. panelEl is
+		// already bound for the click-outside handler, so there is no
+		// reason to go through the DOM by selector.
+		queueMicrotask(() => {
+			panelEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 		});
 	}
 
@@ -3812,8 +3837,27 @@
 									<!-- v2.41 — the column answers "what guards this
 									     route?", not just "is the WAF on?": the geo,
 									     IP-filter and rate-limit postures were
-									     invisible from the list until now. -->
-									<RoutePostureChips route={r} />
+									     invisible from the list until now.
+
+									     v2.61 — and it is now the door to the page
+									     that details it. The chips named the WAF, the
+									     geo gate and the rate limit while being
+									     cursor-help text with a tooltip, when
+									     /security/<id> is exactly the screen that
+									     explains them. The information and the link
+									     are the same object; the list had no entry
+									     point to either per-route page before this.
+									     stopPropagation so the row's own click does
+									     not open the edit panel underneath. -->
+									<a
+										href={`/security/${r.id}`}
+										class="cell-pivot"
+										data-testid="row-pivot-security"
+										title={language.current && t('routes.list.securityPivotTitle')}
+										onclick={(e) => e.stopPropagation()}
+									>
+										<RoutePostureChips route={r} />
+									</a>
 								</td>
 								<td class="px-4 py-3 text-center">
 									<!-- Critique 11 Pack A (2026-06-05): per-route
@@ -3831,17 +3875,27 @@
 									     pointer + hover tint + selected accent),
 									     matching the mock and avoiding the
 									     double-action anti-pattern. -->
+									<!-- v2.61 — the state badge is the door to the route's
+									     performance page. Same reasoning as the Security
+									     column: the badge already names the health, and
+									     /observability/<id> is the screen that charts it.
+									     Skipped for the not_applicable dash, which links to
+									     nothing worth reading. -->
 									{#if statusBadge.dash}
 										<span
 											title={statusBadge.tooltip}
 											class="text-muted cursor-help"
 											data-testid="route-status-dash">{statusBadge.label}</span>
-									{:else if statusBadge.tooltip}
-										<span title={statusBadge.tooltip} class="inline-block cursor-help">
-											<Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
-										</span>
 									{:else}
-										<Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
+										<a
+											href={`/observability/${r.id}`}
+											class="cell-pivot"
+											data-testid="row-pivot-metrics"
+											title={statusBadge.tooltip ?? (language.current && t('routes.list.metricsPivotTitle'))}
+											onclick={(e) => e.stopPropagation()}
+										>
+											<Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
+										</a>
 									{/if}
 								</td>
 								<td class="px-4 py-3 text-center">
@@ -3946,13 +4000,29 @@
 				     and stay reachable. Delete moved to the footer, away from
 				     Save: a destructive action does not share a row with the
 				     links you click to read a chart. -->
-				{#if formMode === 'edit' && editingId}
-					<div class="flex flex-wrap gap-2" data-testid="panel-pivots">
+				<!-- v2.41.1 — the two drill-down links used to sit in a row
+				     BELOW the sticky header, so they scrolled out of sight as
+				     soon as the operator moved down the form. They belong to
+				     the route's identity, so they live in the header itself
+				     and stay reachable. Delete moved to the footer, away from
+				     Save: a destructive action does not share a row with the
+				     links you click to read a chart.
+
+				     v2.61 — they were 11px text-secondary chips with no fill,
+				     in the third row of the header, and absent in create mode.
+				     The operator said it plainly: "on ne voit pas très bien les
+				     boutons et comment y arriver". They now carry real button
+				     chrome, and they are PRESENT but disabled before the first
+				     save, with the reason — a control that appears only once
+				     you have guessed it exists teaches nothing. -->
+				<div class="flex flex-wrap items-center gap-2" data-testid="panel-pivots">
+					{#if formMode === 'edit' && editingId}
 						<a
 							href={`/observability/${editingId}`}
-							class="inline-flex items-center gap-1.5 rounded-md border border-border-default bg-surface px-2.5 py-1 text-xs text-secondary hover:text-primary hover:bg-hover transition-colors"
+							data-testid="panel-pivot-metrics"
+							class="pivot-btn"
 						>
-							<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+							<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
 								<path d="M3 3v10h10" />
 								<path d="M5 11l3-3 2 2 3-4" />
 							</svg>
@@ -3960,16 +4030,22 @@
 						</a>
 						<a
 							href={`/security/${editingId}`}
-							class="inline-flex items-center gap-1.5 rounded-md border border-border-default bg-surface px-2.5 py-1 text-xs text-secondary hover:text-primary hover:bg-hover transition-colors"
+							data-testid="panel-pivot-security"
+							class="pivot-btn"
 						>
-							<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+							<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
 								<rect x="3" y="7" width="10" height="7" rx="1" />
 								<path d="M5 7V5a3 3 0 016 0v2" />
 							</svg>
 							{language.current && t('routes.panel.securityLink')}
 						</a>
-					</div>
-				{/if}
+					{:else}
+						<span class="pivot-btn pivot-btn-disabled" data-testid="panel-pivot-pending"
+							title={language.current && t('routes.panel.pivotsAfterSave')}>
+							{language.current && t('routes.panel.pivotsAfterSave')}
+						</span>
+					{/if}
+				</div>
 				</div>
 
 				<!-- Form body — moved verbatim out of the prior Modal
@@ -4380,6 +4456,30 @@
 							both the on-screen disclosure visibility and the
 							storage row.
 						-->
+						<!--
+							v2.61 — the server name was INSIDE the advanced-TLS
+							disclosure, which is itself inside a collapsed
+							section: two invisible clicks deep, for a field the
+							operator needed the day after it shipped. It now
+							sits in the TLS section directly, beside the
+							disclosure rather than within it. Same scheme gate
+							(https pools only), one fewer thing to discover.
+						-->
+						{#if tlsAdvancedVisible}
+							<div class="flex flex-col gap-1">
+								<Input
+									id="route-upstream-tls-server-name"
+									label={language.current && t('routes.form.upstreamTlsServerNameLabel')}
+									placeholder={language.current && t('routes.form.upstreamTlsServerNamePlaceholder')}
+									bind:value={formData.upstreamTlsServerName}
+									data-testid="upstream-tls-server-name"
+								/>
+								<p class="text-xs text-muted">
+									{language.current && t('routes.form.upstreamTlsServerNameHelper')}
+								</p>
+							</div>
+						{/if}
+
 						{#if tlsAdvancedVisible}
 							<details
 								class="rounded-md border border-border-default bg-surface px-3 py-2"
@@ -4395,25 +4495,6 @@
 									/>
 									<p class="text-xs text-muted ml-6">
 										{language.current && t('routes.form.tlsAdvancedHelper')}
-									</p>
-								</div>
-								<!--
-									v2.60 — the TLS server name sits beside the
-									skip-verify checkbox because they answer the same
-									question in opposite directions: when the pool is
-									addressed by IP, one gives up on verifying and the
-									other says what to verify against.
-								-->
-								<div class="mt-3 flex flex-col gap-1">
-									<Input
-										id="route-upstream-tls-server-name"
-										label={language.current && t('routes.form.upstreamTlsServerNameLabel')}
-										placeholder={language.current && t('routes.form.upstreamTlsServerNamePlaceholder')}
-										bind:value={formData.upstreamTlsServerName}
-										data-testid="upstream-tls-server-name"
-									/>
-									<p class="text-xs text-muted">
-										{language.current && t('routes.form.upstreamTlsServerNameHelper')}
 									</p>
 								</div>
 							</details>
@@ -6040,6 +6121,68 @@
 	   not. The collapsed track needs overflow hidden and min-width 0
 	   or its content refuses to shrink below its intrinsic size and
 	   the animation fights itself. */
+	/* v2.61 — the two drill-down links, given the chrome of a real
+	   secondary button. They were 11px text-secondary on a bare
+	   surface, which read as help text rather than as something you
+	   click. Same tokens as Button variant="secondary". */
+	/* v2.61 — a list cell that is also a link. No underline, no colour
+	   change: the chips and the badge already carry their own meaning,
+	   and turning them blue would say "this is a link" twice while
+	   making the posture harder to read. The cursor and the hover tint
+	   are the affordance. */
+	.cell-pivot {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		border-radius: var(--radius-sm);
+		padding: 2px 4px;
+		margin: -2px -4px;
+		text-decoration: none;
+		color: inherit;
+		transition: background var(--motion-fast);
+	}
+	.cell-pivot:hover {
+		background: var(--bg-hover);
+	}
+	.cell-pivot:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 1px;
+	}
+
+	.pivot-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		border-radius: var(--radius-md);
+		border: 1px solid var(--border-strong);
+		background: var(--bg-elevated);
+		color: var(--text-primary);
+		font-size: var(--text-sm);
+		font-weight: 500;
+		padding: 6px 12px;
+		text-decoration: none;
+		transition:
+			background var(--motion-fast),
+			border-color var(--motion-fast);
+	}
+	.pivot-btn:hover {
+		background: var(--bg-hover);
+		border-color: var(--accent);
+	}
+	.pivot-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+	/* Present before the first save, and plainly not yet usable. A
+	   control that only appears once you have guessed it exists
+	   teaches nothing. */
+	.pivot-btn-disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
+		color: var(--text-muted);
+		border-style: dashed;
+	}
+
 	.split {
 		display: grid;
 		grid-template-columns: 1fr;

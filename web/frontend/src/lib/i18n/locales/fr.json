@@ -331,6 +331,8 @@
 			"colHost": "Hôte / chemin",
 			"colUpstream": "Upstream",
 			"colTLS": "TLS",
+			"securityPivotTitle": "Ouvrir la page sécurité de cette route",
+			"metricsPivotTitle": "Ouvrir la page métriques de cette route",
 			"colSecurity": "Sécurité",
 			"geoChip": "Géo",
 			"ipChip": "IP",
@@ -363,6 +365,7 @@
 			"unsaved": "modifications non enregistrées",
 			"idLabel": "id",
 			"metricsLink": "Métriques de cette route →",
+			"pivotsAfterSave": "Métriques et sécurité s’ouvrent après le premier enregistrement",
 			"securityLink": "Sécurité de cette route →",
 			"deleteButton": "Supprimer"
 		},

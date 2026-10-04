@@ -5592,3 +5592,73 @@ describe('Routes page — upstream TLS server name', () => {
 		expect(payload.upstreamTlsServerName).toBe('');
 	});
 });
+
+// -----------------------------------------------------------------
+// v2.61 — reaching a route's metrics and security.
+//
+// The operator's words: "on ne voit pas très bien les boutons dans le
+// modale d'édition d'une route et comment y arriver". The audit found
+// three causes, and only one of them was styling:
+//   - the two links were 11px text-secondary chips with no fill, in
+//     row 3 of a sticky header, and ABSENT in create mode;
+//   - the list rows had no entry point to either page at all;
+//   - below 1280px the panel is not beside the list, it is stacked
+//     under the entire table, so clicking a route looked like it did
+//     nothing.
+// -----------------------------------------------------------------
+describe('Routes page — reaching metrics and security', () => {
+	const seeded = () =>
+		makeRoute({ id: 'r-nav', host: 'app.example.com', wafMode: 'block' });
+
+	it('a list row links to the route security page from the Security column', async () => {
+		apiMock.listRoutes.mockResolvedValue([seeded()]);
+		render(Page);
+		await screen.findByText('app.example.com');
+		const link = screen.getByTestId('row-pivot-security');
+		expect(link.getAttribute('href')).toBe('/security/r-nav');
+	});
+
+	it('a list row links to the route metrics page from the State column', async () => {
+		apiMock.listRoutes.mockResolvedValue([seeded()]);
+		render(Page);
+		await screen.findByText('app.example.com');
+		const link = screen.getByTestId('row-pivot-metrics');
+		expect(link.getAttribute('href')).toBe('/observability/r-nav');
+	});
+
+	it('clicking a row link does not also open the edit panel', async () => {
+		// The whole <tr> is the affordance for opening the panel, so a
+		// link inside it has to stop the event or the operator both
+		// navigates and opens a form they did not ask for.
+		apiMock.listRoutes.mockResolvedValue([seeded()]);
+		render(Page);
+		await screen.findByText('app.example.com');
+		await userEvent.click(screen.getByTestId('row-pivot-security'));
+		await tick();
+		expect(screen.queryByTestId('route-row-selected')).not.toBeInTheDocument();
+	});
+
+	it('the panel pivots are present before the first save, and say why not yet', async () => {
+		// Previously `{#if formMode === 'edit'}` hid them entirely in
+		// create mode — the one place a new operator starts.
+		render(Page);
+		await openCreateForm();
+		expect(screen.getByTestId('panel-pivot-pending')).toBeInTheDocument();
+		expect(screen.queryByTestId('panel-pivot-metrics')).not.toBeInTheDocument();
+	});
+
+	it('the panel pivots become real links once a route is selected', async () => {
+		apiMock.listRoutes.mockResolvedValue([seeded()]);
+		render(Page);
+		const row = (await screen.findByText('app.example.com')).closest('tr')!;
+		await userEvent.click(row);
+		await tick();
+		expect(screen.getByTestId('panel-pivot-metrics').getAttribute('href')).toBe(
+			'/observability/r-nav'
+		);
+		expect(screen.getByTestId('panel-pivot-security').getAttribute('href')).toBe(
+			'/security/r-nav'
+		);
+		expect(screen.queryByTestId('panel-pivot-pending')).not.toBeInTheDocument();
+	});
+});
