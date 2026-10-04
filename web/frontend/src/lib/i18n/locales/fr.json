@@ -2424,6 +2424,9 @@
 		"ipEnforcementHelper": "Timeline complète des IPs bloquées (auto + manuel). La gestion manuelle de la liste est différée (voir backlog)."
 	},
 	"topology": {
+		"viewProxy": "Proxy",
+		"viewRedirect": "Redirections",
+		"viewAriaLabel": "Vue de la topologie",
 		"emptyTitle": "Rien à afficher pour le moment",
 		"emptyBody": "Le graphe montre tes noms d'hôtes, le hub Arenet et les backends derrière lui, avec le trafic en direct sur les liens. Crée une route et elle apparaît ici en quelques secondes.",
 		"emptyAction": "Créer une route",

@@ -253,6 +253,9 @@ type ClusterSpec = {
         lbPolicy: LBPolicy;
         hasHealthCheck: boolean;
         warning?: string;
+        /** v2.61 — set on a redirecting route; the cluster draws the
+         *  destination instead of an empty pool. */
+        redirectTarget?: string;
 };
 
 // ===========================================================================
@@ -541,6 +544,7 @@ export function buildTopologyGraph(
                 lbPolicy: route.lbPolicy,
                 hasHealthCheck: route.hasHealthCheck,
                 warning: deriveClusterWarning(route),
+                redirectTarget: route.redirectTarget,
         }));
 
         const clusterHeights = clusterSpecs.map((spec) =>
@@ -564,6 +568,7 @@ export function buildTopologyGraph(
                         totalCount,
                         hasHealthCheck: spec.hasHealthCheck,
                         warning: spec.warning,
+                        redirectTarget: spec.redirectTarget,
                 };
                 nodes.push({
                         id: spec.clusterId,
@@ -895,6 +900,11 @@ function dominantRuntime(upstreams: TopologyUpstream[]): string | undefined {
 
 function deriveClusterWarning(route: TopologyRoute): string | undefined {
         const ups = route.upstreams;
+        // v2.61 — a redirecting route has no upstream BY DESIGN, so the
+        // empty-pool warning was the canvas calling a working route
+        // broken. Checked BEFORE the length test, not after: the length
+        // is zero in both cases and only the redirect explains it.
+        if (route.redirectTarget) return undefined;
         if (ups.length === 0) return 'Aucun upstream configuré';
         // Three-state aware (Regression A, 2026-06-03). v1.1.0 emits
         // 'unknown' for every upstream — "no probe data yet, not the

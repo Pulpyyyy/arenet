@@ -83,6 +83,17 @@ export interface TopologyRoute {
         // node (C18, 2026-06-04). The backend always emits the
         // field; tlsEnabled === false implies httpRedirect === false.
         httpRedirect: boolean;
+        /**
+         * v2.61 — the destination of a ROUTE-LEVEL redirect, absent on a
+         * proxying route. Not to be confused with `httpRedirect` above,
+         * which is the :80 → :443 bounce; the names are close and the
+         * meanings are not.
+         *
+         * Before this, a redirecting route drew an empty backend cluster
+         * wearing the red "no upstream configured" warning — the canvas
+         * claiming a working route was broken.
+         */
+        redirectTarget?: string;
 
         // True when storage.Route.HealthCheck.Enabled is true on
         // the backend. Drives the per-upstream shield indicator
@@ -244,6 +255,13 @@ export type BackendClusterNodeData = {
         // about "sains" because nothing is being probed.
         hasHealthCheck: boolean;
         warning?: string;
+        /**
+         * v2.61 — set when the route redirects instead of proxying. The
+         * cluster then renders its destination rather than an empty pool,
+         * and carries no warning: a redirect is not a route missing its
+         * backend, it is a route whose destination is not a backend.
+         */
+        redirectTarget?: string;
 } & Record<string, unknown>;
 
 /** A per-path section header rendered INSIDE a route's single backend

@@ -82,6 +82,21 @@
 	// single buildTopologyGraph call — no view toggle, no second
 	// canvas mode.
 	let routes = $state<TopologyRoute[]>([]);
+
+	// v2.61 — the canvas splits by what a route DOES, because mixing
+	// the two made both harder to read: proxying routes carry a
+	// backend pool worth watching, redirecting routes carry a
+	// destination and nothing to watch. An instance with many
+	// redirects drowned its own backends.
+	//
+	// 'proxy' is the default: it is the half with health, traffic and
+	// latency — the half an operator opens this page to look at.
+	type TopoView = 'proxy' | 'redirect';
+	let topoView = $state<TopoView>('proxy');
+
+	const proxyRoutes = $derived(routes.filter((r) => !r.redirectTarget));
+	const redirectRoutes = $derived(routes.filter((r) => !!r.redirectTarget));
+	const visibleRoutes = $derived(topoView === 'redirect' ? redirectRoutes : proxyRoutes);
 	let nodes = $state.raw([] as ReturnType<typeof buildTopologyGraph>['nodes']);
 	let edges = $state.raw([] as ReturnType<typeof buildTopologyGraph>['edges']);
 
@@ -245,7 +260,7 @@
 		try {
 			const snap = await fetchSnapshot();
 			routes = snap.routes;
-			rebuildGraph(routes);
+			rebuildGraph(visibleRoutes);
 			pageStatus = 'connected';
 			// Now that we have the initial graph, open the live
 			// stream. The WS handler's initial-emit-on-connect
@@ -326,12 +341,16 @@
 	$effect(() => {
 		// Tracked deps : the trigger and the gate.
 		void collapsedRoutes.collapsed;
+		// v2.61 — the view selector is a tracked dep too, so switching
+		// Proxy ↔ Redirections redraws immediately instead of waiting
+		// for the next WebSocket frame.
+		void topoView;
 		if (pageStatus !== 'connected') return;
 		// Untracked body : rebuildGraph reads and writes nodes /
 		// edges / routes; isolating it here keeps those out of
 		// the effect's reactive graph.
 		untrack(() => {
-			rebuildGraph(routes);
+			rebuildGraph(visibleRoutes);
 		});
 	});
 
@@ -425,7 +444,7 @@
 	// dragged nodes back would make the graph unusable while reading
 	// it. This is a button because it has to be a decision.
 	function relayout(): void {
-		const graph = buildTopologyGraph(routes, collapsedRoutes.collapsed);
+		const graph = buildTopologyGraph(visibleRoutes, collapsedRoutes.collapsed);
 		nodes = graph.nodes;
 		edges = graph.edges;
 		lastDragPosByNode.clear();
@@ -448,6 +467,28 @@
 			title={language.current && t('topology.title')}
 			subtitle={language.current && t('topology.lede')}
 		/>
+		<!-- v2.61 — the view selector. Counts are on the labels because
+		     the useful question before switching is "is there anything
+		     over there", and a tab that turns out to be empty is a
+		     wasted click. -->
+		<div class="topo-views" role="group" aria-label={language.current && t('topology.viewAriaLabel')}>
+			<button
+				type="button"
+				data-testid="topo-view-proxy"
+				class="topo-view-btn"
+				class:is-active={topoView === 'proxy'}
+				aria-pressed={topoView === 'proxy'}
+				onclick={() => (topoView = 'proxy')}
+			>{language.current && t('topology.viewProxy')} ({proxyRoutes.length})</button>
+			<button
+				type="button"
+				data-testid="topo-view-redirect"
+				class="topo-view-btn"
+				class:is-active={topoView === 'redirect'}
+				aria-pressed={topoView === 'redirect'}
+				onclick={() => (topoView = 'redirect')}
+			>{language.current && t('topology.viewRedirect')} ({redirectRoutes.length})</button>
+		</div>
 	</div>
 
 	{#if pageStatus === 'loading'}
@@ -671,6 +712,32 @@
 	   and lets a future light-theme toggle reset without touching
 	   this rule. Foreground/border use the design-token palette so
 	   the buttons match the rest of the canvas chrome. */
+	.topo-views {
+		display: inline-flex;
+		gap: 2px;
+		padding: 2px;
+		border-radius: var(--radius-full);
+		background: var(--bg-surface);
+		border: 1px solid var(--border-default);
+	}
+	.topo-view-btn {
+		border: 0;
+		background: transparent;
+		color: var(--text-secondary);
+		font-size: var(--text-xs);
+		padding: 4px 12px;
+		border-radius: var(--radius-full);
+		cursor: pointer;
+		transition: background var(--motion-fast), color var(--motion-fast);
+	}
+	.topo-view-btn:hover {
+		color: var(--text-primary);
+	}
+	.topo-view-btn.is-active {
+		background: var(--bg-hover);
+		color: var(--text-primary);
+	}
+
 	.canvas-frame :global(.svelte-flow__controls) {
 		--xy-controls-button-background-color: var(--surface, oklch(19% 0.006 250));
 		--xy-controls-button-background-color-hover: var(--surface-2, oklch(22% 0.007 250));

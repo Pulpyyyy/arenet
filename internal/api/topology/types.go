@@ -122,6 +122,26 @@ type Route struct {
 	HasHealthCheck bool `json:"hasHealthCheck"`
 
 	ClusterLabel string `json:"clusterLabel,omitempty"`
+
+	// RedirectTarget (v2.61) mirrors storage.Route.RedirectConfig.Target
+	// when the route is in the redirect state, and is empty otherwise.
+	//
+	// Until now the topology knew nothing of route-level redirects, and
+	// the consequence was a lie on the canvas: a redirecting route
+	// carries no upstream, so it rendered as an EMPTY backend cluster
+	// wearing the red "no upstream configured" warning — visually
+	// indistinguishable from a genuinely broken route. The operator met
+	// exactly that on 2026-10-03 and asked whether it was normal.
+	//
+	// With the target on the wire the graph can say the true thing:
+	// traffic for this host leaves for somewhere else, and here is
+	// where. A redirect is not a route without a destination; it is a
+	// route whose destination is not a backend.
+	//
+	// NOTE the neighbouring HTTPRedirect field, which is a different
+	// thing entirely (the :80 → :443 bounce). The names are close and
+	// the meanings are not.
+	RedirectTarget string `json:"redirectTarget,omitempty"`
 }
 
 // Upstream is the per-backend entry. Stage A fields that are NOT
