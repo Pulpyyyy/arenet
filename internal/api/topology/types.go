@@ -142,6 +142,23 @@ type Route struct {
 	// thing entirely (the :80 → :443 bounce). The names are close and
 	// the meanings are not.
 	RedirectTarget string `json:"redirectTarget,omitempty"`
+
+	// RedirectStatusCode (v2.66) is the code the route answers with,
+	// 301 or 302, and is zero when the route does not redirect.
+	//
+	// It is on the wire so the canvas can label the redirect edge.
+	// That edge needed relabelling anyway: it was drawn as an animated
+	// flow toward the destination, which says traffic passes THROUGH
+	// Arenet to get there. It does not. Arenet answers the client and
+	// the client goes on by itself, so the edge is a statement about
+	// the response, not a path. Carrying the code lets it say which
+	// statement — a permanent move reads differently from a temporary
+	// one when you are deciding whether the old name can be retired.
+	//
+	// Storage treats zero as 301 (RedirectConfig.StatusCode's doc
+	// comment); the builder resolves that here rather than leaving the
+	// frontend to know it.
+	RedirectStatusCode int `json:"redirectStatusCode,omitempty"`
 }
 
 // Upstream is the per-backend entry. Stage A fields that are NOT

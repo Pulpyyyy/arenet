@@ -1221,4 +1221,62 @@ describe('buildTopologyGraph — redirecting routes', () => {
 		expect(data.warning).toBeUndefined();
 		expect(data.redirectTarget).toBeUndefined();
 	});
+
+	// --- The redirect edge is a statement, not a path ----------------
+	//
+	// The operator's question, twice over: are the traffic dots on a
+	// redirect real, and why does Arenet sit in the middle of a chain
+	// it is not part of? For a proxied route the edge IS the path
+	// traffic takes. For a redirect Arenet answers the client and the
+	// client goes on by itself, so nothing traverses this edge and
+	// animating it claims a flow that does not exist.
+
+	it('marks the hub-to-destination edge with the redirect status code', () => {
+		const { edges } = buildTopologyGraph([
+			redirectRoute({ id: 'r-1', redirectStatusCode: 302 })
+		]);
+		const edge = edges.find((e) => e.id === 'e-caddy-cluster-r-1')!;
+		expect(edge).toBeDefined();
+		const data = edge.data as FlowEdgeData;
+		expect(data.redirectStatusCode).toBe(302);
+	});
+
+	it('defaults the code to 301 when the wire omits it', () => {
+		// Storage stores zero to mean 301 and the builder resolves it,
+		// but an older server will send nothing at all.
+		const { edges } = buildTopologyGraph([redirectRoute({ id: 'r-1' })]);
+		const data = edges.find((e) => e.id === 'e-caddy-cluster-r-1')!.data as FlowEdgeData;
+		expect(data.redirectStatusCode).toBe(301);
+	});
+
+	it('leaves the FQDN-to-hub edge alone', () => {
+		// That edge carries REAL traffic: requests arriving at the host
+		// and being answered. Marking it too would erase the one honest
+		// flow on the canvas.
+		const { edges } = buildTopologyGraph([redirectRoute({ id: 'r-1' })]);
+		const fqdn = edges.find((e) => e.id === 'e-fqdn-r-1-caddy')!;
+		expect(fqdn).toBeDefined();
+		expect((fqdn.data as FlowEdgeData).redirectStatusCode).toBeUndefined();
+	});
+
+	it('does NOT mark a proxied route’s cluster edge', () => {
+		// The guard against over-reach: a degenerate proxy route with no
+		// upstream takes the same single-edge branch, and its edge is a
+		// real path.
+		const { edges } = buildTopologyGraph([makeRoute({ id: 'r-empty', upstreams: [] })]);
+		const edge = edges.find((e) => e.id === 'e-caddy-cluster-r-empty')!;
+		expect(edge).toBeDefined();
+		expect((edge.data as FlowEdgeData).redirectStatusCode).toBeUndefined();
+	});
+
+	it('marks every source edge when routes converge on one destination', () => {
+		const { edges } = buildTopologyGraph([
+			redirectRoute({ id: 'r-1', host: 'a.example.com' }),
+			redirectRoute({ id: 'r-2', host: 'b.example.com' })
+		]);
+		for (const id of ['e-caddy-cluster-r-1', 'e-caddy-cluster-r-2']) {
+			const data = edges.find((e) => e.id === id)!.data as FlowEdgeData;
+			expect(data.redirectStatusCode).toBe(301);
+		}
+	});
 });

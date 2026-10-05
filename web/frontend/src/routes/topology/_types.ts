@@ -94,6 +94,9 @@ export interface TopologyRoute {
          * claiming a working route was broken.
          */
         redirectTarget?: string;
+        /** 301 or 302 when the route redirects, absent otherwise.
+         *  Resolved server-side: storage stores zero to mean 301. */
+        redirectStatusCode?: number;
 
         // True when storage.Route.HealthCheck.Enabled is true on
         // the backend. Drives the per-upstream shield indicator
@@ -410,6 +413,25 @@ export type FlowEdgeData = {
          *  than the near-invisible dead-tier stroke. When per-branch metrics
          *  land, this flag is dropped and the edge animates like any flow. */
         structural?: boolean;
+        /**
+         * Set on the edge from the Caddy hub to a REDIRECT destination,
+         * carrying the status code (301 / 302).
+         *
+         * It changes what the edge means, not just how it looks. For a
+         * proxied route the edge is a path: traffic really does pass
+         * through Arenet to reach the upstream, and animated particles
+         * are the truth. For a redirect Arenet answers the client and
+         * the client goes on by itself — nothing traverses this edge.
+         * Drawing particles along it claimed a flow that does not
+         * exist, which is what the operator spotted when they asked
+         * whether the traffic dots on redirects were real.
+         *
+         * So a redirect edge is dashed, carries no particles, and is
+         * labelled with the code. The traffic that IS real stays on the
+         * edge before it: FQDN to hub, where the requests genuinely
+         * arrive and are answered.
+         */
+        redirectStatusCode?: number;
 } & Record<string, unknown>;
 
 /** Phase 3.c (2026-06-17): AliasOfEdgeData removed. The Phase
