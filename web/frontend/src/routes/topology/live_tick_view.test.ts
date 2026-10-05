@@ -107,11 +107,10 @@ afterEach(() => {
 /**
  * Assertions are scoped to the CANVAS, not the document.
  *
- * The sidebar's "Top flows" panel is fed the full route list, so a
- * document-wide query sees proxy hosts even in the Redirects view. That
- * is a separate question about whether the sidebar should follow the
- * selector — it is not what this file is about, and scoping here keeps
- * the two from being confused.
+ * Scoping is kept even though the sidebar now follows the selector
+ * too: a canvas assertion that silently also covered the sidebar would
+ * pass if either one filtered, and the point of this file is the
+ * canvas rebuild path. The sidebar gets its own test below.
  */
 function canvas(container: HTMLElement): HTMLElement {
 	const el = container.querySelector('.canvas-frame');
@@ -152,6 +151,35 @@ describe('topology: the live tick respects the selected view', () => {
 
 		await waitFor(() => expect(proxyNodeVisible(container)).toBe(true));
 		expect(redirectNodeVisible(container)).toBe(false);
+	});
+
+	it('sidebar Top flows follows the selector', async () => {
+		// The operator asked for this: "il faudrait qu'il suive le
+		// selecteur". A panel ranking proxy routes while the canvas
+		// shows only redirects made the filter look half-applied.
+		const { container } = render(Page);
+		await waitFor(() => expect(apiMock.onTick).not.toBeNull());
+
+		const sidebar = () => {
+			const el = container.querySelector('.topo-sidebar');
+			if (!el) throw new Error('topo-sidebar not found');
+			return el as HTMLElement;
+		};
+		const sidebarHosts = () =>
+			Array.from(sidebar().querySelectorAll('.host')).map((e) => e.textContent);
+
+		await waitFor(() => expect(sidebarHosts()).toContain('p-1.example.com'));
+		expect(sidebarHosts()).not.toContain('r-1.example.com');
+
+		await fireEvent.click(screen.getByTestId('topo-view-redirect'));
+		await waitFor(() => expect(sidebarHosts()).toContain('r-1.example.com'));
+		expect(sidebarHosts()).not.toContain('p-1.example.com');
+
+		// And a live frame must not drag the other view's routes back,
+		// exactly as on the canvas.
+		apiMock.onTick!([proxyRoute('p-1'), redirectRoute('r-1')], GENERATED_AT);
+		await waitFor(() => expect(sidebarHosts()).toContain('r-1.example.com'));
+		expect(sidebarHosts()).not.toContain('p-1.example.com');
 	});
 
 	it('keeps the Redirects view after a live frame arrives', async () => {

@@ -598,7 +598,11 @@
 				</div>
 			</div>
 
-			<TopologySidebar {routes} />
+			<!-- The sidebar follows the selector. Top flows ranking proxy
+			     routes while the canvas showed only redirects made the
+			     filter look half-applied; the panel answers "what is busy
+			     in what I am looking at", not "what is busy overall". -->
+			<TopologySidebar routes={filterForView(routes, topoView)} />
 		</div>
 	{/if}
 </div>
