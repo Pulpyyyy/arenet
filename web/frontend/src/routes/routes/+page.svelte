@@ -120,6 +120,35 @@
 	// which would need an AbortController per open for no gain.
 	let routeSummaryFor = $state<string | null>(null);
 
+	// Mirrors histogram.MinSamplesFor(0.95) on the server, which derives
+	// it rather than choosing it: Quantile takes rank ceil(0.95 * n),
+	// and that rank equals n — making the "percentile" the slowest
+	// request — for every n below twenty. The API already returns null
+	// under this threshold; the constant is here only so the panel can
+	// say WHY instead of rendering a dash.
+	const MIN_QUANTILE_SAMPLES = 20;
+
+	/** null is "not measured", which is not 0 ms — rendering zero would
+	 *  read as "instant". */
+	function formatMs(v: number | null): string {
+		return v === null ? '—' : `${Math.round(v)} ms`;
+	}
+
+	/** Bytes at the scale an operator reads them. Deliberately decimal
+	 *  (kB = 1000), matching how bandwidth and file sizes are quoted
+	 *  everywhere the number will be compared against. */
+	function formatBytes(n: number, locale: string): string {
+		if (n < 1000) return `${n} B`;
+		const units = ['kB', 'MB', 'GB', 'TB'];
+		let v = n / 1000;
+		let i = 0;
+		while (v >= 1000 && i < units.length - 1) {
+			v /= 1000;
+			i++;
+		}
+		return `${v.toLocaleString(locale, { maximumFractionDigits: v < 10 ? 1 : 0 })} ${units[i]}`;
+	}
+
 	function clearRouteSummary() {
 		routeSummary = null;
 		routeSummaryFor = null;
@@ -4137,16 +4166,85 @@
 									>
 									{language.current && t('routes.panel.stripFivexx')}
 								</span>
-								<span data-testid="panel-metrics-p95">
-									{language.current && t('routes.panel.stripP95')}
-									<!-- null is "never measured", which is not 0 ms.
-									     Rendering 0 would read as "instant". -->
-									<span class="text-secondary tabular-nums">
-										{routeSummary.p95LatencyMs === null
-											? '—'
-											: `${Math.round(routeSummary.p95LatencyMs)} ms`}
+								<!-- Two latency figures, because one cannot answer the
+								     question. The operator read "p95 6701 ms" on a blog
+								     that loads instantly: the server had answered in
+								     0.1 s and the remaining 23.9 s was a visitor
+								     downloading a 2.9 MB file. Total duration carries
+								     the transfer; TTFB stops when the response
+								     committed. Shown side by side, the gap between
+								     them IS the diagnosis. -->
+								{#if routeSummary.samples === 0 && routeSummary.reqs > 0}
+									<!-- Requests were counted and no distribution was
+									     recorded for them. That is the upgrade boundary,
+									     NOT thin traffic, and saying "too few requests"
+									     here would be a plain lie on a route serving
+									     44,673 of them — which is exactly what the
+									     operator's instance returned the hour the
+									     release landed.
+									     The two cases read identically on the wire
+									     (samples below the threshold, quantiles null)
+									     and mean completely different things. -->
+									<span
+										class="text-secondary"
+										data-testid="panel-metrics-nohist"
+										title={language.current && t('routes.panel.stripNoHistogramHint')}
+									>
+										{language.current && t('routes.panel.stripNoHistogram')}
 									</span>
-								</span>
+								{:else if routeSummary.samples < MIN_QUANTILE_SAMPLES}
+									<!-- Genuinely thin traffic. Below twenty
+									     observations ceil(0.95 * n) === n, so a "p95" is
+									     just the slowest request. The API returns null;
+									     this says WHY, because a bare dash teaches
+									     nothing. -->
+									<span class="text-secondary" data-testid="panel-metrics-thin">
+										{language.current && t('routes.panel.stripThinData')}
+									</span>
+								{:else}
+									<span data-testid="panel-metrics-ttfb">
+										{language.current && t('routes.panel.stripP95')}
+										<span class="text-primary font-medium tabular-nums"
+											>{formatMs(routeSummary.ttfbMs)}</span
+										>
+										{language.current && t('routes.panel.stripTtfb')}
+									</span>
+									<span data-testid="panel-metrics-total">
+										<span class="text-secondary tabular-nums"
+											>{formatMs(routeSummary.totalMs)}</span
+										>
+										{language.current && t('routes.panel.stripTotal')}
+									</span>
+								{/if}
+								{#if routeSummary.bytesOut > 0}
+									<span data-testid="panel-metrics-bytes">
+										<span class="text-secondary tabular-nums"
+											>{formatBytes(routeSummary.bytesOut, language.current)}</span
+										>
+										{language.current && t('routes.panel.stripBytes')}
+									</span>
+								{/if}
+								{#if routeSummary.hijacked > 0}
+									<!-- Explains a missing TTFB rather than leaving the
+									     operator to wonder: these never committed a
+									     response, so there was no first byte to time. -->
+									<span
+										class="text-secondary"
+										data-testid="panel-metrics-hijacked"
+										title={language.current && t('routes.panel.stripHijacked')}
+									>
+										{routeSummary.hijacked.toLocaleString(language.current)} WS
+									</span>
+								{/if}
+								{#if routeSummary.partialHistogram}
+									<span
+										class="text-warn"
+										data-testid="panel-metrics-partial"
+										title={language.current && t('routes.panel.stripPartialHint')}
+									>
+										{language.current && t('routes.panel.stripPartial')}
+									</span>
+								{/if}
 								<span class="text-secondary" data-testid="panel-metrics-window"
 									>· {language.current && t('routes.panel.stripWindow')}</span
 								>

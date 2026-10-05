@@ -5706,7 +5706,15 @@ describe('routes page: panel header metrics strip', () => {
 			reqs: 1234,
 			fourxx: 12,
 			fivexx: 0,
+			// Legacy field, still on the wire for pre-v15 readers.
 			p95LatencyMs: 184.4,
+			// Schema v15: the two real quantiles, plus the count that
+			// decides whether they may be shown at all.
+			totalMs: 340,
+			ttfbMs: 110,
+			samples: 1234,
+			bytesOut: 12_400_000,
+			hijacked: 0,
 			...over
 		};
 	}
@@ -5718,9 +5726,115 @@ describe('routes page: panel header metrics strip', () => {
 		const strip = await screen.findByTestId('panel-metrics-strip');
 		expect(within(strip).getByTestId('panel-metrics-reqs').textContent).toContain('1,234');
 		expect(within(strip).getByTestId('panel-metrics-fourxx').textContent).toContain('12');
-		// 184.4 ms rounds to 184 — a decimal of a millisecond is
-		// noise in a header.
-		expect(within(strip).getByTestId('panel-metrics-p95').textContent).toContain('184 ms');
+	});
+
+	it('shows the server time and the transfer time as two figures', async () => {
+		// The point of the whole latency-truth change. One number could
+		// not tell the operator that their 6701 ms was 0.1 s of server
+		// and 23.9 s of a visitor downloading a 2.9 MB file.
+		metricsMock.fetchRouteSummary.mockResolvedValue(summary());
+		await openStripPanel();
+
+		const strip = await screen.findByTestId('panel-metrics-strip');
+		expect(within(strip).getByTestId('panel-metrics-ttfb').textContent).toContain('110 ms');
+		expect(within(strip).getByTestId('panel-metrics-total').textContent).toContain('340 ms');
+		// And the volume that explains the gap between them.
+		expect(within(strip).getByTestId('panel-metrics-bytes').textContent).toContain('12 MB');
+	});
+
+	it('keeps a decimal where it changes the reading', async () => {
+		// 2.9 MB is the size of the file that actually caused the
+		// operator's slow transfers. Rounding it to "3 MB" loses the
+		// only digit that distinguishes a heavy asset from a
+		// reasonable one, so values under 10 keep one decimal while
+		// larger ones do not — roughly constant significant figures,
+		// not constant decimals.
+		metricsMock.fetchRouteSummary.mockResolvedValue(summary({ bytesOut: 2_899_675 }));
+		await openStripPanel();
+		const bytes = await screen.findByTestId('panel-metrics-bytes');
+		expect(bytes.textContent).toContain('2.9 MB');
+	});
+
+	it('hides the volume when nothing was served', async () => {
+		// Zero bytes on a window with no recorded distribution is not
+		// a measurement of zero egress; showing "0 B" would invent one.
+		metricsMock.fetchRouteSummary.mockResolvedValue(summary({ bytesOut: 0 }));
+		await openStripPanel();
+		await screen.findByTestId('panel-metrics-strip');
+		expect(screen.queryByTestId('panel-metrics-bytes')).not.toBeInTheDocument();
+	});
+
+	it('rounds the latency figures to whole milliseconds', async () => {
+		// A decimal of a millisecond is noise in a header.
+		metricsMock.fetchRouteSummary.mockResolvedValue(summary({ ttfbMs: 109.6, totalMs: 184.4 }));
+		await openStripPanel();
+		const strip = await screen.findByTestId('panel-metrics-strip');
+		expect(within(strip).getByTestId('panel-metrics-ttfb').textContent).toContain('110 ms');
+		expect(within(strip).getByTestId('panel-metrics-total').textContent).toContain('184 ms');
+	});
+
+	it('says the latency was not recorded, not that traffic was thin', async () => {
+		// THE case the operator's instance returned the hour v2.63.0
+		// landed: samples 0, reqs 44673, partialHistogram true. The
+		// requests were counted; the distribution a percentile needs
+		// was never kept and cannot be recomputed.
+		//
+		// "too few requests for a p95" would be a plain lie on 44,673
+		// requests — and the two situations are indistinguishable on
+		// the wire, both having null quantiles and a sample count under
+		// the threshold.
+		metricsMock.fetchRouteSummary.mockResolvedValue(
+			summary({
+				reqs: 44673,
+				fourxx: 1464,
+				fivexx: 3,
+				samples: 0,
+				totalMs: null,
+				ttfbMs: null,
+				bytesOut: 0,
+				partialHistogram: true
+			})
+		);
+		await openStripPanel();
+
+		await screen.findByTestId('panel-metrics-nohist');
+		expect(screen.queryByTestId('panel-metrics-thin')).not.toBeInTheDocument();
+		expect(screen.queryByTestId('panel-metrics-ttfb')).not.toBeInTheDocument();
+		// The request counts are real and must still be shown.
+		expect(screen.getByTestId('panel-metrics-reqs').textContent).toContain('44,673');
+	});
+
+	it('says the traffic was thin when it genuinely was', async () => {
+		// The mirror case: 9 requests, 9 samples. Below twenty,
+		// ceil(0.95 * n) === n and a "p95" is the slowest request, so
+		// the API returns null — but here the sample size IS the honest
+		// explanation.
+		metricsMock.fetchRouteSummary.mockResolvedValue(
+			summary({ reqs: 9, samples: 9, totalMs: null, ttfbMs: null })
+		);
+		await openStripPanel();
+
+		await screen.findByTestId('panel-metrics-thin');
+		expect(screen.queryByTestId('panel-metrics-nohist')).not.toBeInTheDocument();
+	});
+
+	it('flags a window that straddles the upgrade boundary', async () => {
+		metricsMock.fetchRouteSummary.mockResolvedValue(summary({ partialHistogram: true }));
+		await openStripPanel();
+
+		const partial = await screen.findByTestId('panel-metrics-partial');
+		// The explanation lives in the title, so the strip stays a row
+		// of facts rather than a paragraph.
+		expect(partial.getAttribute('title')).toBeTruthy();
+	});
+
+	it('reports upgraded connections, which explain a missing TTFB', async () => {
+		metricsMock.fetchRouteSummary.mockResolvedValue(summary({ hijacked: 37, ttfbMs: null }));
+		await openStripPanel();
+
+		const ws = await screen.findByTestId('panel-metrics-hijacked');
+		expect(ws.textContent).toContain('37');
+		expect(screen.getByTestId('panel-metrics-ttfb').textContent).toContain('—');
 	});
 
 	it('asks for the summary of the route that was selected', async () => {
@@ -5770,16 +5884,16 @@ describe('routes page: panel header metrics strip', () => {
 		expect(screen.queryByTestId('panel-metrics-reqs')).not.toBeInTheDocument();
 	});
 
-	it('renders a null p95 as a dash, never as 0 ms', async () => {
-		// The route served traffic but no latency was recorded. 0 ms
-		// would read as "instant"; the honest answer is "not
+	it('renders a null latency as a dash, never as 0 ms', async () => {
+		// Enough samples, but one of the two measurements is missing.
+		// 0 ms would read as "instant"; the honest answer is "not
 		// measured".
-		metricsMock.fetchRouteSummary.mockResolvedValue(summary({ p95LatencyMs: null }));
+		metricsMock.fetchRouteSummary.mockResolvedValue(summary({ totalMs: null }));
 		await openStripPanel();
 
-		const p95 = await screen.findByTestId('panel-metrics-p95');
-		expect(p95.textContent).toContain('—');
-		expect(p95.textContent).not.toContain('0 ms');
+		const total = await screen.findByTestId('panel-metrics-total');
+		expect(total.textContent).toContain('—');
+		expect(total.textContent).not.toContain('0 ms');
 	});
 
 	it('tints the 5xx count only when there are 5xx', async () => {

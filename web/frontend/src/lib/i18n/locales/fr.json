@@ -374,7 +374,16 @@
 			"stripFivexx": "5xx",
 			"stripP95": "p95",
 			"stripNoData": "aucune donnée",
-			"stripUnavailable": "mesures indisponibles"
+			"stripUnavailable": "mesures indisponibles",
+			"stripTtfb": "serveur",
+			"stripTotal": "avec transfert",
+			"stripBytes": "servis",
+			"stripThinData": "trop peu de requêtes pour un p95",
+			"stripPartial": "fenêtre partielle",
+			"stripPartialHint": "Une partie de cette fenêtre a été enregistrée avant qu’Arenet ne stocke les distributions de latence. Ces heures ne peuvent pas être recalculées, les centiles n’en couvrent donc qu’une partie.",
+			"stripHijacked": "connexions basculées, non chronométrées",
+			"stripNoHistogram": "latence non enregistrée sur cette fenêtre",
+			"stripNoHistogramHint": "Cette fenêtre est antérieure au stockage des distributions de latence par Arenet. Les requêtes ont bien été comptées, mais la distribution nécessaire à un centile n’a pas été conservée et ne peut pas être recalculée. Les chiffres apparaîtront au fil des nouvelles heures enregistrées."
 		},
 		"delete": {
 			"title": "Supprimer la route",
