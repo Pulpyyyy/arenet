@@ -31,10 +31,12 @@ Viewer-accessible — relies on the API gate (AC #17).
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
 	import TimelineChart from '$lib/components/TimelineChart.svelte';
+	import MultiSeriesTimelineChart from '$lib/components/MultiSeriesTimelineChart.svelte';
 	import { fetchTimeseries } from '$lib/api/metrics';
 	import { getRoute } from '$lib/api/client';
 	import type {
 		MetricWindow,
+		MetricQuantile,
 		TimeseriesPoint,
 		TimeseriesResponse
 	} from '$lib/api/types';
@@ -54,7 +56,34 @@ Viewer-accessible — relies on the API gate (AC #17).
 	let reqSeries = $state<TimeseriesPoint[]>([]);
 	let fourxxSeries = $state<TimeseriesPoint[]>([]);
 	let fivexxSeries = $state<TimeseriesPoint[]>([]);
-	let p95Series = $state<TimeseriesPoint[]>([]);
+	// t() reads the active locale from the module, not from a store,
+	// so a derived label has to touch language.current to re-run on a
+	// language switch. tl() does that read once instead of repeating
+	// `language.current &&` at every call — same helper as the routes
+	// page.
+	function tl(key: string, params?: Record<string, string | number>): string {
+		void language.current;
+		return t(key, params);
+	}
+
+	// Two latency series instead of one. They answer different
+	// questions and the gap between them is the diagnosis: on a real
+	// instance a route reading "p95 6701 ms" turned out to be 0.1 s of
+	// server and 23.9 s of a visitor downloading a 2.9 MB file. No
+	// single line could have said that.
+	let totalSeries = $state<TimeseriesPoint[]>([]);
+	let ttfbSeries = $state<TimeseriesPoint[]>([]);
+
+	// Which quantile the two lines report. p95 by default, matching
+	// what the server returns when the parameter is absent.
+	//
+	// The selector carries this feature rather than decorating it. At
+	// p95 the two lines nearly coincide on both of the operator's
+	// routes (212 vs 236 ms, 786 vs 995 ms), because these are
+	// percentiles of two different distributions and not two
+	// measurements of one request — at the p95 point the transfers are
+	// small. The multi-second cases live at p99.
+	let quantile = $state<MetricQuantile>('p95');
 
 	async function load(): Promise<void> {
 		loading = true;
@@ -69,17 +98,24 @@ Viewer-accessible — relies on the API gate (AC #17).
 			// Four independent series in parallel. AC #3: each is
 			// its own request, response, and chart — they MUST
 			// NOT be folded.
-			const [req, fourxx, fivexx, p95] = await Promise.all([
+			const [req, fourxx, fivexx, total, ttfb] = await Promise.all([
 				fetchTimeseries(routeId, 'req_per_sec', window),
 				fetchTimeseries(routeId, 'four_xx_rate', window),
 				fetchTimeseries(routeId, 'five_xx_rate', window),
-				fetchTimeseries(routeId, 'p95_latency_ms', window)
+				// total_ms and ttfb_ms read the stored distributions,
+				// so they honour the quantile. p95_latency_ms is no
+				// longer fetched: it is the legacy scalar, fixed at
+				// p95 and computed as a mean of per-bucket
+				// percentiles, which is not a percentile.
+				fetchTimeseries(routeId, 'total_ms', window, quantile),
+				fetchTimeseries(routeId, 'ttfb_ms', window, quantile)
 			]);
 			disabled = req.disabled === true;
 			reqSeries = trimTrailing(req);
 			fourxxSeries = trimTrailing(fourxx);
 			fivexxSeries = trimTrailing(fivexx);
-			p95Series = trimTrailing(p95);
+			totalSeries = trimTrailing(total);
+			ttfbSeries = trimTrailing(ttfb);
 		} catch (err) {
 			if (err instanceof ApiError && err.status === 404) {
 				routeNotFound = true;
@@ -90,6 +126,52 @@ Viewer-accessible — relies on the API gate (AC #17).
 		} finally {
 			loading = false;
 		}
+	}
+
+	/**
+	 * Zip the two latency series into the chart's row shape, keyed by
+	 * timestamp rather than by index.
+	 *
+	 * Both series are gap-filled over the same window and step, so the
+	 * timestamps do line up today — keying on them anyway means a
+	 * future change to either endpoint cannot silently shift one curve
+	 * against the other, which would be invisible on screen and
+	 * perfectly wrong.
+	 *
+	 * null is preserved, not coerced: the chart's nullAsGap prop turns
+	 * it into a break in the line. A zero here would draw a dip to
+	 * "instant" exactly where nothing was measured.
+	 */
+	const latencyRows = $derived.by(() => {
+		const byTs = new Map<string, { bucketStart: string; ttfb: number | null; total: number | null }>();
+		for (const p of ttfbSeries) {
+			byTs.set(p.ts, { bucketStart: p.ts, ttfb: p.value, total: null });
+		}
+		for (const p of totalSeries) {
+			const row = byTs.get(p.ts);
+			if (row) row.total = p.value;
+			else byTs.set(p.ts, { bucketStart: p.ts, ttfb: null, total: p.value });
+		}
+		return Array.from(byTs.values()).sort((a, b) => a.bucketStart.localeCompare(b.bucketStart));
+	});
+
+	const latencySeries = $derived([
+		{
+			key: 'ttfb',
+			label: tl('observability.latencySeriesTtfb'),
+			color: 'var(--status-info)'
+		},
+		{
+			key: 'total',
+			label: tl('observability.latencySeriesTotal'),
+			color: 'var(--accent-cyan)'
+		}
+	]);
+
+	function switchQuantile(q: MetricQuantile): void {
+		if (q === quantile) return;
+		quantile = q;
+		void load();
 	}
 
 	function trimTrailing(resp: TimeseriesResponse): TimeseriesPoint[] {
@@ -203,13 +285,32 @@ Viewer-accessible — relies on the API gate (AC #17).
 		</Card>
 		<Card>
 			<div class="chart-block">
-				<h3>Latence p95 (ms)</h3>
-				<TimelineChart
-					points={p95Series}
-					color="var(--status-info)"
+				<div class="latency-head">
+					<h3>{tl('observability.latencyTitle')}</h3>
+					<div
+						class="quantile-toggle"
+						role="group"
+						aria-label={tl('observability.quantileAria')}
+					>
+						{#each ['p50', 'p95', 'p99'] as const as q (q)}
+							<button
+								type="button"
+								class:active={quantile === q}
+								aria-pressed={quantile === q}
+								data-testid={`quantile-${q}`}
+								onclick={() => switchQuantile(q)}>{q}</button
+							>
+						{/each}
+					</div>
+				</div>
+				<MultiSeriesTimelineChart
+					data={latencyRows}
+					series={latencySeries}
+					label={tl('observability.latencyAria')}
 					formatValue={fmtMs}
-					label="p95 latency in milliseconds"
+					nullAsGap
 				/>
+				<p class="latency-hint">{tl('observability.latencyHint')}</p>
 			</div>
 		</Card>
 	</div>
@@ -322,6 +423,49 @@ Viewer-accessible — relies on the API gate (AC #17).
 			grid-template-columns: repeat(2, 1fr);
 		}
 	}
+	.latency-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+	}
+
+	.quantile-toggle {
+		display: inline-flex;
+		gap: 2px;
+	}
+
+	.quantile-toggle button {
+		border: 1px solid var(--border);
+		background: transparent;
+		color: var(--text-secondary);
+		font-size: 11px;
+		font-variant-numeric: tabular-nums;
+		padding: 2px 8px;
+		cursor: pointer;
+	}
+
+	.quantile-toggle button:first-child {
+		border-radius: 4px 0 0 4px;
+	}
+
+	.quantile-toggle button:last-child {
+		border-radius: 0 4px 4px 0;
+	}
+
+	.quantile-toggle button.active {
+		background: var(--surface-raised);
+		color: var(--text-primary);
+		border-color: var(--text-muted);
+	}
+
+	.latency-hint {
+		margin: 6px 0 0;
+		font-size: 11px;
+		line-height: 1.45;
+		color: var(--text-muted);
+	}
+
 	.chart-block {
 		padding: 1rem;
 	}

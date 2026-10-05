@@ -2569,5 +2569,13 @@
 		"title": "Change your password",
 		"body": "This account was created by an administrator, who knows its first password. Choose your own before going any further.",
 		"action": "Change my password"
+	},
+	"observability": {
+		"latencyTitle": "Latency (ms)",
+		"latencySeriesTtfb": "server",
+		"latencySeriesTotal": "with transfer",
+		"latencyAria": "Server time and total time, in milliseconds",
+		"latencyHint": "The gap between the two lines is the response transfer: the server had finished, the visitor was still downloading. A gap in a line means that bucket held too few requests for the chosen quantile.",
+		"quantileAria": "Which quantile the latency lines report"
 	}
 }

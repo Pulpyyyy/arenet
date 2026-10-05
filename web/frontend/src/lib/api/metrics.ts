@@ -10,6 +10,7 @@ import { request } from './client';
 import type {
 	MetricName,
 	MetricWindow,
+	MetricQuantile,
 	TimeseriesResponse,
 	SummaryResponse,
 	RouteSummaryResponse
@@ -29,9 +30,15 @@ import type {
 export function fetchTimeseries(
 	routeId: string,
 	metric: MetricName,
-	window: MetricWindow
+	window: MetricWindow,
+	quantile?: MetricQuantile
 ): Promise<TimeseriesResponse> {
 	const qs = new URLSearchParams({ route: routeId, metric, window });
+	// Omitted rather than defaulted to 'p95': the server already
+	// defaults to p95, and sending it explicitly on every call would
+	// make the parameter look mandatory to anyone reading the network
+	// tab, including on the metrics that ignore it.
+	if (quantile) qs.set('quantile', quantile);
 	return request<TimeseriesResponse>('GET', `/metrics/timeseries?${qs.toString()}`);
 }
 
