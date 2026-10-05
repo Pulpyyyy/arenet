@@ -374,7 +374,16 @@
 			"stripFivexx": "5xx",
 			"stripP95": "p95",
 			"stripNoData": "no data yet",
-			"stripUnavailable": "metrics unavailable"
+			"stripUnavailable": "metrics unavailable",
+			"stripTtfb": "server",
+			"stripTotal": "with transfer",
+			"stripBytes": "served",
+			"stripThinData": "too few requests for a p95",
+			"stripPartial": "partial window",
+			"stripPartialHint": "Some of this window was recorded before Arenet stored latency distributions. Those hours cannot be recomputed, so the percentiles cover only part of it.",
+			"stripHijacked": "upgraded connections, not timed",
+			"stripNoHistogram": "latency not recorded for this window",
+			"stripNoHistogramHint": "This window predates Arenet storing latency distributions. The requests were counted, but the distribution needed for a percentile was not kept and cannot be recomputed. Figures appear as new hours are recorded."
 		},
 		"delete": {
 			"title": "Delete route",

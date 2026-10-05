@@ -2074,7 +2074,60 @@ export interface RouteSummaryResponse {
 	 *  pre-aggregated percentiles. null when the route served no
 	 *  traffic with a recorded latency: render "—", never 0 ms,
 	 *  which would read as "instant". */
+	/**
+	 * LEGACY, kept so pre-v15 readers keep working. A request-weighted
+	 * mean of the per-hour p95 values — which is a mean of percentiles,
+	 * and therefore still not a percentile however correct each hour
+	 * is. Prefer `totalMs`.
+	 */
 	p95LatencyMs: number | null;
+
+	/**
+	 * p95 of TOTAL request duration, computed from the window's stored
+	 * distribution (schema v15). Runs to the last byte, so it carries
+	 * the visitor's download speed as well as the server's.
+	 */
+	totalMs: number | null;
+
+	/**
+	 * p95 of time-to-first-byte: how long the upstream took to START
+	 * answering. Excludes body transfer, so a slow client cannot
+	 * inflate it.
+	 *
+	 * Null independently of `totalMs` — a route serving mostly
+	 * WebSocket upgrades has requests but few committed responses to
+	 * time, and TTFB is gated on its own population.
+	 */
+	ttfbMs: number | null;
+
+	/**
+	 * Observations behind the quantiles, always present.
+	 *
+	 * Below 20 the quantiles above are null, because at nineteen
+	 * samples ceil(0.95 × n) === n and a "p95" is simply the slowest
+	 * request. Surfaced so the absence is explicable rather than a
+	 * blank the operator has to guess at.
+	 */
+	samples: number;
+
+	/** Response body bytes served over the window. */
+	bytesOut: number;
+
+	/**
+	 * Requests whose connection was taken over (a WebSocket upgrade).
+	 * Their timing and bytes are unobservable by construction, so they
+	 * are counted apart rather than reading as instant empty
+	 * responses.
+	 */
+	hijacked: number;
+
+	/**
+	 * True when some rows in the window carry no distribution, which
+	 * happens across the schema v15 upgrade boundary. Those rows
+	 * cannot be back-filled, so the quantiles describe only part of
+	 * the window.
+	 */
+	partialHistogram?: boolean;
 }
 
 export interface SummaryResponse {
