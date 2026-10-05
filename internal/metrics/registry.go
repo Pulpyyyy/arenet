@@ -19,6 +19,8 @@ package metrics
 import (
 	"sync"
 	"sync/atomic"
+
+	"github.com/barto95100/arenet/internal/histogram"
 )
 
 // Registry holds per-route request and 5xx-error counters with
@@ -103,23 +105,23 @@ type counterCell struct {
 // move the histogram into a shared internal/histogram package)
 // is a rename, not a semantic change.
 type latencyHist struct {
-	counts [17]uint64
+	counts [histogram.Buckets]uint64
 }
 
 func (h *latencyHist) observe(durMs float64) {
-	const baseMs = 0.5
+	const baseMs = histogram.BaseMs
 	idx := 0
 	switch {
 	case durMs < baseMs:
 		idx = 0
 	default:
-		// log2(durMs / baseMs) clamped to [0, 16].
+		// log2(durMs / baseMs) clamped to [0, Buckets-1].
 		x := durMs / baseMs
 		// Fast log2-of-float via repeated halving; avoids math.Log2
 		// to keep the hot path free of any FP transcendental cost.
 		// For our range (0.5 ms .. 65536 ms = factor 131072 = 2^17),
 		// 17 iterations is the worst case.
-		for x >= 2 && idx < 16 {
+		for x >= 2 && idx < histogram.Buckets-1 {
 			x /= 2
 			idx++
 		}
@@ -127,42 +129,33 @@ func (h *latencyHist) observe(durMs float64) {
 	atomic.AddUint64(&h.counts[idx], 1)
 }
 
-// drainP95 returns the p95 in ms over the buckets and resets all
-// counts to zero in one go. Goroutine-local read pattern (called
-// only by Snapshot, which already holds the RLock that protects
-// the map structure); within each cell we atomic.Swap each bucket
-// so a concurrent observe() either lands in this drain (counted)
-// or in the next tick (counted next time).
-func (h *latencyHist) drainP95() int32 {
-	const baseMs = 0.5
-	var total uint64
-	var drained [17]uint64
+// drainBuckets returns the latency distribution accumulated since the
+// previous drain and resets every bucket to zero in one pass.
+//
+// It replaces drainP95, which reduced each tick to a single scalar
+// percentile. That reduction was the first of four invalid aggregation
+// steps: a percentile cannot be summed, averaged or maximised, and the
+// chain downstream did all three. At the 0.88 req/s measured on a real
+// homelab route a one-second tick holds zero or one request, so the
+// "p95" it produced was that single request's duration rounded up to a
+// power of two — the whole explanation for "p95 35658 ms" on a service
+// that was answering in 0.1 s.
+//
+// Bucket counts, unlike percentiles, sum exactly: the elementwise sum
+// of two histograms IS the histogram of the union of their samples
+// (proved in internal/histogram's G1 property test). So the quantile is
+// computed once, at read time, over everything.
+//
+// Goroutine-local read pattern (called only by Snapshot, which already
+// holds the RLock protecting the map structure); within each cell we
+// atomic.Swap each bucket so a concurrent observe() either lands in
+// this drain or in the next tick. Nothing is lost either way.
+func (h *latencyHist) drainBuckets() histogram.BucketCounts {
+	var out histogram.BucketCounts
 	for i := range h.counts {
-		c := atomic.SwapUint64(&h.counts[i], 0)
-		drained[i] = c
-		total += c
+		out[i] = atomic.SwapUint64(&h.counts[i], 0)
 	}
-	if total == 0 {
-		return 0
-	}
-	// p95 = upper edge of bucket where cumulative count first
-	// reaches 95 % of total. Compute threshold with integer ceil:
-	// ceil(total * 95 / 100).
-	threshold := (total*95 + 99) / 100
-	var cum uint64
-	for i, c := range drained {
-		cum += c
-		if cum >= threshold {
-			// Upper edge of bucket i = baseMs * 2^(i+1).
-			edge := baseMs * float64(int(1)<<(i+1))
-			if edge > float64(int32(^uint32(0)>>1)) {
-				return int32(^uint32(0) >> 1)
-			}
-			return int32(edge)
-		}
-	}
-	// Shouldn't happen — if total > 0 some bucket was non-zero.
-	return int32(baseMs * float64(int(1)<<17))
+	return out
 }
 
 // NewRegistry returns an empty Registry. The Caddy module's
@@ -373,8 +366,12 @@ func (r *Registry) Snapshot() map[string]Delta {
 		reqs := atomic.SwapUint64(&cell.reqs, 0)
 		errs := atomic.SwapUint64(&cell.errs, 0)
 		errs4xx := atomic.SwapUint64(&cell.errs4xx, 0)
-		p95 := cell.latency.drainP95()
-		out[id] = Delta{Reqs: reqs, Errs: errs, Errs4xx: errs4xx, LatencyP95Ms: p95}
+		out[id] = Delta{
+			Reqs:           reqs,
+			Errs:           errs,
+			Errs4xx:        errs4xx,
+			LatencyBuckets: cell.latency.drainBuckets(),
+		}
 	}
 	return out
 }
@@ -413,14 +410,13 @@ func (r *Registry) SnapshotHosts() []HostDelta {
 			reqs := atomic.SwapUint64(&cell.reqs, 0)
 			errs := atomic.SwapUint64(&cell.errs, 0)
 			errs4xx := atomic.SwapUint64(&cell.errs4xx, 0)
-			p95 := cell.latency.drainP95()
 			out = append(out, HostDelta{
-				RouteID:      routeID,
-				Host:         host,
-				Reqs:         reqs,
-				Errs:         errs,
-				Errs4xx:      errs4xx,
-				LatencyP95Ms: p95,
+				RouteID:        routeID,
+				Host:           host,
+				Reqs:           reqs,
+				Errs:           errs,
+				Errs4xx:        errs4xx,
+				LatencyBuckets: cell.latency.drainBuckets(),
 			})
 		}
 	}

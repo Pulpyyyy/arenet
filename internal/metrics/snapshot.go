@@ -26,6 +26,8 @@
 // (§4 and §5 in particular).
 package metrics
 
+import "github.com/barto95100/arenet/internal/histogram"
+
 import "time"
 
 // Delta is the per-route counter difference produced by one Snapshot
@@ -50,10 +52,19 @@ import "time"
 // [0, 1] before sending; consumers of Delta directly must apply the
 // same clamp if they compute a rate.
 type Delta struct {
-	Reqs         uint64 `json:"reqs"`
-	Errs         uint64 `json:"errs"` // 5xx (Step E wire-shape name)
-	Errs4xx      uint64 `json:"errs4xx,omitempty"`
-	LatencyP95Ms int32  `json:"latencyP95Ms,omitempty"`
+	Reqs    uint64 `json:"reqs"`
+	Errs    uint64 `json:"errs"` // 5xx (Step E wire-shape name)
+	Errs4xx uint64 `json:"errs4xx,omitempty"`
+	// LatencyBuckets is the latency DISTRIBUTION observed during the
+	// tick, not a percentile over it.
+	//
+	// It replaced LatencyP95Ms because a percentile is not an
+	// aggregatable quantity: the pipeline downstream summed, averaged
+	// and maximised it in turn, and all three operations are invalid.
+	// Bucket counts sum exactly — the elementwise sum of two
+	// histograms is the histogram of the union — so the quantile can
+	// be taken once, at read time, over the whole window.
+	LatencyBuckets histogram.BucketCounts `json:"-"`
 }
 
 // HostDelta is the per-(routeID, host) counter difference produced
@@ -72,12 +83,21 @@ type Delta struct {
 // KnownHosts set — so HostDelta entries are necessarily
 // well-formed hostnames known to the storage layer.
 type HostDelta struct {
-	RouteID      string `json:"routeId"`
-	Host         string `json:"host"`
-	Reqs         uint64 `json:"reqs"`
-	Errs         uint64 `json:"errs"` // 5xx
-	Errs4xx      uint64 `json:"errs4xx,omitempty"`
-	LatencyP95Ms int32  `json:"latencyP95Ms,omitempty"`
+	RouteID string `json:"routeId"`
+	Host    string `json:"host"`
+	Reqs    uint64 `json:"reqs"`
+	Errs    uint64 `json:"errs"` // 5xx
+	Errs4xx uint64 `json:"errs4xx,omitempty"`
+	// LatencyBuckets is the latency DISTRIBUTION observed during the
+	// tick, not a percentile over it.
+	//
+	// It replaced LatencyP95Ms because a percentile is not an
+	// aggregatable quantity: the pipeline downstream summed, averaged
+	// and maximised it in turn, and all three operations are invalid.
+	// Bucket counts sum exactly — the elementwise sum of two
+	// histograms is the histogram of the union — so the quantile can
+	// be taken once, at read time, over the whole window.
+	LatencyBuckets histogram.BucketCounts `json:"-"`
 }
 
 // RouteSnapshot is one route's entry in the per-tick Snapshot. It

@@ -21,6 +21,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/barto95100/arenet/internal/histogram"
 )
 
 // --- Inc -------------------------------------------------------------------
@@ -132,11 +134,34 @@ func TestRegistry_Inc_LatencyP95(t *testing.T) {
 	if got["r1"].Reqs != 100 {
 		t.Fatalf("Reqs=%d, want 100", got["r1"].Reqs)
 	}
-	if got["r1"].LatencyP95Ms == 0 {
-		t.Fatalf("LatencyP95Ms = 0, want a positive ms value")
+
+	// Snapshot now drains the DISTRIBUTION, so this test can assert
+	// the thing it always meant: the p95 of 95 requests at 10 ms and
+	// 5 at 1000 ms sits in the fast region. It also checks the shape
+	// directly, which the old scalar made impossible.
+	buckets := got["r1"].LatencyBuckets
+	if total := buckets.Total(); total != 100 {
+		t.Fatalf("histogram total = %d, want 100 — the drain lost observations", total)
 	}
-	if got["r1"].LatencyP95Ms > 64 {
-		t.Errorf("LatencyP95Ms = %d, expected ~16-32 ms (fast region), got slow-tail", got["r1"].LatencyP95Ms)
+	p95, n := histogram.Quantile(buckets, 0.95)
+	if n != 100 {
+		t.Fatalf("Quantile count = %d, want 100", n)
+	}
+	if p95 == 0 {
+		t.Fatalf("p95 = 0, want a positive ms value")
+	}
+	if p95 > 64 {
+		t.Errorf("p95 = %v ms, expected the fast region (~10 ms), got the slow tail", p95)
+	}
+	// The slow tail must still be visible in the distribution — a p95
+	// in the fast region is only honest if the 5 slow requests were
+	// recorded rather than dropped.
+	if slow := buckets[histogram.IndexOf(1000)]; slow != 5 {
+		t.Errorf("bucket for 1000 ms holds %d, want 5", slow)
+	}
+	// And the p99 of the same data must find them.
+	if p99, _ := histogram.Quantile(buckets, 0.99); p99 < 512 {
+		t.Errorf("p99 = %v ms, want the slow tail — one histogram answers both questions", p99)
 	}
 }
 

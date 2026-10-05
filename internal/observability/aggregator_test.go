@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/barto95100/arenet/internal/histogram"
 )
 
 // silentLogger discards log output during tests so the verbose
@@ -62,11 +64,11 @@ func TestAggregator_FlushAtMinuteBoundary(t *testing.T) {
 	// for r-b. Drain the in channel into the absorb path
 	// manually since we are not running the goroutine.
 	for _, d := range []TickDelta{
-		{RouteID: "r-a", Reqs: 50, Fourxx: 1, Fivexx: 0, LatencyP95Ms: 16},
-		{RouteID: "r-a", Reqs: 60, Fourxx: 0, Fivexx: 1, LatencyP95Ms: 32},
-		{RouteID: "r-a", Reqs: 40, Fourxx: 2, Fivexx: 0, LatencyP95Ms: 8},
-		{RouteID: "r-b", Reqs: 10, Fourxx: 5, Fivexx: 0, LatencyP95Ms: 64},
-		{RouteID: "r-b", Reqs: 12, Fourxx: 3, Fivexx: 0, LatencyP95Ms: 128},
+		{RouteID: "r-a", Reqs: 50, Fourxx: 1, Fivexx: 0, LatencyBuckets: histogram.Of([]float64{16})},
+		{RouteID: "r-a", Reqs: 60, Fourxx: 0, Fivexx: 1, LatencyBuckets: histogram.Of([]float64{32})},
+		{RouteID: "r-a", Reqs: 40, Fourxx: 2, Fivexx: 0, LatencyBuckets: histogram.Of([]float64{8})},
+		{RouteID: "r-b", Reqs: 10, Fourxx: 5, Fivexx: 0, LatencyBuckets: histogram.Of([]float64{64})},
+		{RouteID: "r-b", Reqs: 12, Fourxx: 3, Fivexx: 0, LatencyBuckets: histogram.Of([]float64{128})},
 	} {
 		a.absorb(d)
 	}
@@ -104,15 +106,20 @@ func TestAggregator_FlushAtMinuteBoundary(t *testing.T) {
 	if rowsA[0].FivexxCount != 1 {
 		t.Fatalf("r-a FivexxCount = %d, want 1", rowsA[0].FivexxCount)
 	}
-	if rowsA[0].LatencyP95Ms != 32 {
-		t.Fatalf("r-a LatencyP95Ms = %d, want 32 (max across ticks)", rowsA[0].LatencyP95Ms)
+	// Was "want 32 (max across ticks)". The minute saw three
+	// observations — 16, 32 and 8 ms — and its p95 is now computed
+	// over that distribution instead of being the largest of them.
+	// 32 ms falls in the bucket [32, 64), whose midpoint is 48.
+	if rowsA[0].LatencyP95Ms != 48 {
+		t.Fatalf("r-a LatencyP95Ms = %d, want 48 (p95 of {8,16,32} ms, interpolated)", rowsA[0].LatencyP95Ms)
 	}
 
 	rowsB, err := s.Query(ctx, Granularity1m, "r-b", bucketTs, bucketTs.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("Query r-b: %v", err)
 	}
-	if len(rowsB) != 1 || rowsB[0].ReqCount != 22 || rowsB[0].FourxxCount != 8 || rowsB[0].LatencyP95Ms != 128 {
+	// r-b saw 64 and 128 ms; 128 lands in [128, 256), midpoint 192.
+	if len(rowsB) != 1 || rowsB[0].ReqCount != 22 || rowsB[0].FourxxCount != 8 || rowsB[0].LatencyP95Ms != 192 {
 		t.Fatalf("r-b row mismatch: %+v", rowsB)
 	}
 
@@ -162,7 +169,7 @@ func TestAggregator_DegradedNilStore(t *testing.T) {
 	// not push to a nil DB.
 	a := NewAggregator(nil, silentLogger(), 16)
 	a.currentMinute = time.Date(2026, 5, 28, 10, 0, 0, 0, time.UTC)
-	a.absorb(TickDelta{RouteID: "r-a", Reqs: 100, LatencyP95Ms: 16})
+	a.absorb(TickDelta{RouteID: "r-a", Reqs: 100, LatencyBuckets: histogram.Of([]float64{16})})
 
 	// Manually move the clock forward and flush.
 	a.SetClock(func() time.Time {
@@ -213,7 +220,7 @@ func TestAggregator_FlushErrorIsLoggedAndSwallowed(t *testing.T) {
 
 	// Minute 1: ingest one tick, advance clock to 10:01:00.5,
 	// trigger flush — which must fail-silent.
-	a.absorb(TickDelta{RouteID: "r-a", Reqs: 100, LatencyP95Ms: 16})
+	a.absorb(TickDelta{RouteID: "r-a", Reqs: 100, LatencyBuckets: histogram.Of([]float64{16})})
 	next := t0.Add(time.Minute)
 	nowAtomic.Store(&next)
 	a.maybeFlush(context.Background())
@@ -230,7 +237,7 @@ func TestAggregator_FlushErrorIsLoggedAndSwallowed(t *testing.T) {
 
 	// Critical anti-regression: the in-memory state was reset
 	// before the failed flush. The next minute starts clean.
-	a.absorb(TickDelta{RouteID: "r-b", Reqs: 50, LatencyP95Ms: 32})
+	a.absorb(TickDelta{RouteID: "r-b", Reqs: 50, LatencyBuckets: histogram.Of([]float64{32})})
 	next2 := t0.Add(2 * time.Minute)
 	nowAtomic.Store(&next2)
 	a.maybeFlush(context.Background())
@@ -249,7 +256,7 @@ func TestAggregator_FlushErrorIsLoggedAndSwallowed(t *testing.T) {
 	// recording sink on the third minute.
 	recorder := &recordingSink{}
 	a.sink = recorder
-	a.absorb(TickDelta{RouteID: "r-c", Reqs: 7, LatencyP95Ms: 8})
+	a.absorb(TickDelta{RouteID: "r-c", Reqs: 7, LatencyBuckets: histogram.Of([]float64{8})})
 	next3 := t0.Add(3 * time.Minute)
 	nowAtomic.Store(&next3)
 	a.maybeFlush(context.Background())
@@ -283,7 +290,7 @@ func TestAggregator_IngestStillNonBlockingDuringFlushErrors(t *testing.T) {
 	for w := 0; w < workers; w++ {
 		go func() {
 			for i := 0; i < perWorker; i++ {
-				a.Ingest(TickDelta{RouteID: "r", Reqs: 1, LatencyP95Ms: 10})
+				a.Ingest(TickDelta{RouteID: "r", Reqs: 1, LatencyBuckets: histogram.Of([]float64{10})})
 			}
 		}()
 	}
@@ -331,7 +338,7 @@ func TestAggregator_RunCleanShutdownFlushes(t *testing.T) {
 
 	go a.Run(ctx)
 
-	a.Ingest(TickDelta{RouteID: "r-a", Reqs: 7, LatencyP95Ms: 64})
+	a.Ingest(TickDelta{RouteID: "r-a", Reqs: 7, LatencyBuckets: histogram.Of([]float64{64})})
 
 	// Yield to let the goroutine receive the tick and absorb
 	// it. A short sleep is acceptable here — we are
@@ -579,29 +586,24 @@ drained:
 	}
 }
 
-// TestAggregator_CHARACTERISATION_p95IsActuallyAMaximum is gate G2 of
-// the 2026-10-05 latency-truth design, and it asserts behaviour that is
-// WRONG.
+// TestAggregator_P95IsNotTheMaximum is the inverse of the
+// characterisation test this commit deleted, on the same fixture.
 //
-// It exists so the defect has a written shape before the fix moves it,
-// instead of being argued from memory. **Delete it in the commit that
-// makes it false** (plan task T6) — a characterisation test that
-// survives its own fix has become a lie told by the suite.
+// 600 one-second ticks, each holding one request — which is what
+// 0.88 req/s against a 1 s tick actually produces, measured on a real
+// homelab route. 599 of them took 2 ms and one took 8192 ms.
 //
-// What it records: 600 one-second ticks, 599 of them carrying a 2 ms
-// p95 and one carrying 8192 ms. The honest p95 of that population is
-// 2 ms, because 599/600 = 99.8% of the traffic was 2 ms. The stored
-// value is 8192 — the maximum — because:
+// The old chain stored 8192: drainP95 reduced each tick to a scalar
+// (and with one request, ceil(1 x 0.95) = 1 selected it), then absorb
+// kept the max in a field named p95MaxMs. Nothing in that was a
+// percentile, and it is the whole explanation for an operator reading
+// "p95 35658 ms" off a service answering in 0.1 s.
 //
-//   - registry.drainP95 reduces each tick to a scalar, and at the
-//     operator-measured 0.88 req/s a one-second tick holds zero or one
-//     request, so ceil(1 x 0.95) = 1 selects that single request;
-//   - aggregator.absorb then keeps max(), in a field whose own name
-//     says so: p95MaxMs.
-//
-// Both of the operator's reported figures (35658 ms and 6701 ms)
-// reproduce from this rule. Nothing here is a percentile.
-func TestAggregator_CHARACTERISATION_p95IsActuallyAMaximum(t *testing.T) {
+// 599/600 is 99.8% of the traffic at 2 ms, so the honest p95 is 2 ms.
+// The stored value is now ~4 ms: the 570th of 600 sorted observations
+// falls in bucket [2, 4), interpolated near its top. A factor-2 bucket
+// is the resolution cost; a factor of 2000 was the defect.
+func TestAggregator_P95IsNotTheMaximum(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, ":memory:")
 	if err != nil {
@@ -617,12 +619,10 @@ func TestAggregator_CHARACTERISATION_p95IsActuallyAMaximum(t *testing.T) {
 	a.SetClock(func() time.Time { return *nowAtomic.Load() })
 	a.currentMinute = a.now().Truncate(time.Minute)
 
-	// 599 ticks at 2 ms, one at 8192 ms. One request per tick, which
-	// is what 0.88 req/s against a 1 s tick actually produces.
 	for i := 0; i < 599; i++ {
-		a.absorb(TickDelta{RouteID: "r-slowtail", Reqs: 1, LatencyP95Ms: 2})
+		a.absorb(TickDelta{RouteID: "r-slowtail", Reqs: 1, LatencyBuckets: histogram.Of([]float64{2})})
 	}
-	a.absorb(TickDelta{RouteID: "r-slowtail", Reqs: 1, LatencyP95Ms: 8192})
+	a.absorb(TickDelta{RouteID: "r-slowtail", Reqs: 1, LatencyBuckets: histogram.Of([]float64{8192})})
 
 	next := t0.Add(time.Minute)
 	nowAtomic.Store(&next)
@@ -633,18 +633,40 @@ func TestAggregator_CHARACTERISATION_p95IsActuallyAMaximum(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query: %v", err)
 	}
-	if len(rows) != 1 {
-		t.Fatalf("rows = %d, want 1", len(rows))
-	}
-	if rows[0].ReqCount != 600 {
-		t.Fatalf("ReqCount = %d, want 600 (fixture assumption broken)", rows[0].ReqCount)
+	if len(rows) != 1 || rows[0].ReqCount != 600 {
+		t.Fatalf("rows=%d ReqCount=%v, want 1 row of 600 (fixture assumption broken)", len(rows), rows)
 	}
 
-	// The wrong value, asserted on purpose.
-	if rows[0].LatencyP95Ms != 8192 {
-		t.Errorf("stored latency_p95_ms = %d, want 8192 — this test records the DEFECT; if it now reports something near 2 ms the fix has landed and this test must be DELETED, not adjusted",
-			rows[0].LatencyP95Ms)
+	got := rows[0].LatencyP95Ms
+	if got > 10 {
+		t.Errorf("latency_p95_ms = %d; 599 of 600 requests took 2 ms, so a p95 above 10 ms means the maximum is leaking back in", got)
 	}
-	// And state the truth it fails to tell, so the gap is on the record.
-	t.Logf("599/600 requests were 2 ms; the honest p95 is 2 ms; the stored \"p95\" is %d ms", rows[0].LatencyP95Ms)
+	if got == 0 {
+		t.Errorf("latency_p95_ms = 0; the minute had 600 observations, so zero means the distribution never arrived")
+	}
+	t.Logf("599x2ms + 1x8192ms over one minute -> stored p95 = %d ms (was 8192 before this change)", got)
+}
+
+// TestAggregator_SlowTailStillReachableAtP99 — the fix must not become
+// a different lie by hiding the outlier. The same minute's p99 has to
+// find the 8192 ms request, because one histogram answers both
+// questions and the operator investigating a complaint needs the tail.
+func TestAggregator_SlowTailStillReachableAtP99(t *testing.T) {
+	var acc histogram.BucketCounts
+	for i := 0; i < 599; i++ {
+		acc.Add(histogram.Of([]float64{2}))
+	}
+	acc.Add(histogram.Of([]float64{8192}))
+
+	p95, _ := histogram.Quantile(acc, 0.95)
+	p999, n := histogram.Quantile(acc, 0.999)
+	if n != 600 {
+		t.Fatalf("count = %d, want 600", n)
+	}
+	if p95 > 10 {
+		t.Errorf("p95 = %v ms, want the fast region", p95)
+	}
+	if p999 < 4096 {
+		t.Errorf("p99.9 = %v ms, want the slow tail — the outlier must stay findable, not be averaged away", p999)
+	}
 }
