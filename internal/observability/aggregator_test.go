@@ -578,3 +578,73 @@ drained:
 		t.Errorf("AC #N.15 violation — CrowdSec bump leaked into L/M/Q counters: %+v", rows[0])
 	}
 }
+
+// TestAggregator_CHARACTERISATION_p95IsActuallyAMaximum is gate G2 of
+// the 2026-10-05 latency-truth design, and it asserts behaviour that is
+// WRONG.
+//
+// It exists so the defect has a written shape before the fix moves it,
+// instead of being argued from memory. **Delete it in the commit that
+// makes it false** (plan task T6) — a characterisation test that
+// survives its own fix has become a lie told by the suite.
+//
+// What it records: 600 one-second ticks, 599 of them carrying a 2 ms
+// p95 and one carrying 8192 ms. The honest p95 of that population is
+// 2 ms, because 599/600 = 99.8% of the traffic was 2 ms. The stored
+// value is 8192 — the maximum — because:
+//
+//   - registry.drainP95 reduces each tick to a scalar, and at the
+//     operator-measured 0.88 req/s a one-second tick holds zero or one
+//     request, so ceil(1 x 0.95) = 1 selects that single request;
+//   - aggregator.absorb then keeps max(), in a field whose own name
+//     says so: p95MaxMs.
+//
+// Both of the operator's reported figures (35658 ms and 6701 ms)
+// reproduce from this rule. Nothing here is a percentile.
+func TestAggregator_CHARACTERISATION_p95IsActuallyAMaximum(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	var nowAtomic atomic.Pointer[time.Time]
+	t0 := time.Date(2026, 10, 5, 9, 0, 0, 500_000_000, time.UTC)
+	nowAtomic.Store(&t0)
+
+	a := NewAggregator(s, silentLogger(), 16)
+	a.SetClock(func() time.Time { return *nowAtomic.Load() })
+	a.currentMinute = a.now().Truncate(time.Minute)
+
+	// 599 ticks at 2 ms, one at 8192 ms. One request per tick, which
+	// is what 0.88 req/s against a 1 s tick actually produces.
+	for i := 0; i < 599; i++ {
+		a.absorb(TickDelta{RouteID: "r-slowtail", Reqs: 1, LatencyP95Ms: 2})
+	}
+	a.absorb(TickDelta{RouteID: "r-slowtail", Reqs: 1, LatencyP95Ms: 8192})
+
+	next := t0.Add(time.Minute)
+	nowAtomic.Store(&next)
+	a.maybeFlush(ctx)
+
+	bucketTs := t0.Truncate(time.Minute)
+	rows, err := s.Query(ctx, Granularity1m, "r-slowtail", bucketTs, bucketTs.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].ReqCount != 600 {
+		t.Fatalf("ReqCount = %d, want 600 (fixture assumption broken)", rows[0].ReqCount)
+	}
+
+	// The wrong value, asserted on purpose.
+	if rows[0].LatencyP95Ms != 8192 {
+		t.Errorf("stored latency_p95_ms = %d, want 8192 — this test records the DEFECT; if it now reports something near 2 ms the fix has landed and this test must be DELETED, not adjusted",
+			rows[0].LatencyP95Ms)
+	}
+	// And state the truth it fails to tell, so the gap is on the record.
+	t.Logf("599/600 requests were 2 ms; the honest p95 is 2 ms; the stored \"p95\" is %d ms", rows[0].LatencyP95Ms)
+}
