@@ -5828,6 +5828,30 @@ describe('routes page: panel header metrics strip', () => {
 		expect(partial.getAttribute('title')).toBeTruthy();
 	});
 
+	it('keeps the partial marker beside a volume it also qualifies', async () => {
+		// The request counts cover the whole window; the percentiles
+		// AND the bytes do not, because rows predating schema v15
+		// carry neither a distribution nor a byte count. On a freshly
+		// upgraded instance that read "1.8 GB served … last 24 h"
+		// while the bytes covered about an hour.
+		//
+		// The marker is the only thing qualifying that number, so a
+		// refactor that keeps the volume and drops the marker has to
+		// fail here.
+		metricsMock.fetchRouteSummary.mockResolvedValue(
+			summary({ reqs: 61_786, bytesOut: 1_800_000_000, partialHistogram: true })
+		);
+		await openStripPanel();
+
+		const strip = await screen.findByTestId('panel-metrics-strip');
+		expect(within(strip).getByTestId('panel-metrics-bytes').textContent).toContain('1.8 GB');
+		const partial = within(strip).getByTestId('panel-metrics-partial');
+		expect(partial).toBeInTheDocument();
+		// And the explanation must name the volume, not only the
+		// percentiles — the wording was wrong on exactly that point.
+		expect(partial.getAttribute('title')).toMatch(/bytes|volume/i);
+	});
+
 	it('reports upgraded connections, which explain a missing TTFB', async () => {
 		metricsMock.fetchRouteSummary.mockResolvedValue(summary({ hijacked: 37, ttfbMs: null }));
 		await openStripPanel();
