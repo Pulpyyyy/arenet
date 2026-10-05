@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/barto95100/arenet/internal/audit"
+	"github.com/barto95100/arenet/internal/histogram"
 	"github.com/barto95100/arenet/internal/observability"
 	"github.com/barto95100/arenet/internal/storage"
 )
@@ -1003,6 +1004,50 @@ type routeSummaryResponse struct {
 	// recorded latency, so the UI shows "—" rather than 0 ms,
 	// which would read as "instant".
 	P95LatencyMs *float64 `json:"p95LatencyMs"`
+
+	// TotalMs and TtfbMs are the window's p95 over the stored
+	// DISTRIBUTIONS (schema v15), which is what makes them real
+	// percentiles rather than an average of per-bucket ones.
+	//
+	// They answer different questions and both are needed. TotalMs
+	// runs to the last byte, so it carries the visitor's download
+	// time; TtfbMs stops when the response committed. The same asset
+	// measured 0.108 s TTFB and 24 s total on one instance — the
+	// server was never slow, and a single number could not say so.
+	//
+	// Both are null when the window cannot support a 95th percentile
+	// (see Samples) or holds no distribution at all. Null, never a
+	// number: a figure the data cannot carry is worse than no figure,
+	// because the operator cannot tell the difference.
+	TotalMs *float64 `json:"totalMs"`
+	TtfbMs  *float64 `json:"ttfbMs"`
+
+	// Samples is how many observations the quantiles were computed
+	// from, ALWAYS present so a reader can judge the figures rather
+	// than trust them. Below histogram.MinSamplesFor(0.95) — twenty,
+	// derived rather than chosen — the quantiles above are null,
+	// because at nineteen samples or fewer ceil(0.95*n) == n and the
+	// "p95" is simply the slowest request.
+	Samples int64 `json:"samples"`
+
+	// BytesOut is response body bytes served over the window. Volume
+	// was recorded nowhere before v15, so the cause of a slow transfer
+	// was reachable only by reading a raw access log.
+	BytesOut int64 `json:"bytesOut"`
+
+	// Hijacked counts requests whose connection was taken over (a
+	// WebSocket upgrade). Their timings and bytes are unobservable by
+	// construction, so they are reported separately instead of
+	// reading as instant zero-byte responses.
+	Hijacked int64 `json:"hijacked"`
+
+	// PartialHistogram is true when some bucket rows in the window
+	// carry no distribution, which happens across the v15 upgrade
+	// boundary. Those rows cannot be back-filled — the data was
+	// discarded a second after it was produced — so the quantiles
+	// describe only part of the window and the UI must be able to say
+	// so.
+	PartialHistogram bool `json:"partialHistogram,omitempty"`
 }
 
 // metricsRouteSummary handles
@@ -1076,5 +1121,42 @@ func (h *Handler) metricsRouteSummary(w http.ResponseWriter, r *http.Request) {
 		resp.P95LatencyMs = &p95
 	}
 
+	// Schema v15 — the real quantiles, over the window's summed
+	// distributions. P95LatencyMs above is kept for existing readers
+	// and is a weighted mean of per-hour percentiles; these two are
+	// percentiles of the window itself.
+	agg, aerr := h.metrics.AggregateHistogram(r.Context(), observability.Granularity1h, routeID, from, to)
+	if aerr != nil {
+		h.logger.Error("metrics: route summary histogram failed", "err", aerr, "route", routeID)
+		writeError(w, http.StatusServiceUnavailable, "metrics history unavailable")
+		return
+	}
+	resp.BytesOut = agg.BytesOut
+	resp.Hijacked = agg.HijackedCount
+	resp.Samples = agg.Total.Total()
+	resp.PartialHistogram = agg.Rows > 0 && agg.RowsWithHistogram < agg.Rows
+	if resp.Samples >= histogram.MinSamplesFor(summaryQuantile) {
+		if v, n := histogram.Quantile(agg.Total, summaryQuantile); n > 0 {
+			resp.TotalMs = &v
+		}
+		// TTFB is observed only on requests that committed a
+		// response, so its population is its own and is gated on its
+		// own count. A route serving only WebSocket upgrades has
+		// plenty of requests and no TTFB at all.
+		if ttfbN := agg.TTFB.Total(); ttfbN >= histogram.MinSamplesFor(summaryQuantile) {
+			if v, n := histogram.Quantile(agg.TTFB, summaryQuantile); n > 0 {
+				resp.TtfbMs = &v
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
+
+// summaryQuantile is the percentile /metrics/route-summary reports.
+//
+// Fixed at p95 here deliberately: the endpoint answers "is this route
+// healthy at a glance", and a glance does not choose a statistic. The
+// timeseries endpoint is where an operator investigating a complaint
+// picks p50 or p99.
+const summaryQuantile = 0.95

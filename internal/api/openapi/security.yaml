@@ -1006,7 +1006,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [routeId, generatedAt, windowSeconds, reqs, fourxx, fivexx, p95LatencyMs]
+                required: [routeId, generatedAt, windowSeconds, reqs, fourxx, fivexx, p95LatencyMs, totalMs, ttfbMs, samples, bytesOut, hijacked]
                 properties:
                   routeId: { type: string }
                   generatedAt: { type: string, format: date-time }
@@ -1015,7 +1015,52 @@ paths:
                   reqs: { type: integer }
                   fourxx: { type: integer }
                   fivexx: { type: integer }
-                  p95LatencyMs: { type: [number, 'null'] }
+                  p95LatencyMs:
+                    type: [number, 'null']
+                    description: |
+                      Legacy. A request-weighted mean of the per-hour p95 values,
+                      kept so readers written before schema v15 keep working.
+                      Prefer `totalMs`, which is a percentile of the window itself.
+                  totalMs:
+                    type: [number, 'null']
+                    description: |
+                      p95 of total request duration over the window, computed from
+                      the stored distribution. Includes the response body transfer,
+                      so it carries the visitor's download speed as well as the
+                      server's.
+                  ttfbMs:
+                    type: [number, 'null']
+                    description: |
+                      p95 of time-to-first-byte: how long the upstream took to
+                      begin answering. Excludes body transfer, so a slow client
+                      cannot inflate it. Null independently of `totalMs` — a route
+                      serving only WebSocket upgrades has requests but no
+                      committed responses to time.
+                  samples:
+                    type: integer
+                    description: |
+                      Observations behind the quantiles, always present. Below 20
+                      — the point at which ceil(0.95 * n) == n and a "p95" is
+                      simply the slowest request — `totalMs` and `ttfbMs` are
+                      null. The count is still reported so the absence is
+                      explicable rather than blank.
+                  bytesOut:
+                    type: integer
+                    description: Response body bytes served over the window.
+                  hijacked:
+                    type: integer
+                    description: |
+                      Requests whose connection was taken over (a WebSocket
+                      upgrade). Their timing and bytes are unobservable by
+                      construction, so they are counted separately rather than
+                      reading as instant zero-byte responses.
+                  partialHistogram:
+                    type: boolean
+                    description: |
+                      Present and true when some rows in the window carry no
+                      distribution, which happens across the schema v15 upgrade
+                      boundary. Those rows cannot be back-filled, so the
+                      quantiles describe only part of the window.
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }

@@ -285,3 +285,53 @@ func Decode(blob []byte) (BucketCounts, bool, error) {
 	}
 	return out, true, nil
 }
+
+// MinSamplesFor returns the smallest number of observations for which
+// the q-quantile is distinguishable from the maximum.
+//
+// It is derived, not chosen. Quantile selects rank ceil(q*n), and that
+// rank equals n — i.e. the "quantile" IS the largest observation —
+// while q*n > n-1.
+//
+// The threshold is found by evaluating that exact condition rather
+// than by rearranging it to n < 1/(1-q). The closed form looks
+// cleaner and is wrong at the boundary: 1-0.9 is 0.09999999999999998
+// in binary floating point, so ceil(1/(1-0.9)) is 11 where the real
+// answer is 10. Searching with the same expression Quantile uses
+// means the two cannot disagree, which a formula derived separately
+// cannot promise. My own test caught this on the first run.
+//
+// Results:
+//
+//	p50 ->   2 observations
+//	p95 ->  20
+//	p99 -> 100
+//
+// Below the threshold the number is not wrong so much as meaningless:
+// it answers "what was the slowest request" while being labelled a
+// percentile. That is precisely the defect this design was written to
+// remove — the superseded pipeline reduced each one-second tick to a
+// "p95" over zero or one request — so reintroducing it at the read
+// layer, with an arbitrary cutoff picked to feel safe, would be the
+// same mistake wearing a threshold.
+//
+// Callers above this package use it to decide whether to publish a
+// figure at all. Returning null for a window with nine requests is not
+// a gap in the data; it is the honest report that nine requests cannot
+// support a 95th percentile.
+func MinSamplesFor(q float64) int64 {
+	if q <= 0 || q >= 1 {
+		return 1
+	}
+	// Bounded so a pathological q (0.9999999) cannot spin. The cap is
+	// far above any quantile a dashboard offers; reaching it means the
+	// caller is asking for a percentile no realistic window can
+	// support, and the cap is then the honest answer.
+	const maxSearch = int64(1 << 20)
+	for n := int64(1); n < maxSearch; n++ {
+		if int64(math.Ceil(q*float64(n))) < n {
+			return n
+		}
+	}
+	return maxSearch
+}

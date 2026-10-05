@@ -419,3 +419,79 @@ func TestEncode_IsStableAcrossBuilds(t *testing.T) {
 		}
 	}
 }
+
+// TestMinSamplesFor_IsTheRankDegenerationPoint proves the threshold
+// rather than asserting a chosen constant.
+//
+// Just below it, Quantile's rank must equal the sample count — the
+// quantile has degenerated into the maximum. At it and above, the rank
+// must be strictly below the count, so the figure is a percentile
+// again. If this test ever needs a magic number, the derivation has
+// been lost.
+func TestMinSamplesFor_IsTheRankDegenerationPoint(t *testing.T) {
+	for _, q := range []float64{0.5, 0.9, 0.95, 0.99} {
+		min := MinSamplesFor(q)
+		for _, n := range []int64{min - 1, min} {
+			if n < 1 {
+				continue
+			}
+			rank := int64(math.Ceil(q * float64(n)))
+			degenerate := rank >= n
+			wantDegenerate := n < min
+			if degenerate != wantDegenerate {
+				t.Errorf("q=%v n=%d: rank=%d, degenerate=%v want %v (threshold %d)",
+					q, n, rank, degenerate, wantDegenerate, min)
+			}
+		}
+	}
+}
+
+// TestMinSamplesFor_KnownValues pins the three the product actually
+// uses, so a refactor of the formula cannot quietly shift them.
+func TestMinSamplesFor_KnownValues(t *testing.T) {
+	for _, tc := range []struct {
+		q    float64
+		want int64
+	}{
+		{0.5, 2},
+		{0.95, 20},
+		{0.99, 100},
+	} {
+		if got := MinSamplesFor(tc.q); got != tc.want {
+			t.Errorf("MinSamplesFor(%v) = %d, want %d", tc.q, got, tc.want)
+		}
+	}
+}
+
+// TestMinSamplesFor_DegenerateQuantilesAreSafe — q outside (0,1) has
+// no percentile meaning; the threshold must not become zero or
+// negative and let a caller divide by it.
+func TestMinSamplesFor_DegenerateQuantilesAreSafe(t *testing.T) {
+	for _, q := range []float64{-1, 0, 1, 2} {
+		if got := MinSamplesFor(q); got < 1 {
+			t.Errorf("MinSamplesFor(%v) = %d, want at least 1", q, got)
+		}
+	}
+}
+
+// TestQuantile_BelowThresholdIsTheMaximum demonstrates WHY the
+// threshold exists, on the shape that caused the original complaint:
+// a handful of fast requests and one slow one.
+func TestQuantile_BelowThresholdIsTheMaximum(t *testing.T) {
+	// 9 fast, 1 slow. Nine of ten requests took 3 ms.
+	raw := []float64{3, 3, 3, 3, 3, 3, 3, 3, 3, 9000}
+	h := Of(raw)
+	p95, n := Quantile(h, 0.95)
+	if n != 10 {
+		t.Fatalf("count = %d, want 10", n)
+	}
+	if n >= MinSamplesFor(0.95) {
+		t.Fatalf("fixture has %d samples, which is not below the threshold %d", n, MinSamplesFor(0.95))
+	}
+	// The "p95" here sits in the slow request's bucket: with ten
+	// samples it cannot be anything else, which is the whole point.
+	if p95 < 4096 {
+		t.Errorf("p95 = %v ms; with 10 samples the 95th percentile IS the maximum, so this fixture no longer demonstrates the degeneration", p95)
+	}
+	// Callers must therefore publish nothing for this window.
+}
