@@ -271,8 +271,8 @@ func (h *RouteMetricsHandler) Validate() error {
 func (h *RouteMetricsHandler) ServeHTTP(
 	w http.ResponseWriter, r *http.Request, next caddyhttp.Handler,
 ) (err error) {
-	rec := newStatusRecorder(w)
 	start := time.Now()
+	rec := newStatusRecorder(w, start)
 	// Phase 1 — capture r.Host now (before next.ServeHTTP
 	// runs). Some downstream handlers may mutate the request
 	// header set; reading at entry pins the value the matcher
@@ -520,13 +520,77 @@ type statusRecorder struct {
 	http.ResponseWriter
 	status        int
 	headerWritten bool
+
+	// start is the instant the middleware took the request, used to
+	// stamp ttfbMs below.
+	start time.Time
+
+	// ttfbMs is the time to the response's FIRST byte — strictly, to
+	// the moment the response commits, which is the first WriteHeader
+	// or the first Write, whichever an inner handler reaches first.
+	//
+	// It exists because the total duration this middleware already
+	// records includes the whole response body transfer, so it answers
+	// a different question than operators think it does. Measured on a
+	// real instance: the same asset served in 0.108 s TTFB and 0.326 s
+	// total to a fast client appeared in the access log at 24 s for a
+	// slow one. The server was never slow; nothing in the metric could
+	// say so.
+	//
+	// TTFB is the upstream-responsiveness number. Total duration stays
+	// too, because "what are my visitors actually experiencing" is a
+	// real question — it is just not the same question.
+	//
+	// Read it with ttfbCommitted, never by testing for zero. A
+	// response that commits in under a microsecond measures 0.000 ms
+	// after the integer-microsecond division, so zero is a legitimate
+	// value AND would be the obvious sentinel — exactly the
+	// absent-versus-zero conflation this whole change exists to
+	// remove. The gate caught it on the first run: WriteHeader stamped
+	// 0.000, the guard read that as "not stamped", and the next Write
+	// re-stamped at 151 ms, putting a slow client's transfer time
+	// straight into the number built to exclude it.
+	ttfbMs        float64
+	ttfbCommitted bool
+
+	// bytesOut counts response body bytes that passed through Write.
+	// Volume was recorded nowhere, so the cause of a slow transfer —
+	// on the instance above, a 2.9 MB file — was reachable only by
+	// running jq over a raw access log. A reverse proxy that cannot
+	// report its own egress cannot explain its own latency.
+	//
+	// Excludes response headers, and excludes anything written after a
+	// Hijack: see hijacked.
+	bytesOut uint64
+
+	// hijacked records that the connection was taken over, which is
+	// what a WebSocket upgrade does.
+	//
+	// After Hijack there is no WriteHeader and no Write, so TTFB and
+	// bytesOut are unobservable here BY CONSTRUCTION — not merely
+	// missing. The count is surfaced rather than letting those
+	// requests read as a 0 ms response of 0 bytes, which is the kind
+	// of silent zero this whole change exists to stop.
+	hijacked bool
 }
 
-func newStatusRecorder(w http.ResponseWriter) *statusRecorder {
+func newStatusRecorder(w http.ResponseWriter, start time.Time) *statusRecorder {
 	return &statusRecorder{
 		ResponseWriter: w,
 		status:         http.StatusOK,
+		start:          start,
 	}
+}
+
+// commit stamps the time-to-first-byte on the first response write.
+// Called from both WriteHeader and Write, because only one of them
+// fires first and either one means the response has begun.
+func (s *statusRecorder) commit() {
+	if s.ttfbCommitted {
+		return
+	}
+	s.ttfbCommitted = true
+	s.ttfbMs = float64(time.Since(s.start).Microseconds()) / 1000.0
 }
 
 // WriteHeader captures the status code on the first call. Subsequent
@@ -543,6 +607,7 @@ func (s *statusRecorder) WriteHeader(code int) {
 	}
 	s.status = code
 	s.headerWritten = true
+	s.commit()
 	s.ResponseWriter.WriteHeader(code)
 }
 
@@ -554,7 +619,15 @@ func (s *statusRecorder) Write(b []byte) (int, error) {
 		s.headerWritten = true
 		// status already 200 from newStatusRecorder.
 	}
-	return s.ResponseWriter.Write(b)
+	s.commit()
+	n, err := s.ResponseWriter.Write(b)
+	// Count what actually reached the wire, not what was offered: a
+	// short write on a client that hung up mid-body must not be
+	// reported as bytes delivered.
+	if n > 0 {
+		s.bytesOut += uint64(n)
+	}
+	return n, err
 }
 
 // Hijack forwards to the wrapped writer if it supports Hijacker, else
@@ -563,7 +636,14 @@ func (s *statusRecorder) Write(b []byte) (int, error) {
 // would error out at our handler.
 func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if h, ok := s.ResponseWriter.(http.Hijacker); ok {
-		return h.Hijack()
+		conn, rw, err := h.Hijack()
+		if err == nil {
+			// Everything after this point bypasses Write, so TTFB and
+			// bytesOut stop being observable. Record that fact instead
+			// of reporting their zero values as measurements.
+			s.hijacked = true
+		}
+		return conn, rw, err
 	}
 	return nil, nil, http.ErrNotSupported
 }
