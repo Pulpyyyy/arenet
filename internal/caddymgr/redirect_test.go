@@ -17,6 +17,7 @@
 package caddymgr
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -77,6 +78,112 @@ func TestBuildConfigJSON_RedirectRoute(t *testing.T) {
 	if !strings.Contains(compact, `"arenet_routemetrics"`) {
 		t.Error("the metrics handler must stay in front of the redirect")
 	}
+	// Presence is not order — see TestBuildConfigJSON_RedirectMetricsRunBeforeStaticResponse.
+}
+
+// TestBuildConfigJSON_RedirectMetricsRunBeforeStaticResponse pins the
+// ORDER the counters depend on.
+//
+// redirect.go's design comment says the metrics handler sits "in front
+// of" the redirect so a moved domain still reports the traffic still
+// arriving at the old name — the number that tells the operator when
+// the old name can be retired. The assertion above only proved the
+// handler was somewhere in the config, while its own message claimed
+// it was in front; `static_response` terminates the chain, so a
+// swapped pair would send every redirect counter silently to zero and
+// leave that test green.
+//
+// This walks the emitted JSON instead of grepping it, so the invariant
+// is actually checked rather than described.
+func TestBuildConfigJSON_RedirectMetricsRunBeforeStaticResponse(t *testing.T) {
+	cfgJSON, err := buildConfigJSON([]storage.Route{redirectRoute(&storage.RedirectConfig{
+		Target:     "https://new.example.com",
+		StatusCode: 301,
+	})}, buildOpts{DevMode: true})
+	if err != nil {
+		t.Fatalf("buildConfigJSON: %v", err)
+	}
+
+	var cfg any
+	if err := json.Unmarshal(cfgJSON, &cfg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	chain := findHandlerChainWith(cfg, "static_response")
+	if chain == nil {
+		t.Fatal("no handler chain containing static_response found in the emitted config")
+	}
+
+	metricsAt, staticAt := -1, -1
+	for i, h := range chain {
+		switch handlerName(h) {
+		case "arenet_routemetrics":
+			if metricsAt == -1 {
+				metricsAt = i
+			}
+		case "static_response":
+			if staticAt == -1 {
+				staticAt = i
+			}
+		}
+	}
+	if metricsAt == -1 {
+		t.Fatalf("no arenet_routemetrics in the redirect chain: %v", handlerNames(chain))
+	}
+	if staticAt == -1 {
+		t.Fatalf("no static_response in the chain we selected: %v", handlerNames(chain))
+	}
+	if metricsAt > staticAt {
+		t.Errorf("handler order is %v: static_response terminates the chain, so metrics placed after it never run and every redirect counter reads zero", handlerNames(chain))
+	}
+}
+
+// findHandlerChainWith returns the first "handle" array in the config
+// tree that contains a handler of the given name. Walks maps and
+// slices generically so it does not depend on how deeply the redirect
+// subroute happens to be nested.
+func findHandlerChainWith(node any, handler string) []any {
+	switch n := node.(type) {
+	case map[string]any:
+		if raw, ok := n["handle"]; ok {
+			if chain, ok := raw.([]any); ok {
+				for _, h := range chain {
+					if handlerName(h) == handler {
+						return chain
+					}
+				}
+			}
+		}
+		for _, v := range n {
+			if found := findHandlerChainWith(v, handler); found != nil {
+				return found
+			}
+		}
+	case []any:
+		for _, v := range n {
+			if found := findHandlerChainWith(v, handler); found != nil {
+				return found
+			}
+		}
+	}
+	return nil
+}
+
+func handlerName(h any) string {
+	m, ok := h.(map[string]any)
+	if !ok {
+		return ""
+	}
+	name, _ := m["handler"].(string)
+	return name
+}
+
+func handlerNames(chain []any) []string {
+	out := make([]string, 0, len(chain))
+	for _, h := range chain {
+		out = append(out, handlerName(h))
+	}
+	return out
 }
 
 func TestBuildConfigJSON_RedirectWithoutPreservePath(t *testing.T) {

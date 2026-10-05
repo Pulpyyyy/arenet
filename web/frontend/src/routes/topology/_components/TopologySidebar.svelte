@@ -66,8 +66,19 @@
         // Optional inline badge surfaced next to the upstream label
         // when something operationally interesting needs flagging.
         function topfluxBadge(r: TopologyRoute): string | null {
-                if (r.errorRate5xx > 0) return `5xx ${r.errorRate5xx}%`;
-                if (r.p99LatencyMs > 300) return `p99 ${r.p99LatencyMs} ms`;
+                // Both values arrive as raw floats from the windowed
+                // aggregator, and both were interpolated unrounded: the
+                // operator's badge read "5xx 0.8333333333333334%".
+                // AliasNode has used toFixed(2) for this since it
+                // shipped; this is the one surface that forgot.
+                //
+                // Two decimals, not zero: a homelab route at 0.83% 5xx
+                // would otherwise round to "1%" or "0%", and which of
+                // those it picked would carry more meaning than the
+                // measurement does. Latency is whole milliseconds —
+                // a fraction of one is noise in a badge.
+                if (r.errorRate5xx > 0) return `5xx ${r.errorRate5xx.toFixed(2)}%`;
+                if (r.p99LatencyMs > 300) return `p99 ${Math.round(r.p99LatencyMs)} ms`;
                 return null;
         }
 

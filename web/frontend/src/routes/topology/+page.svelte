@@ -35,6 +35,7 @@
 	import { collapsedRoutes } from './_collapsed.svelte';
 	import type { TopologyRoute } from './_types';
 	import { fetchSnapshot, connectLiveStream, TopologyFetchError } from './_api';
+	import { filterForView, type TopoView } from './_view';
 
 	// Custom node components — one per `kind` emitted by the layout builder.
 	import FQDNNode from './_components/nodes/FQDNNode.svelte';
@@ -91,7 +92,8 @@
 	//
 	// 'proxy' is the default: it is the half with health, traffic and
 	// latency — the half an operator opens this page to look at.
-	type TopoView = 'proxy' | 'redirect';
+	// TopoView / filterForView live in ./_view so the test can import
+	// the real thing instead of restating it — see the module comment.
 	let topoView = $state<TopoView>('proxy');
 
 	// The counts on the selector labels. Read from the TEMPLATE, where
@@ -112,11 +114,6 @@
 	// there to prevent in the first place: the WS handler owns the
 	// per-frame rebuild, and an effect that also fired on every frame
 	// would rebuild the graph twice a tick.
-	function filterForView(all: TopologyRoute[], view: TopoView): TopologyRoute[] {
-		return view === 'redirect'
-			? all.filter((r) => !!r.redirectTarget)
-			: all.filter((r) => !r.redirectTarget);
-	}
 	let nodes = $state.raw([] as ReturnType<typeof buildTopologyGraph>['nodes']);
 	let edges = $state.raw([] as ReturnType<typeof buildTopologyGraph>['edges']);
 
@@ -309,7 +306,17 @@
 		closeStream = connectLiveStream(
 			(nextRoutes) => {
 				routes = nextRoutes;
-				rebuildGraph(nextRoutes);
+				// THE view filter belongs here too. `routes` keeps the
+				// full list — the sidebar and the selector counts need
+				// it — but the graph only ever shows one view.
+				//
+				// This site was the one of four that passed the raw
+				// list, so every frame (2 s by default) rebuilt the
+				// canvas with every node and undid the operator's
+				// choice. The comment above filterForView already
+				// claimed "the WS handler owns the per-frame rebuild";
+				// it did, and it was the handler that forgot to filter.
+				rebuildGraph(filterForView(nextRoutes, topoView));
 				liveStatus = 'live';
 			},
 			() => {
@@ -591,7 +598,11 @@
 				</div>
 			</div>
 
-			<TopologySidebar {routes} />
+			<!-- The sidebar follows the selector. Top flows ranking proxy
+			     routes while the canvas showed only redirects made the
+			     filter look half-applied; the panel answers "what is busy
+			     in what I am looking at", not "what is busy overall". -->
+			<TopologySidebar routes={filterForView(routes, topoView)} />
 		</div>
 	{/if}
 </div>
