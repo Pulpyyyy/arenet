@@ -1988,9 +1988,32 @@ export type MetricName =
 	// upstream zone "route-<UUID>" to the route UUID and
 	// bumps the bucket under that real ID). Powers the
 	// /security/[routeId] chart panel.
-	| 'rate_limit_rate';
+	| 'rate_limit_rate'
+	// Schema v15 — computed from the stored distributions, so these
+	// two honour the quantile parameter. Total runs to the last byte
+	// and therefore carries the visitor's download time; TTFB stops
+	// when the response committed. Read apart, the gap between them
+	// says whether a slow route is the backend or the bandwidth.
+	| 'total_ms'
+	| 'ttfb_ms'
+	// A plain sum; the quantile does not apply.
+	| 'bytes_out';
 
 export type MetricWindow = '24h' | '30d';
+
+/**
+ * Which quantile the latency series report.
+ *
+ * Three values, not a free dial. Each is a decision an operator makes
+ * — the typical, the slow tail, the worst of it — and a free-form
+ * value invites asking for p99.99 of a window holding a few hundred
+ * requests, which the server then suppresses, leaving an empty chart
+ * and no explanation.
+ *
+ * Applies to `total_ms` and `ttfb_ms` only. Counts and sums ignore it,
+ * and `p95_latency_ms` is fixed at p95 because its name says so.
+ */
+export type MetricQuantile = 'p50' | 'p95' | 'p99';
 
 // One point on the timeline. `value` is `number | null` — null
 // marks a missing-data gap that the chart MUST NOT connect

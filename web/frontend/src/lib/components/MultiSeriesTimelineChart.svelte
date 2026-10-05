@@ -72,9 +72,35 @@ baseline.
 		/** Optional formatter for tooltip values. Default rounds
 		    to nearest integer. */
 		formatValue?: (v: number) => string;
+		/**
+		 * Treat a null / missing value as a BREAK in the line rather
+		 * than as zero. Opt-in, default false.
+		 *
+		 * The two readings are both legitimate and the caller is the
+		 * only one who knows which applies. For a count, a bucket with
+		 * no row genuinely saw zero events, and drawing it at zero is
+		 * the truth. For a latency, zero is a claim that the route
+		 * answered instantly — so a bucket with no measurement must
+		 * leave a hole, or the chart dips to "instant" exactly where it
+		 * knows least.
+		 *
+		 * Added opt-in rather than changed outright because the
+		 * existing caller (the dashboard's certificate lifecycle) plots
+		 * counts, where the current behaviour is correct.
+		 */
+		nullAsGap?: boolean;
 	}
 
-	let { data, series, label, height = 200, formatValue }: Props = $props();
+	let { data, series, label, height = 200, formatValue, nullAsGap = false }: Props = $props();
+
+	/** Raw value for a row/series, or null when there is nothing to
+	 *  plot. Only nullAsGap callers can receive null — everyone else
+	 *  keeps the zero-coercion they were written against. */
+	function valueAt(i: number, key: string): number | null {
+		const raw = data[i][key];
+		if (nullAsGap && (raw === null || raw === undefined)) return null;
+		return Number(raw ?? 0);
+	}
 
 	const PAD_L = 36;
 	const PAD_R = 12;
@@ -113,9 +139,9 @@ baseline.
 	const maxVal = $derived.by(() => {
 		let m = 0;
 		for (const s of visibleSeries) {
-			for (const row of data) {
-				const v = Number(row[s.key] ?? 0);
-				if (v > m) m = v;
+			for (let i = 0; i < data.length; i++) {
+				const v = valueAt(i, s.key);
+				if (v !== null && v > m) m = v;
 			}
 		}
 		return m === 0 ? 1 : m;
@@ -123,7 +149,12 @@ baseline.
 
 	const hasData = $derived(
 		visibleSeries.length > 0 &&
-			data.some((row) => visibleSeries.some((s) => Number(row[s.key] ?? 0) > 0))
+			data.some((_, i) =>
+				visibleSeries.some((s) => {
+					const v = valueAt(i, s.key);
+					return v !== null && v > 0;
+				})
+			)
 	);
 
 	function xAt(i: number): number {
@@ -137,19 +168,30 @@ baseline.
 	function pathDFor(s: SeriesDef): string {
 		if (data.length === 0) return '';
 		if (data.length === 1) {
-			const v = Number(data[0][s.key] ?? 0);
+			const v = valueAt(0, s.key);
+			if (v === null) return '';
 			const x = xAt(0);
 			const y = yAt(v);
 			return `M ${x - 1} ${y} L ${x + 1} ${y}`;
 		}
 		let d = '';
+		// `penDown` restarts the path after every gap, so the line
+		// breaks instead of being drawn straight across a stretch
+		// where nothing was measured. Interpolating across it would
+		// invent the one thing the gap exists to say.
+		let penDown = false;
 		for (let i = 0; i < data.length; i++) {
-			const v = Number(data[i][s.key] ?? 0);
+			const v = valueAt(i, s.key);
+			if (v === null) {
+				penDown = false;
+				continue;
+			}
 			const x = xAt(i);
 			const y = yAt(v);
-			d += i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`;
+			d += penDown ? ` L ${x} ${y}` : ` M ${x} ${y}`;
+			penDown = true;
 		}
-		return d;
+		return d.trim();
 	}
 
 	const fmt = $derived(formatValue ?? ((v: number) => String(Math.round(v))));
@@ -203,12 +245,21 @@ baseline.
 			return t.getHours() === 0 && t.getMinutes() === 0;
 		});
 		const tsLabel = sameTime ? `${m}-${dd}` : `${m}-${dd} ${hh}:${mi}`;
-		const rows = visibleSeries.map((s) => ({
-			key: s.key,
-			label: s.label,
-			color: s.color,
-			value: fmt(Number(row[s.key] ?? 0))
-		}));
+		// Captured so the narrowing from the hoverIdx === null guard
+		// above survives into the closure.
+		const idx = hoverIdx;
+		const rows = visibleSeries.map((s) => {
+			const v = valueAt(idx, s.key);
+			return {
+				key: s.key,
+				label: s.label,
+				color: s.color,
+				// An em dash, not "0". The tooltip is where an
+				// operator looks to confirm what the gap in the line
+				// means, so it has to say the same thing the gap does.
+				value: v === null ? '—' : fmt(v)
+			};
+		});
 		return { x: xAt(hoverIdx), tsLabel, rows };
 	});
 </script>

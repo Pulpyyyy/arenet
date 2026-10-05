@@ -2569,5 +2569,13 @@
 		"title": "Change ton mot de passe",
 		"body": "Ce compte a été créé par un administrateur, qui connaît son premier mot de passe. Choisis le tien avant d'aller plus loin.",
 		"action": "Changer mon mot de passe"
+	},
+	"observability": {
+		"latencyTitle": "Latence (ms)",
+		"latencySeriesTtfb": "serveur",
+		"latencySeriesTotal": "avec transfert",
+		"latencyAria": "Temps serveur et temps total, en millisecondes",
+		"latencyHint": "L’écart entre les deux courbes est le transfert de la réponse : le serveur avait fini, le visiteur téléchargeait encore. Une coupure dans une courbe signifie que ce point portait trop peu de requêtes pour le quantile choisi.",
+		"quantileAria": "Quantile rapporté par les courbes de latence"
 	}
 }
