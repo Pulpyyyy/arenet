@@ -403,3 +403,88 @@ func TestRollupHour_LegacyMinutesKeepTheOldFallback(t *testing.T) {
 		t.Errorf("LatencyP95Ms = %d, want 30 (the pre-v15 weighted fallback)", rows[0].LatencyP95Ms)
 	}
 }
+
+// TestAggregateHistogramByBucket_SumsAcrossRoutesPerTimestamp — the
+// "all" timeseries. QueryAggregated groups in SQL and SQLite cannot
+// add two blobs, so this path groups in Go.
+func TestAggregateHistogramByBucket_SumsAcrossRoutesPerTimestamp(t *testing.T) {
+	ctx := context.Background()
+	s := openMem(t)
+	t0 := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	t1 := t0.Add(time.Minute)
+
+	a := histogram.Of([]float64{2, 2})
+	b := histogram.Of([]float64{900})
+	c := histogram.Of([]float64{40, 40, 40})
+	if err := s.InsertBatch(ctx, Granularity1m, []MetricBucket{
+		{RouteID: "r-a", Ts: t0, ReqCount: 2, TotalHist: &a, BytesOut: 100},
+		{RouteID: "r-b", Ts: t0, ReqCount: 1, TotalHist: &b, BytesOut: 200},
+		{RouteID: "r-a", Ts: t1, ReqCount: 3, TotalHist: &c, BytesOut: 300},
+	}); err != nil {
+		t.Fatalf("InsertBatch: %v", err)
+	}
+
+	rows, err := s.AggregateHistogramByBucket(ctx, Granularity1m, t0, t0.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("AggregateHistogramByBucket: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2 (one per timestamp)", len(rows))
+	}
+	// Ordered ascending, as Query is.
+	if !rows[0].Ts.Equal(t0) || !rows[1].Ts.Equal(t1) {
+		t.Fatalf("timestamps = %v, %v; want %v, %v ascending", rows[0].Ts, rows[1].Ts, t0, t1)
+	}
+
+	// The first bucket is r-a plus r-b, summed exactly.
+	var want histogram.BucketCounts
+	want.Add(a)
+	want.Add(b)
+	if rows[0].TotalHist == nil || *rows[0].TotalHist != want {
+		t.Errorf("bucket 0 histogram = %v, want the sum %v", rows[0].TotalHist, want)
+	}
+	if rows[0].ReqCount != 3 {
+		t.Errorf("bucket 0 ReqCount = %d, want 3", rows[0].ReqCount)
+	}
+	if rows[0].BytesOut != 300 {
+		t.Errorf("bucket 0 BytesOut = %d, want 300", rows[0].BytesOut)
+	}
+	// And the slow request from r-b must be reachable in the union —
+	// a weighted average of the two routes' percentiles would have
+	// buried it.
+	if p99, _ := histogram.Quantile(*rows[0].TotalHist, 0.99); p99 < 512 {
+		t.Errorf("p99 of the summed bucket = %v ms, want r-b's 900 ms to be findable", p99)
+	}
+}
+
+// TestAggregateHistogramByBucket_NoHistogramStaysNil — a timestamp
+// where no route recorded a distribution has none. An all-zero
+// histogram would read as "measured, and empty", and the handler would
+// draw a point instead of a break.
+func TestAggregateHistogramByBucket_NoHistogramStaysNil(t *testing.T) {
+	ctx := context.Background()
+	s := openMem(t)
+	ts := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+
+	if err := s.InsertBatch(ctx, Granularity1m, []MetricBucket{
+		{RouteID: "r-legacy", Ts: ts, ReqCount: 500, LatencyP95Ms: 16},
+	}); err != nil {
+		t.Fatalf("InsertBatch: %v", err)
+	}
+
+	rows, err := s.AggregateHistogramByBucket(ctx, Granularity1m, ts, ts.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("AggregateHistogramByBucket: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].TotalHist != nil {
+		t.Errorf("TotalHist = %v, want nil on a pre-v15 bucket", *rows[0].TotalHist)
+	}
+	// The request count is real and travels, so the caller can tell
+	// "traffic with no distribution" from "no traffic".
+	if rows[0].ReqCount != 500 {
+		t.Errorf("ReqCount = %d, want 500", rows[0].ReqCount)
+	}
+}

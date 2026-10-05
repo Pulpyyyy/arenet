@@ -81,6 +81,11 @@ type MetricsReader interface {
 	// window rather than derived from per-bucket percentiles.
 	// routeID == "" aggregates every route.
 	AggregateHistogram(ctx context.Context, gran observability.Granularity, routeID string, from, to time.Time) (observability.HistogramAggregate, error)
+	// AggregateHistogramByBucket returns one row per timestamp with the
+	// distributions summed across every route — the "all" sentinel's
+	// timeseries for a distribution-backed metric, which
+	// QueryAggregated cannot produce because SQLite cannot add blobs.
+	AggregateHistogramByBucket(ctx context.Context, gran observability.Granularity, from, to time.Time) ([]observability.MetricBucket, error)
 }
 
 // WafEventReader is the read surface the Step M security

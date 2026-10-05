@@ -33,10 +33,26 @@ import (
 type metricName string
 
 const (
-	metricReqPerSec    metricName = "req_per_sec"
-	metricFourXxRate   metricName = "four_xx_rate"
-	metricFiveXxRate   metricName = "five_xx_rate"
+	metricReqPerSec  metricName = "req_per_sec"
+	metricFourXxRate metricName = "four_xx_rate"
+	metricFiveXxRate metricName = "five_xx_rate"
+	// metricP95LatencyMs is LEGACY from schema v15 onward. It reads
+	// the scalar column, which is now a correct p95 but is fixed at
+	// p95 — the name says so and must stay true. Callers wanting
+	// another quantile ask for metricTotalMs with ?quantile=.
 	metricP95LatencyMs metricName = "p95_latency_ms"
+	// metricTotalMs and metricTtfbMs are computed from the stored
+	// DISTRIBUTIONS, so they honour the quantile parameter. Total runs
+	// to the last byte and therefore carries the visitor's download
+	// time; TTFB stops when the response committed. Reported apart
+	// because the gap between them is the diagnosis — one number
+	// could not tell an operator that 6701 ms was 0.1 s of server and
+	// 23.9 s of transfer.
+	metricTotalMs metricName = "total_ms"
+	metricTtfbMs  metricName = "ttfb_ms"
+	// metricBytesOut is a plain sum, so the quantile parameter does
+	// not apply to it. Volume is what explains a slow transfer.
+	metricBytesOut metricName = "bytes_out"
 	// Step M.2 — WAF block rate as a count metric. Routes
 	// through the existing timeseries handler unchanged
 	// (gap-fill rule = 0 for missing buckets, same as the
@@ -235,8 +251,14 @@ const routeAllSentinel = "all"
 // Query parameters:
 //   - route  : storage route UUID (per-route) OR "all"
 //     (global aggregate, Spec-1 §10.1)
-//   - metric : one of req_per_sec / four_xx_rate / five_xx_rate / p95_latency_ms
+//   - metric : one of req_per_sec / four_xx_rate / five_xx_rate /
+//     p95_latency_ms / total_ms / ttfb_ms / bytes_out / the security
+//     counters
 //   - window : 24h (returns 1-minute buckets) or 30d (1-hour buckets)
+//   - quantile : p50 | p95 | p99, default p95. Applies only to
+//     total_ms and ttfb_ms, which are computed from the stored
+//     distributions; everything else is a count or a sum and ignores
+//     it.
 //
 // Response on success: 200 with timeseriesResponse, gap-filled
 // per AC #5 (0 for counts, null for p95).
@@ -251,6 +273,11 @@ func (h *Handler) metricsTimeseries(w http.ResponseWriter, r *http.Request) {
 	routeID := r.URL.Query().Get("route")
 	metric := metricName(r.URL.Query().Get("metric"))
 	window := r.URL.Query().Get("window")
+	quantile, qok := parseQuantile(r.URL.Query().Get("quantile"))
+	if !qok {
+		writeError(w, http.StatusBadRequest, "quantile must be p50, p95 or p99")
+		return
+	}
 
 	if routeID == "" {
 		writeError(w, http.StatusBadRequest, "route is required (use \"all\" for the global aggregate)")
@@ -347,9 +374,15 @@ func (h *Handler) metricsTimeseries(w http.ResponseWriter, r *http.Request) {
 		rows []observability.MetricBucket
 		err  error
 	)
-	if aggregated {
+	switch {
+	case aggregated && metricNeedsHistogram(metric):
+		// QueryAggregated groups in SQL and SQLite cannot add two
+		// blobs, so a distribution-backed metric across all routes
+		// has to be summed in Go.
+		rows, err = h.metrics.AggregateHistogramByBucket(r.Context(), gran, from, to)
+	case aggregated:
 		rows, err = h.metrics.QueryAggregated(r.Context(), gran, from, to)
-	} else {
+	default:
 		rows, err = h.metrics.Query(r.Context(), gran, routeID, from, to)
 	}
 	if err != nil {
@@ -358,7 +391,7 @@ func (h *Handler) metricsTimeseries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp.Points = gapFillTimeseries(rows, from, to, step, metric)
+	resp.Points = gapFillTimeseries(rows, from, to, step, metric, quantile)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -783,6 +816,8 @@ func (h *Handler) metricsSummary(w http.ResponseWriter, r *http.Request) {
 
 func isValidMetric(m metricName) bool {
 	switch m {
+	case metricTotalMs, metricTtfbMs, metricBytesOut:
+		return true
 	case metricReqPerSec, metricFourXxRate, metricFiveXxRate, metricP95LatencyMs,
 		metricWafBlockRate, metricThrottleBlockRate, metricAuthFailureRate,
 		metricCrowdSecDecisionRate, metricRateLimitRate:
@@ -882,7 +917,7 @@ func gapFillAuthFailureZero(from, to time.Time, step time.Duration) []timeseries
 //
 // The map lookup makes the projection O(N+M) where N is the
 // dense slot count and M is the row count.
-func gapFillTimeseries(rows []observability.MetricBucket, from, to time.Time, step time.Duration, metric metricName) []timeseriesPoint {
+func gapFillTimeseries(rows []observability.MetricBucket, from, to time.Time, step time.Duration, metric metricName, quantile float64) []timeseriesPoint {
 	byTs := make(map[int64]observability.MetricBucket, len(rows))
 	for _, r := range rows {
 		byTs[r.Ts.Unix()] = r
@@ -894,7 +929,7 @@ func gapFillTimeseries(rows []observability.MetricBucket, from, to time.Time, st
 		row, hit := byTs[ts.Unix()]
 		out = append(out, timeseriesPoint{
 			Ts:    ts.Format(time.RFC3339),
-			Value: pickMetricValue(row, hit, metric),
+			Value: pickMetricValue(row, hit, metric, quantile),
 		})
 	}
 	return out
@@ -911,15 +946,25 @@ func gapFillTimeseries(rows []observability.MetricBucket, from, to time.Time, st
 //	  p95    → row value if > 0, else nil (the row exists but
 //	           no latency observation landed in it; treat
 //	           identically to a missing bucket)
-func pickMetricValue(row observability.MetricBucket, hit bool, metric metricName) *float64 {
+func pickMetricValue(row observability.MetricBucket, hit bool, metric metricName, quantile float64) *float64 {
 	if !hit {
-		if metric == metricP95LatencyMs {
+		// A latency metric has no value for a bucket that saw no
+		// traffic — nil renders as a break in the line rather than a
+		// fake dip to zero.
+		if metric == metricP95LatencyMs || metricNeedsHistogram(metric) {
 			return nil
 		}
 		v := 0.0
 		return &v
 	}
 	switch metric {
+	case metricTotalMs:
+		return bucketQuantile(row.TotalHist, quantile)
+	case metricTtfbMs:
+		return bucketQuantile(row.TTFBHist, quantile)
+	case metricBytesOut:
+		v := float64(row.BytesOut)
+		return &v
 	case metricReqPerSec:
 		v := float64(row.ReqCount)
 		return &v
@@ -1160,3 +1205,64 @@ func (h *Handler) metricsRouteSummary(w http.ResponseWriter, r *http.Request) {
 // timeseries endpoint is where an operator investigating a complaint
 // picks p50 or p99.
 const summaryQuantile = 0.95
+
+// metricNeedsHistogram reports whether a metric is computed from a
+// stored distribution, which decides both how it is fetched for the
+// "all" sentinel and how a missing bucket is gap-filled.
+func metricNeedsHistogram(m metricName) bool {
+	return m == metricTotalMs || m == metricTtfbMs
+}
+
+// parseQuantile maps the query parameter to a fraction.
+//
+// Only three are offered, and deliberately so: each is a decision an
+// operator makes ("typical", "the slow tail", "the worst of it"), and
+// an arbitrary free-form value invites asking for p99.99 of a window
+// holding two hundred requests — a number the data cannot support and
+// that MinSamplesFor would then suppress, leaving an empty chart with
+// no explanation.
+//
+// An absent parameter means p95, matching what every existing caller
+// gets today.
+func parseQuantile(raw string) (float64, bool) {
+	switch raw {
+	case "", "p95":
+		return 0.95, true
+	case "p50":
+		return 0.50, true
+	case "p99":
+		return 0.99, true
+	}
+	return 0, false
+}
+
+// bucketQuantile computes one bucket's quantile, or nil.
+//
+// nil covers three distinct situations that all mean "no number can be
+// given here", and the chart draws a break for each:
+//
+//   - the bucket predates schema v15 and carries no distribution;
+//   - the bucket recorded nothing observable (every request hijacked);
+//   - the bucket holds too few observations for the quantile asked
+//     for, where ceil(q*n) == n makes the "percentile" the slowest
+//     request.
+//
+// The third is why a quiet route shows gaps at one-minute granularity
+// and fills in at one-hour: twenty observations is a lot for a minute
+// and nothing for an hour. The gap is the honest answer, not a defect
+// — the alternative is a line drawn through numbers that are maxima
+// wearing a percentile's name, which is the bug this whole subsystem
+// was rebuilt to remove.
+func bucketQuantile(h *histogram.BucketCounts, quantile float64) *float64 {
+	if h == nil {
+		return nil
+	}
+	if h.Total() < histogram.MinSamplesFor(quantile) {
+		return nil
+	}
+	v, n := histogram.Quantile(*h, quantile)
+	if n == 0 {
+		return nil
+	}
+	return &v
+}

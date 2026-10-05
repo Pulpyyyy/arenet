@@ -1585,3 +1585,109 @@ WHERE ts >= ? AND ts < ?`
 	}
 	return agg, nil
 }
+
+// AggregateHistogramByBucket returns one MetricBucket per timestamp in
+// the range, with the distributions and byte counts SUMMED across every
+// route.
+//
+// It exists because QueryAggregated cannot do this. That query groups
+// in SQL, and SQLite has no way to add two blobs — so the aggregated
+// timeseries for a distribution-backed metric has to group in Go. The
+// returned shape matches Query's deliberately, so the handler's
+// gap-filling needs no special case.
+//
+// Only the histogram-backed fields are populated: TotalHist, TTFBHist,
+// BytesOut, HijackedCount and ReqCount. The counter columns are left
+// zero, because a caller asking for this is asking about latency or
+// volume and QueryAggregated already answers the rest — filling them
+// in would invite someone to read a half-populated row as complete.
+//
+// Summing across routes is exact here where a weighted average of
+// per-route percentiles never was: the elementwise sum of two
+// histograms is the histogram of the union of their samples.
+func (s *Store) AggregateHistogramByBucket(ctx context.Context, gran Granularity, from, to time.Time) ([]MetricBucket, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("observability: store closed")
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT ts, total_hist, ttfb_hist, bytes_out, hijacked_count, req_count
+FROM `+gran.tableName()+`
+WHERE ts >= ? AND ts < ?
+ORDER BY ts ASC
+`, from.UTC().Unix(), to.UTC().Unix())
+	if err != nil {
+		return nil, fmt.Errorf("observability: aggregate histogram by bucket: %w", err)
+	}
+	defer rows.Close()
+
+	// Accumulate per ts. A map plus a slice of keys in first-seen
+	// order keeps the SQL ordering without a second sort.
+	type acc struct {
+		total    histogram.BucketCounts
+		ttfb     histogram.BucketCounts
+		bytesOut int64
+		hijacked int64
+		reqs     int64
+	}
+	byTs := make(map[int64]*acc)
+	order := make([]int64, 0)
+
+	for rows.Next() {
+		var tsUnix, bytesOut, hijacked, reqCount int64
+		var totalBlob, ttfbBlob []byte
+		if err := rows.Scan(&tsUnix, &totalBlob, &ttfbBlob, &bytesOut, &hijacked, &reqCount); err != nil {
+			return nil, fmt.Errorf("observability: aggregate by bucket scan: %w", err)
+		}
+		a, ok := byTs[tsUnix]
+		if !ok {
+			a = &acc{}
+			byTs[tsUnix] = a
+			order = append(order, tsUnix)
+		}
+		a.bytesOut += bytesOut
+		a.hijacked += hijacked
+		a.reqs += reqCount
+
+		total, derr := decodeHistOrNil(totalBlob)
+		if derr != nil {
+			return nil, fmt.Errorf("observability: aggregate by bucket total_hist (ts=%d): %w", tsUnix, derr)
+		}
+		ttfb, derr := decodeHistOrNil(ttfbBlob)
+		if derr != nil {
+			return nil, fmt.Errorf("observability: aggregate by bucket ttfb_hist (ts=%d): %w", tsUnix, derr)
+		}
+		if total != nil {
+			a.total.Add(*total)
+		}
+		if ttfb != nil {
+			a.ttfb.Add(*ttfb)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("observability: aggregate by bucket iterate: %w", err)
+	}
+
+	out := make([]MetricBucket, 0, len(order))
+	for _, tsUnix := range order {
+		a := byTs[tsUnix]
+		b := MetricBucket{
+			Ts:            time.Unix(tsUnix, 0).UTC(),
+			ReqCount:      a.reqs,
+			BytesOut:      a.bytesOut,
+			HijackedCount: a.hijacked,
+		}
+		// nil stays nil: a bucket where no route recorded a
+		// distribution has none, and an all-zero histogram would read
+		// as "measured, and empty".
+		if a.total.Total() > 0 {
+			t := a.total
+			b.TotalHist = &t
+		}
+		if a.ttfb.Total() > 0 {
+			t := a.ttfb
+			b.TTFBHist = &t
+		}
+		out = append(out, b)
+	}
+	return out, nil
+}
