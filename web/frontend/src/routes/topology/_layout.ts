@@ -817,11 +817,21 @@ export function buildTopologyGraph(
                         // build.
                         const sources = spec.redirectSources ?? [spec.route];
                         sources.forEach((src) => {
+                                const data = routeFlowData(src);
+                                if (spec.redirectSources) {
+                                        // Nothing traverses this edge. Arenet answers
+                                        // the client and the client goes on by itself,
+                                        // so the edge states where it was sent rather
+                                        // than drawing a flow. The real traffic is on
+                                        // the FQDN-to-hub edge before it, which keeps
+                                        // its particles.
+                                        data.redirectStatusCode = src.redirectStatusCode ?? 301;
+                                }
                                 edges.push(makeFlowEdge(
                                         `e-caddy-cluster-${src.id}`,
                                         'caddy-hub',
                                         spec.clusterId,
-                                        routeFlowData(src),
+                                        data,
                                 ));
                         });
                 } else {

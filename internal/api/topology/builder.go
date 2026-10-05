@@ -18,6 +18,7 @@ package topology
 
 import (
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -168,6 +169,14 @@ func buildRoute(r *storage.Route, metrics MetricsView, status StatusLookup) Rout
 	// that no upstream is configured.
 	if r.RedirectConfig != nil {
 		out.RedirectTarget = r.RedirectConfig.Target
+		// Storage stores zero to mean 301 (the permanent move a domain
+		// change almost always is). Resolving it here keeps that
+		// convention in one place instead of asking the frontend to
+		// know it.
+		out.RedirectStatusCode = r.RedirectConfig.StatusCode
+		if out.RedirectStatusCode == 0 {
+			out.RedirectStatusCode = http.StatusMovedPermanently
+		}
 	}
 
 	// Build the upstream list via the shared conversion helper (also

@@ -53,6 +53,9 @@
                 }),
         );
         let edgePath = $derived(pathTuple[0]);
+        // getBezierPath returns [path, labelX, labelY, offsetX, offsetY].
+        let labelX = $derived(pathTuple[1]);
+        let labelY = $derived(pathTuple[2]);
 
         // -----------------------------------------------------------------
         // Tier resolution + visual config tables.
@@ -168,16 +171,52 @@
         // sets its own dasharray, so append ours only when absent to avoid a
         // double declaration.
         let isStructural = $derived(data?.structural === true);
+
+        // A redirect edge is a STATEMENT, not a path.
+        //
+        // For a proxied route the edge is the route traffic takes and the
+        // particles are the truth. For a redirect Arenet answers the
+        // client and the client goes on by itself: nothing traverses this
+        // edge. Animating it claimed a flow that does not exist — the
+        // thing the operator questioned when they asked whether the dots
+        // on redirects were real.
+        //
+        // So: dashed like a structural branch, NO particles, and labelled
+        // with the code. The traffic that IS real sits on the edge before
+        // this one, FQDN to hub, where requests genuinely arrive.
+        let redirectCode = $derived(
+                typeof data?.redirectStatusCode === 'number' ? data.redirectStatusCode : null
+        );
+        let isRedirect = $derived(redirectCode !== null);
+
         let baseStroke = $derived(tierStrokeStyle(tier));
         let strokeStyle = $derived(
-                isStructural && !baseStroke.includes('stroke-dasharray')
+                (isStructural || isRedirect) && !baseStroke.includes('stroke-dasharray')
                         ? `${baseStroke} stroke-dasharray: 5 4;`
                         : baseStroke
         );
+
+        // Zero on a redirect edge. The circles still render — the SMIL
+        // attributes must stay literally constant for the component's
+        // lifetime, see the particle block below — but at opacity 0.
+        let particleCount = $derived(isRedirect ? 0 : cfg.count);
 </script>
 
 <!-- The path itself; id={id} so our <mpath> below can reference it. -->
 <BaseEdge {id} path={edgePath} {markerEnd} style={strokeStyle} />
+
+<!-- The status code, on a redirect edge only. An SVG label rather than
+     an HTML one so it pans and scales with the canvas like everything
+     else on it; the rect behind keeps the digits legible where they
+     cross the dashed line. -->
+{#if isRedirect}
+        <g class="redirect-label" data-testid={`edge-redirect-label-${id}`} pointer-events="none">
+                <rect x={labelX - 13} y={labelY - 8} width="26" height="16" rx="3" />
+                <text x={labelX} y={labelY} text-anchor="middle" dominant-baseline="central">
+                        {redirectCode}
+                </text>
+        </g>
+{/if}
 
 <!-- Particle trail. ALWAYS MAX_PARTICLES circles, staggered evenly
      along the path. Tier controls visibility/size/glow via reactive
@@ -192,8 +231,8 @@
                 class="particle"
                 r={cfg.radius}
                 fill={color}
-                style:opacity={i < cfg.count ? cfg.opacity : 0}
-                style:filter={cfg.glowPx > 0 && i < cfg.count
+                style:opacity={i < particleCount ? cfg.opacity : 0}
+                style:filter={cfg.glowPx > 0 && i < particleCount
                         ? `drop-shadow(0 0 ${cfg.glowPx}px ${color})`
                         : 'none'}
                 style:pointer-events="none"
@@ -212,6 +251,18 @@
         /* Smooth tier transitions — opacity/r/filter changes ease over
            ~0.4 s instead of popping. SMIL motion is untouched: only
            these CSS properties animate. */
+        .redirect-label rect {
+                fill: var(--surface);
+                stroke: var(--border);
+                stroke-width: 1;
+        }
+
+        .redirect-label text {
+                fill: var(--text-secondary);
+                font-size: 9px;
+                font-variant-numeric: tabular-nums;
+        }
+
         .particle {
                 transition:
                         opacity 0.4s ease,
