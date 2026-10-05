@@ -380,7 +380,7 @@
 			"stripBytes": "served",
 			"stripThinData": "too few requests for a p95",
 			"stripPartial": "partial window",
-			"stripPartialHint": "Some of this window was recorded before Arenet stored latency distributions. Those hours cannot be recomputed, so the percentiles cover only part of it.",
+			"stripPartialHint": "Request counts cover the full window. The percentiles and the bytes figure do not: part of this window was recorded before Arenet stored latency distributions, and those hours cannot be recomputed. All three line up again once the whole window is newer than the upgrade.",
 			"stripHijacked": "upgraded connections, not timed",
 			"stripNoHistogram": "latency not recorded for this window",
 			"stripNoHistogramHint": "This window predates Arenet storing latency distributions. The requests were counted, but the distribution needed for a percentile was not kept and cannot be recomputed. Figures appear as new hours are recorded."
