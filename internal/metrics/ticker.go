@@ -18,7 +18,10 @@ package metrics
 
 import (
 	"context"
+	"math"
 	"time"
+
+	"github.com/barto95100/arenet/internal/histogram"
 )
 
 // RouteLister returns the canonical list of routes for the current
@@ -56,8 +59,28 @@ type RouteMetadata struct {
 // implementation pushes the tick onto a buffered channel that a
 // separate goroutine drains; channel-full is a dropped tick, not a
 // stall.
+//
+// The last parameter carries the tick's latency DISTRIBUTION rather
+// than a percentile over it. A percentile cannot be summed, averaged
+// or maximised, and the pipeline that received the old scalar did all
+// three in turn. Bucket counts sum exactly, so the consumer can
+// accumulate them for as long as it likes and take the quantile once,
+// at read time, over the whole window.
+//
+// It takes the Delta itself rather than a growing list of positional
+// parameters. The measurements added by the latency-truth work took
+// the payload to seven fields, four of them numeric, and positional
+// numerics of the same type are how a DurMs and a TTFBMs get silently
+// swapped with nothing in the tests noticing.
+//
+// Delta is the registry's own output shape, so this introduces no new
+// type and no new concept — the consumer now receives exactly what the
+// producer produces. It does mean the implementing package imports
+// internal/metrics, which is the harmless direction: the invariant
+// that matters is that metrics depends on no storage or observability
+// code, and that is untouched.
 type TickConsumer interface {
-	Consume(routeID string, reqs, errs4xx, errs5xx uint64, latencyP95Ms int32)
+	Consume(routeID string, d Delta)
 }
 
 // Ticker drives the per-tick snapshot loop (spec §4.3). On each tick
@@ -165,12 +188,17 @@ func (t *Ticker) makeSnapshot(ctx context.Context, now time.Time) Snapshot {
 	hosts := make([]HostSnapshot, 0, len(hostDeltas))
 	for _, hd := range hostDeltas {
 		hosts = append(hosts, HostSnapshot{
-			RouteID:      hd.RouteID,
-			Host:         hd.Host,
-			Reqs:         hd.Reqs,
-			Errs:         hd.Errs,
-			Errs4xx:      hd.Errs4xx,
-			LatencyP95Ms: hd.LatencyP95Ms,
+			RouteID: hd.RouteID,
+			Host:    hd.Host,
+			Reqs:    hd.Reqs,
+			Errs:    hd.Errs,
+			Errs4xx: hd.Errs4xx,
+			// The topology ring still wants a scalar. It now gets a
+			// REAL p95 over the tick's distribution, interpolated,
+			// instead of the resolved bucket's upper edge. Renaming
+			// the topology wire's p99LatencyMs is explicitly out of
+			// scope for this change (see the plan's closing note).
+			LatencyP95Ms: p95FromBuckets(hd.LatencyBuckets),
 		})
 	}
 
@@ -203,8 +231,23 @@ func (t *Ticker) makeSnapshot(ctx context.Context, now time.Time) Snapshot {
 		// fully idle to keep the channel pressure low (the
 		// aggregator's absorb() also ignores zero ReqCount).
 		if t.consumer != nil && (d.Reqs > 0 || d.Errs > 0 || d.Errs4xx > 0) {
-			t.consumer.Consume(rt.ID, d.Reqs, d.Errs4xx, d.Errs, d.LatencyP95Ms)
+			t.consumer.Consume(rt.ID, d)
 		}
 	}
 	return Snapshot{T: now.UTC(), Routes: out, Hosts: hosts}
+}
+
+// p95FromBuckets reduces a tick's distribution to the int32 the
+// topology snapshot wire still carries.
+//
+// Rounds rather than truncates: truncation would bias every value
+// downward by up to a millisecond, which is invisible at 300 ms and
+// absurd at 2 ms. Returns 0 for an empty histogram, which is what the
+// wire has always meant by "no traffic this tick".
+func p95FromBuckets(b histogram.BucketCounts) int32 {
+	v, n := histogram.Quantile(b, 0.95)
+	if n == 0 {
+		return 0
+	}
+	return int32(math.Round(v))
 }

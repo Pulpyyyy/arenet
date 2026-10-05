@@ -94,16 +94,16 @@ func TestIntegration_TickerToAggregatorToStore(t *testing.T) {
 	// 100 OK + 3 4xx for r-a, 50 OK + 2 5xx for r-b. Latencies
 	// chosen so the per-tick p95 lands in the fast region.
 	for i := 0; i < 100; i++ {
-		registry.Inc("r-a", 200, 10)
+		registry.Inc("r-a", metrics.Observation{Status: 200, DurMs: 10})
 	}
 	for i := 0; i < 3; i++ {
-		registry.Inc("r-a", 404, 12)
+		registry.Inc("r-a", metrics.Observation{Status: 404, DurMs: 12})
 	}
 	for i := 0; i < 50; i++ {
-		registry.Inc("r-b", 200, 25)
+		registry.Inc("r-b", metrics.Observation{Status: 200, DurMs: 25})
 	}
 	for i := 0; i < 2; i++ {
-		registry.Inc("r-b", 503, 200)
+		registry.Inc("r-b", metrics.Observation{Status: 503, DurMs: 200})
 	}
 
 	// --- Tick 1 (10:00:00.5) ---

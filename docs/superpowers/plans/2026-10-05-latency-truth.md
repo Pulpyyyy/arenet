@@ -64,11 +64,14 @@ and is the one gate that cannot be faked.
 BLOBs. **Delete T1's characterisation test here**, in the same commit
 that makes it false, and say so in the message.
 
-**T7. Schema v16 (D6, D13, D14).**
-`currentSchemaVersion` 15 → 16 (see spec §9 — this lands *after*
-health history or renumbers). `ttfb_hist BLOB`, `total_hist BLOB`,
-`bytes_out INTEGER`, `hijacked_count INTEGER` on `bucket_1m`,
-`bucket_1h`, `bucket_1d`. 68-byte fixed encoding, 17 × uint32 LE.
+**T7. Schema v15 (D6, D13, D14).**
+`currentSchemaVersion` 14 → 15. Corrected twice against the tree: the
+version (health history has not landed, so 15 is free and it
+renumbers to 16) and the table list — there is **no `bucket_1d`**, only
+`bucket_1m` and `bucket_1h`. `ttfb_hist BLOB`, `total_hist BLOB`,
+`bytes_out INTEGER`, `hijacked_count INTEGER` on both. 68-byte fixed
+encoding, 17 × uint32 LE. The BLOBs stay nullable: pre-v15 rows have
+no histogram and NULL is how the read path knows (D14).
 `latency_p95_ms` stays and is now written from `Quantile(total_hist,
 0.95)` (D13). Follow the `INSERT … SELECT WHERE NOT EXISTS` seed
 pattern at `storage.go:57-64`, not `INSERT OR IGNORE`. No back-fill

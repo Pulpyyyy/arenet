@@ -8,7 +8,7 @@ Licensed under the GNU AGPL v3 or later. See LICENSE.
 
 **Target version**: v2.63.0 (measurement + storage), v2.64.0 (surfaces)
 **Date**: 2026-10-05
-**Schema**: observability v16 (health history takes v15 — see §9)
+**Schema**: observability v15 (corrected — see §9)
 
 ## 1. Why
 
@@ -87,7 +87,7 @@ it to anyone, on any upstream, with no configuration.
 | D3 | **Compute quantiles at read time**, in the API, from the summed histogram. | Decouples "what we store" from "what we ask". p50, p95 and p99 become available from the same rows, and a future quantile needs no migration. |
 | D4 | **Keep the existing 17-bucket log2 layout** (0.5 ms → 65536 ms, factor 2). | It already exists, identically, in both packages. Changing edges in the same change would conflate two risks. §8 records how to refine it later without another migration. |
 | D5 | **Linear interpolation inside the resolved bucket**, as `histogram_quantile` does. | A factor-2 bucket reported at its upper edge overstates by up to 100% — reporting the edge is what produced "8192 ms". Interpolation is exact in expectation for a uniform intra-bucket distribution and bounded by the bucket width otherwise; the actual error is **not asserted here**, it is whatever G9 measures. If G9 shows it too coarse, §8 is the lever, not a different interpolation. |
-| D6 | **Store the histogram as a fixed 68-byte BLOB** (17 × uint32 little-endian) on `bucket_1m`, `bucket_1h`, `bucket_1d`. | 50 routes × 1440 min × 68 B = **4.9 MB** at `Retain1m` (24 h), 2.4 MB at `Retain1h` (30 d). Storage is not an argument against correctness here. A BLOB avoids 17 columns and three migrations' worth of churn. |
+| D6 | **Store the histogram as a fixed 68-byte BLOB** (17 × uint32 little-endian) on `bucket_1m` and `bucket_1h`. | 50 routes × 1440 min × 68 B = **4.9 MB** at `Retain1m` (24 h), 2.4 MB at `Retain1h` (30 d). Storage is not an argument against correctness here. A BLOB avoids 17 columns and three migrations' worth of churn. |
 | D7 | **Measure TTFB separately** — stamped when the response first commits, in `statusRecorder` at the existing `headerWritten` flip (`middleware.go:536` and `:552`). | That guard is already exactly the moment the response begins. Two assignments, no allocation, nothing new on the hot path. |
 | D8 | **Keep total duration too**, as its own histogram. | They answer different questions. TTFB: is my upstream responsive. Total: what are my visitors actually experiencing, bandwidth included. Neither replaces the other. |
 | D9 | **Count bytes written**, summed per tick from `statusRecorder.Write`. | Makes egress visible, which is what explains a slow transfer. `len(b)` on a path that already sees every byte. |
@@ -184,15 +184,26 @@ Prometheus native histograms carry a schema field. Readers switch on
 it; old rows keep reading correctly. This is why D6 stores a BLOB and
 not 17 columns.
 
-## 9. Ordering against health history
+## 9. Ordering against health history, and two corrections
 
-The merged health-history plan
-(`docs/superpowers/plans/2026-10-04-health-history.md`) claims
-observability schema **v15**. This design takes **v16** and must land
-after it, or the two migrations collide on the same version number.
-Whichever ships second renumbers. Noted here because the health-history
-plan's own target version (`v2.62.0`) is already stale — v2.62.0
-shipped without it.
+**Schema version.** This design first claimed v16, on the assumption
+that the merged health-history plan would take v15 before it. Health
+history has not been implemented, `currentSchemaVersion` is still 14,
+so **this takes v15** and the health-history plan renumbers to v16 when
+it lands. Recorded rather than quietly edited: the original reasoning
+was sound and the facts moved.
+
+**There is no `bucket_1d`.** D6 listed three bucket tables. The
+observability store has exactly two — `bucket_1m` (`Retain1m`, 24 h)
+and `bucket_1h` (`Retain1h`, 30 d) — and no `Granularity1d` exists.
+The third came from conflating these with the health-history spec's
+own `health_bucket_1d`, which is a different table in a different
+design. Caught by reading `storage.go` before writing the migration,
+which is the only reason it is not now a migration against a table
+that does not exist.
+
+The health-history plan's target version (`v2.62.0`) is also stale —
+v2.62.0 shipped without it.
 
 ## 10. Honest accounting
 

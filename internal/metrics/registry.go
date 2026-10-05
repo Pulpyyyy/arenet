@@ -19,6 +19,8 @@ package metrics
 import (
 	"sync"
 	"sync/atomic"
+
+	"github.com/barto95100/arenet/internal/histogram"
 )
 
 // Registry holds per-route request and 5xx-error counters with
@@ -88,6 +90,30 @@ type counterCell struct {
 	errs    uint64 // 5xx responses since last Snapshot (Step E name preserved)
 	errs4xx uint64 // 4xx responses since last Snapshot (Step L)
 	latency latencyHist
+
+	// ttfb is the time-to-first-byte distribution, kept apart from
+	// latency because the two answer different questions: latency runs
+	// to the last byte and so includes the visitor's download, while
+	// ttfb stops when the response commits. An asset measured at
+	// 0.108 s ttfb and 24 s total on a real instance is the same
+	// request seen by both.
+	//
+	// Only requests that actually committed a response are observed
+	// here, so its total can be lower than reqs — a hijacked
+	// connection and a handler that errored without writing have no
+	// first byte to time.
+	ttfb latencyHist
+
+	// bytesOut is response body bytes accepted by the wire since the
+	// last Snapshot. Headers excluded; anything after a Hijack
+	// excluded (see hijacked).
+	bytesOut uint64
+
+	// hijacked counts requests whose connection was taken over, which
+	// is what a WebSocket upgrade does. Their ttfb and bytesOut are
+	// unobservable BY CONSTRUCTION, so the count is carried instead of
+	// letting them read as instant zero-byte responses.
+	hijacked uint64
 }
 
 // latencyHist is the metrics-package-internal copy of the
@@ -103,23 +129,23 @@ type counterCell struct {
 // move the histogram into a shared internal/histogram package)
 // is a rename, not a semantic change.
 type latencyHist struct {
-	counts [17]uint64
+	counts [histogram.Buckets]uint64
 }
 
 func (h *latencyHist) observe(durMs float64) {
-	const baseMs = 0.5
+	const baseMs = histogram.BaseMs
 	idx := 0
 	switch {
 	case durMs < baseMs:
 		idx = 0
 	default:
-		// log2(durMs / baseMs) clamped to [0, 16].
+		// log2(durMs / baseMs) clamped to [0, Buckets-1].
 		x := durMs / baseMs
 		// Fast log2-of-float via repeated halving; avoids math.Log2
 		// to keep the hot path free of any FP transcendental cost.
 		// For our range (0.5 ms .. 65536 ms = factor 131072 = 2^17),
 		// 17 iterations is the worst case.
-		for x >= 2 && idx < 16 {
+		for x >= 2 && idx < histogram.Buckets-1 {
 			x /= 2
 			idx++
 		}
@@ -127,42 +153,33 @@ func (h *latencyHist) observe(durMs float64) {
 	atomic.AddUint64(&h.counts[idx], 1)
 }
 
-// drainP95 returns the p95 in ms over the buckets and resets all
-// counts to zero in one go. Goroutine-local read pattern (called
-// only by Snapshot, which already holds the RLock that protects
-// the map structure); within each cell we atomic.Swap each bucket
-// so a concurrent observe() either lands in this drain (counted)
-// or in the next tick (counted next time).
-func (h *latencyHist) drainP95() int32 {
-	const baseMs = 0.5
-	var total uint64
-	var drained [17]uint64
+// drainBuckets returns the latency distribution accumulated since the
+// previous drain and resets every bucket to zero in one pass.
+//
+// It replaces drainP95, which reduced each tick to a single scalar
+// percentile. That reduction was the first of four invalid aggregation
+// steps: a percentile cannot be summed, averaged or maximised, and the
+// chain downstream did all three. At the 0.88 req/s measured on a real
+// homelab route a one-second tick holds zero or one request, so the
+// "p95" it produced was that single request's duration rounded up to a
+// power of two — the whole explanation for "p95 35658 ms" on a service
+// that was answering in 0.1 s.
+//
+// Bucket counts, unlike percentiles, sum exactly: the elementwise sum
+// of two histograms IS the histogram of the union of their samples
+// (proved in internal/histogram's G1 property test). So the quantile is
+// computed once, at read time, over everything.
+//
+// Goroutine-local read pattern (called only by Snapshot, which already
+// holds the RLock protecting the map structure); within each cell we
+// atomic.Swap each bucket so a concurrent observe() either lands in
+// this drain or in the next tick. Nothing is lost either way.
+func (h *latencyHist) drainBuckets() histogram.BucketCounts {
+	var out histogram.BucketCounts
 	for i := range h.counts {
-		c := atomic.SwapUint64(&h.counts[i], 0)
-		drained[i] = c
-		total += c
+		out[i] = atomic.SwapUint64(&h.counts[i], 0)
 	}
-	if total == 0 {
-		return 0
-	}
-	// p95 = upper edge of bucket where cumulative count first
-	// reaches 95 % of total. Compute threshold with integer ceil:
-	// ceil(total * 95 / 100).
-	threshold := (total*95 + 99) / 100
-	var cum uint64
-	for i, c := range drained {
-		cum += c
-		if cum >= threshold {
-			// Upper edge of bucket i = baseMs * 2^(i+1).
-			edge := baseMs * float64(int(1)<<(i+1))
-			if edge > float64(int32(^uint32(0)>>1)) {
-				return int32(^uint32(0) >> 1)
-			}
-			return int32(edge)
-		}
-	}
-	// Shouldn't happen — if total > 0 some bucket was non-zero.
-	return int32(baseMs * float64(int(1)<<17))
+	return out
 }
 
 // NewRegistry returns an empty Registry. The Caddy module's
@@ -191,21 +208,67 @@ func NewRegistry() *Registry {
 // Hot path. Must not allocate, must not perform I/O. AC #13: a
 // metrics-DB failure later in the pipeline must not propagate
 // here — Inc only mutates in-memory atomic state.
-func (r *Registry) Inc(routeID string, status int, durMs float64) {
+// Observation is everything one finished request contributes to the
+// counters.
+//
+// A struct rather than seven positional parameters: Inc used to take
+// (routeID, status, durMs) and the three measurements added by the
+// latency-truth work would have pushed it to six, four of them
+// numeric. Positional numerics of the same type are how a DurMs and a
+// TTFBMs get silently swapped, and nothing in the tests would notice
+// because both are plausible milliseconds.
+type Observation struct {
+	Status int
+
+	// DurMs is the TOTAL duration, response body transfer included.
+	DurMs float64
+
+	// TTFBMs is the time to the moment the response committed. Read it
+	// only when TTFBValid — a response that commits in under a
+	// microsecond measures 0.000 after the integer-microsecond
+	// division, so zero cannot distinguish "instant" from "never".
+	// That conflation is the bug the G3 gate caught on its first run.
+	TTFBMs    float64
+	TTFBValid bool
+
+	// BytesOut is response body bytes the wire accepted.
+	BytesOut uint64
+
+	// Hijacked is true when the connection was taken over, making
+	// TTFBMs and BytesOut unobservable rather than zero.
+	Hijacked bool
+}
+
+// observe folds one request into a cell. Hot path: atomics only, no
+// allocation, no I/O.
+func (c *counterCell) observe(obs Observation) {
+	atomic.AddUint64(&c.reqs, 1)
+	switch {
+	case obs.Status >= 500:
+		atomic.AddUint64(&c.errs, 1)
+	case obs.Status >= 400:
+		atomic.AddUint64(&c.errs4xx, 1)
+	}
+	c.latency.observe(obs.DurMs)
+	if obs.TTFBValid {
+		c.ttfb.observe(obs.TTFBMs)
+	}
+	if obs.BytesOut > 0 {
+		atomic.AddUint64(&c.bytesOut, obs.BytesOut)
+	}
+	if obs.Hijacked {
+		atomic.AddUint64(&c.hijacked, 1)
+	}
+}
+
+func (r *Registry) Inc(routeID string, obs Observation) {
 	r.mu.RLock()
 	cell, ok := r.cells[routeID]
 	r.mu.RUnlock()
 	if !ok {
 		return
 	}
-	atomic.AddUint64(&cell.reqs, 1)
-	switch {
-	case status >= 500:
-		atomic.AddUint64(&cell.errs, 1)
-	case status >= 400:
-		atomic.AddUint64(&cell.errs4xx, 1)
-	}
-	cell.latency.observe(durMs)
+	cell.observe(obs)
 }
 
 // IncByHost records a single request against routeID AND, when host
@@ -233,7 +296,7 @@ func (r *Registry) Inc(routeID string, status int, durMs float64) {
 // map is created lazily on the first hit for a host; subsequent
 // hits use the cached cell pointer via the RLock + atomic add
 // pattern).
-func (r *Registry) IncByHost(routeID, host string, status int, durMs float64) {
+func (r *Registry) IncByHost(routeID, host string, obs Observation) {
 	r.mu.RLock()
 	routeCell, ok := r.cells[routeID]
 	if !ok {
@@ -249,14 +312,7 @@ func (r *Registry) IncByHost(routeID, host string, status int, durMs float64) {
 	r.mu.RUnlock()
 
 	// Route-level bump (always).
-	atomic.AddUint64(&routeCell.reqs, 1)
-	switch {
-	case status >= 500:
-		atomic.AddUint64(&routeCell.errs, 1)
-	case status >= 400:
-		atomic.AddUint64(&routeCell.errs4xx, 1)
-	}
-	routeCell.latency.observe(durMs)
+	routeCell.observe(obs)
 
 	if host == "" {
 		return
@@ -287,14 +343,7 @@ func (r *Registry) IncByHost(routeID, host string, status int, durMs float64) {
 		r.mu.Unlock()
 	}
 
-	atomic.AddUint64(&hostCell.reqs, 1)
-	switch {
-	case status >= 500:
-		atomic.AddUint64(&hostCell.errs, 1)
-	case status >= 400:
-		atomic.AddUint64(&hostCell.errs4xx, 1)
-	}
-	hostCell.latency.observe(durMs)
+	hostCell.observe(obs)
 }
 
 // Sync reconciles the Registry's cells with the canonical list of
@@ -373,8 +422,15 @@ func (r *Registry) Snapshot() map[string]Delta {
 		reqs := atomic.SwapUint64(&cell.reqs, 0)
 		errs := atomic.SwapUint64(&cell.errs, 0)
 		errs4xx := atomic.SwapUint64(&cell.errs4xx, 0)
-		p95 := cell.latency.drainP95()
-		out[id] = Delta{Reqs: reqs, Errs: errs, Errs4xx: errs4xx, LatencyP95Ms: p95}
+		out[id] = Delta{
+			Reqs:           reqs,
+			Errs:           errs,
+			Errs4xx:        errs4xx,
+			LatencyBuckets: cell.latency.drainBuckets(),
+			TTFBBuckets:    cell.ttfb.drainBuckets(),
+			BytesOut:       atomic.SwapUint64(&cell.bytesOut, 0),
+			Hijacked:       atomic.SwapUint64(&cell.hijacked, 0),
+		}
 	}
 	return out
 }
@@ -413,14 +469,16 @@ func (r *Registry) SnapshotHosts() []HostDelta {
 			reqs := atomic.SwapUint64(&cell.reqs, 0)
 			errs := atomic.SwapUint64(&cell.errs, 0)
 			errs4xx := atomic.SwapUint64(&cell.errs4xx, 0)
-			p95 := cell.latency.drainP95()
 			out = append(out, HostDelta{
-				RouteID:      routeID,
-				Host:         host,
-				Reqs:         reqs,
-				Errs:         errs,
-				Errs4xx:      errs4xx,
-				LatencyP95Ms: p95,
+				RouteID:        routeID,
+				Host:           host,
+				Reqs:           reqs,
+				Errs:           errs,
+				Errs4xx:        errs4xx,
+				LatencyBuckets: cell.latency.drainBuckets(),
+				TTFBBuckets:    cell.ttfb.drainBuckets(),
+				BytesOut:       atomic.SwapUint64(&cell.bytesOut, 0),
+				Hijacked:       atomic.SwapUint64(&cell.hijacked, 0),
 			})
 		}
 	}

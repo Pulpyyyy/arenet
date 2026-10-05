@@ -27,6 +27,7 @@ import (
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"time"
 )
 
 // newTestHandler returns a RouteMetricsHandler with the registry
@@ -368,7 +369,7 @@ func (h *hijackableRW) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 func TestRouteMetrics_StatusRecorder_ForwardsHijacker(t *testing.T) {
 	underlying := &hijackableRW{ResponseRecorder: httptest.NewRecorder()}
-	rec := newStatusRecorder(underlying)
+	rec := newStatusRecorder(underlying, time.Now())
 
 	_, _, err := rec.Hijack()
 	if !underlying.hijackCalled {
@@ -382,7 +383,7 @@ func TestRouteMetrics_StatusRecorder_ForwardsHijacker(t *testing.T) {
 func TestRouteMetrics_StatusRecorder_DegradesNoHijacker(t *testing.T) {
 	// fakeRWNoHijack does NOT implement Hijacker. statusRecorder
 	// must return ErrNotSupported, not panic.
-	rec := newStatusRecorder(&fakeRWNoHijack{})
+	rec := newStatusRecorder(&fakeRWNoHijack{}, time.Now())
 	_, _, err := rec.Hijack()
 	if !errors.Is(err, http.ErrNotSupported) {
 		t.Errorf("Hijack err=%v want http.ErrNotSupported", err)
@@ -392,7 +393,7 @@ func TestRouteMetrics_StatusRecorder_DegradesNoHijacker(t *testing.T) {
 func TestRouteMetrics_StatusRecorder_Flush_NoOpOnPlainWriter(t *testing.T) {
 	// fakeRWNoHijack does not implement Flusher. Calling Flush on
 	// our recorder must be a no-op, not a panic.
-	rec := newStatusRecorder(&fakeRWNoHijack{})
+	rec := newStatusRecorder(&fakeRWNoHijack{}, time.Now())
 	rec.Flush()
 	// Reached here without panic → pass.
 }
@@ -403,7 +404,7 @@ func TestRouteMetrics_StatusRecorder_DoubleWriteHeader_KeepsFirst(t *testing.T) 
 	// "superfluous WriteHeader") but do not overwrite our recorded
 	// status.
 	underlying := httptest.NewRecorder()
-	rec := newStatusRecorder(underlying)
+	rec := newStatusRecorder(underlying, time.Now())
 
 	rec.WriteHeader(http.StatusServiceUnavailable)  // 503
 	rec.WriteHeader(http.StatusInternalServerError) // 500 — must NOT overwrite
@@ -415,7 +416,7 @@ func TestRouteMetrics_StatusRecorder_DoubleWriteHeader_KeepsFirst(t *testing.T) 
 
 func TestRouteMetrics_StatusRecorder_DefaultIsOK(t *testing.T) {
 	// A freshly-created recorder reports 200 before any write.
-	rec := newStatusRecorder(httptest.NewRecorder())
+	rec := newStatusRecorder(httptest.NewRecorder(), time.Now())
 	if rec.Status() != http.StatusOK {
 		t.Errorf("default Status()=%d want %d", rec.Status(), http.StatusOK)
 	}

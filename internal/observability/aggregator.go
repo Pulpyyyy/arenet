@@ -19,8 +19,12 @@ package observability
 import (
 	"context"
 	"log/slog"
+	"math"
 	"sync"
 	"time"
+
+	"github.com/barto95100/arenet/internal/histogram"
+	"github.com/barto95100/arenet/internal/metrics"
 )
 
 // TickDelta is one second of accumulated per-route counters
@@ -31,17 +35,41 @@ import (
 // the request path.
 //
 // Reqs, Fourxx, Fivexx are counts since the previous tick (NOT
-// cumulative). LatencyP95Ms is the p95 over the same tick
-// window — for the aggregator's purpose we store it as the
-// representative latency of this 1-second sample and pick the
-// max across the 60 samples at minute boundary (per spec §3
-// "percentile-of-percentiles approximation").
+// cumulative). LatencyBuckets is the tick's latency DISTRIBUTION.
+//
+// It replaced LatencyP95Ms, and with it the "percentile-of-
+// percentiles approximation" the previous comment here cited from
+// spec §3. That approximation was not an approximation: a percentile
+// cannot be maximised, and taking max() across sixty one-second
+// samples reported the slowest request of the minute under the name
+// p95. At 0.88 req/s — measured, not assumed — a one-second tick holds
+// zero or one request, so each "sample" was one request's duration
+// rounded up to a power of two.
+//
+// Bucket counts sum exactly: the elementwise sum of two histograms is
+// the histogram of the union of their samples. So the minute
+// accumulates the distribution and the quantile is taken once, over
+// everything, at flush and at read time.
 type TickDelta struct {
-	RouteID      string
-	Reqs         uint64
-	Fourxx       uint64
-	Fivexx       uint64
-	LatencyP95Ms int32
+	RouteID        string
+	Reqs           uint64
+	Fourxx         uint64
+	Fivexx         uint64
+	LatencyBuckets histogram.BucketCounts
+
+	// TTFBBuckets is the time-to-first-byte distribution. Kept apart
+	// from LatencyBuckets because latency runs to the last byte and so
+	// carries the visitor's download time; TTFB stops when the
+	// response committed. Its total can sit below Reqs — a hijacked
+	// connection has no first byte to time.
+	TTFBBuckets histogram.BucketCounts
+
+	// BytesOut is response body bytes the wire accepted this tick.
+	BytesOut uint64
+
+	// Hijacked counts connections taken over (a WebSocket upgrade),
+	// whose TTFB and bytes are unobservable rather than zero.
+	Hijacked uint64
 
 	// WafBlocks is the count of WAF block events to add to
 	// the current minute's accumulator. Distinct from the
@@ -149,9 +177,16 @@ type routeState struct {
 	// ratelimit.Sink.absorb path (only when routeID != "" ;
 	// zones not following the "route-<UUID>" convention
 	// don't reach this counter).
-	rateLimits        int64
-	p95MaxMs          int32 // max across all 1-second samples this minute
-	samples           int   // number of non-empty 1-second samples
+	rateLimits int64
+	// latency accumulates every tick's distribution for the minute.
+	// Summed, not maximised — see TickDelta's comment for why max()
+	// was never an approximation of a percentile.
+	latency histogram.BucketCounts
+	// ttfb accumulates the same way. Summed, never maximised.
+	ttfb     histogram.BucketCounts
+	bytesOut int64
+	hijacked int64
+	samples  int // number of non-empty 1-second samples
 }
 
 // bucketSink is the minimal write surface the aggregator depends
@@ -383,13 +418,16 @@ func (a *Aggregator) BumpRateLimitExceeded(routeID string) {
 //
 // Non-blocking by construction: delegates to Ingest, which drops
 // silently when the ingress channel is full (AC #13).
-func (a *Aggregator) Consume(routeID string, reqs, fourxx, fivexx uint64, latencyP95Ms int32) {
+func (a *Aggregator) Consume(routeID string, d metrics.Delta) {
 	a.Ingest(TickDelta{
-		RouteID:      routeID,
-		Reqs:         reqs,
-		Fourxx:       fourxx,
-		Fivexx:       fivexx,
-		LatencyP95Ms: latencyP95Ms,
+		RouteID:        routeID,
+		Reqs:           d.Reqs,
+		Fourxx:         d.Errs4xx,
+		Fivexx:         d.Errs,
+		LatencyBuckets: d.LatencyBuckets,
+		TTFBBuckets:    d.TTFBBuckets,
+		BytesOut:       d.BytesOut,
+		Hijacked:       d.Hijacked,
 	})
 }
 
@@ -492,9 +530,10 @@ func (a *Aggregator) absorb(d TickDelta) {
 	rs.throttleBlocks += int64(d.ThrottleBlocks)
 	rs.crowdsecDecisions += int64(d.CrowdSecDecisions)
 	rs.rateLimits += int64(d.RateLimitExceeded)
-	if d.LatencyP95Ms > rs.p95MaxMs {
-		rs.p95MaxMs = d.LatencyP95Ms
-	}
+	rs.latency.Add(d.LatencyBuckets)
+	rs.ttfb.Add(d.TTFBBuckets)
+	rs.bytesOut += int64(d.BytesOut)
+	rs.hijacked += int64(d.Hijacked)
 	if d.Reqs > 0 {
 		rs.samples++
 	}
@@ -538,7 +577,12 @@ func (a *Aggregator) flush(ctx context.Context) {
 			ThrottleBlockCount:    rs.throttleBlocks,
 			CrowdSecDecisionCount: rs.crowdsecDecisions,
 			RateLimitCount:        rs.rateLimits,
-			LatencyP95Ms:          rs.p95MaxMs,
+			// A real p95, computed once over the minute's whole
+			// distribution. The column keeps its name and its type so
+			// every existing reader — the dashboard, the timeseries,
+			// the route panel — keeps working and simply starts
+			// receiving true values.
+			LatencyP95Ms: p95FromBuckets(rs.latency),
 		})
 	}
 	// Reset before the write so a slow / failing flush doesn't
@@ -563,4 +607,20 @@ func (a *Aggregator) flush(ctx context.Context) {
 			slog.Int("rows", len(rows)),
 		)
 	}
+}
+
+// p95FromBuckets reduces a minute's accumulated distribution to the
+// int32 the bucket row carries.
+//
+// Rounds rather than truncates: truncation biases every value down by
+// up to a millisecond, invisible at 300 ms and absurd at 2 ms. Returns
+// 0 when nothing was observed, which is what the column has always
+// meant by "no traffic" — and why the API layer must keep reporting
+// null rather than 0 for a route with no samples.
+func p95FromBuckets(b histogram.BucketCounts) int32 {
+	v, n := histogram.Quantile(b, 0.95)
+	if n == 0 {
+		return 0
+	}
+	return int32(math.Round(v))
 }
