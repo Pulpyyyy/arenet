@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/barto95100/arenet/internal/histogram"
 )
 
 // Retention windows per Step L spec §1.3 D2.
@@ -277,14 +279,25 @@ func (r *RetentionRunner) tick(ctx context.Context) {
 // p95 approximation per spec §2 AC #2: the hourly p95 is the
 // **req-count-weighted percentile-of-percentiles** across the
 // 60 minute samples. Since we only persisted one p95-int per
-// minute (not the underlying histogram), exact recomputation is
-// impossible — the spec acknowledges this and the L.5 smoke
-// asserts the rollup p95 sits within the per-minute envelope,
-// not equality to a recomputed exact p95.
+// minute, exact recomputation used to be impossible — and the
+// comment here said so.
+//
+// It is possible now. Since schema v15 each minute carries its own
+// distribution, and summing distributions is exact: the elementwise
+// sum of two histograms is the histogram of the union of their
+// samples. The hour's p95 is therefore computed over the hour's real
+// population, not derived from sixty per-minute percentiles, which was
+// never an approximation of anything — a percentile cannot be averaged
+// any more than it can be maximised.
+//
+// The weighted-average and max fallbacks remain for hours whose
+// minutes predate v15 and have no histogram to sum. Those rows cannot
+// be improved: the data was discarded a second after it was
+// produced.
 func (r *RetentionRunner) rollupHour(ctx context.Context, hourStart time.Time) error {
 	// One query for the whole hour, all routes.
 	rows, err := r.store.db.QueryContext(ctx, `
-SELECT route_id, req_count, fourxx_count, fivexx_count, waf_block_count, waf_detect_count, throttle_block_count, crowdsec_decision_count, rate_limit_count, latency_p95_ms
+SELECT route_id, req_count, fourxx_count, fivexx_count, waf_block_count, waf_detect_count, throttle_block_count, crowdsec_decision_count, rate_limit_count, latency_p95_ms, total_hist, ttfb_hist, bytes_out, hijacked_count
 FROM bucket_1m
 WHERE ts >= ? AND ts < ?
 `, hourStart.UTC().Unix(), hourStart.Add(time.Hour).UTC().Unix())
@@ -305,13 +318,31 @@ WHERE ts >= ? AND ts < ?
 		p95w      int64 // sum of (req_count * latency_p95_ms)
 		p95wDen   int64 // sum of req_count for samples that had latency
 		p95plain  int64 // unweighted max as fallback when no traffic
+
+		// total / ttfb are the summed distributions, and anyHist says
+		// whether any contributing minute actually carried one.
+		//
+		// Summing is exact: the elementwise sum of two histograms is
+		// the histogram of the union of their samples. So the hour's
+		// p95 below is computed over the real hour, not derived from
+		// sixty per-minute percentiles — which is what the old
+		// weighted-average fallback did, and what the comment above
+		// this function used to concede was "impossible" to do
+		// exactly.
+		total    histogram.BucketCounts
+		ttfb     histogram.BucketCounts
+		anyHist  bool
+		bytesOut int64
+		hijacked int64
 	}
 	byRoute := make(map[string]*acc)
 	for rows.Next() {
 		var routeID string
 		var req, fourxx, fivexx, wafBlock, wafDetect, throttle, crowdsec, rateLimit int64
 		var p95 int32
-		if err := rows.Scan(&routeID, &req, &fourxx, &fivexx, &wafBlock, &wafDetect, &throttle, &crowdsec, &rateLimit, &p95); err != nil {
+		var totalBlob, ttfbBlob []byte
+		var bytesOut, hijacked int64
+		if err := rows.Scan(&routeID, &req, &fourxx, &fivexx, &wafBlock, &wafDetect, &throttle, &crowdsec, &rateLimit, &p95, &totalBlob, &ttfbBlob, &bytesOut, &hijacked); err != nil {
 			return fmt.Errorf("rollup scan: %w", err)
 		}
 		a, ok := byRoute[routeID]
@@ -334,6 +365,24 @@ WHERE ts >= ? AND ts < ?
 		if int64(p95) > a.p95plain {
 			a.p95plain = int64(p95)
 		}
+
+		a.bytesOut += bytesOut
+		a.hijacked += hijacked
+		total, derr := decodeHistOrNil(totalBlob)
+		if derr != nil {
+			return fmt.Errorf("rollup total_hist (route=%s): %w", routeID, derr)
+		}
+		ttfbH, derr := decodeHistOrNil(ttfbBlob)
+		if derr != nil {
+			return fmt.Errorf("rollup ttfb_hist (route=%s): %w", routeID, derr)
+		}
+		if total != nil {
+			a.total.Add(*total)
+			a.anyHist = true
+		}
+		if ttfbH != nil {
+			a.ttfb.Add(*ttfbH)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("rollup iterate: %w", err)
@@ -345,9 +394,16 @@ WHERE ts >= ? AND ts < ?
 	out := make([]MetricBucket, 0, len(byRoute))
 	for id, a := range byRoute {
 		var p95 int32
-		if a.p95wDen > 0 {
+		switch {
+		case a.anyHist:
+			// The hour's own distribution, so this is a real p95 over
+			// the real hour. The two branches below are the legacy
+			// path, kept only for hours whose minutes predate the
+			// histogram columns.
+			p95 = p95FromBuckets(a.total)
+		case a.p95wDen > 0:
 			p95 = int32(a.p95w / a.p95wDen)
-		} else {
+		default:
 			// No req-weighted data — keep the unweighted max
 			// as the representative value rather than 0,
 			// which would render as a fake "no latency" gap.
@@ -365,6 +421,10 @@ WHERE ts >= ? AND ts < ?
 			CrowdSecDecisionCount: a.crowdsec,
 			RateLimitCount:        a.rateLimit,
 			LatencyP95Ms:          p95,
+			TotalHist:             histOrNil(a.total),
+			TTFBHist:              histOrNil(a.ttfb),
+			BytesOut:              a.bytesOut,
+			HijackedCount:         a.hijacked,
 		})
 	}
 	return r.store.InsertBatch(ctx, Granularity1h, out)

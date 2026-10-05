@@ -5,6 +5,8 @@
 package histogram
 
 import (
+	"bytes"
+	"errors"
 	"math"
 	"math/rand"
 	"sort"
@@ -285,4 +287,135 @@ func exactQuantile(xs []float64, q float64) float64 {
 		rank = 1
 	}
 	return s[rank-1]
+}
+
+// ---------------------------------------------------------------------------
+// Storage encoding
+// ---------------------------------------------------------------------------
+
+// TestEncodeDecode_RoundTrips over pseudo-random histograms. This is
+// the only code in the design whose failure would corrupt stored data
+// rather than merely misreport it, so it gets a property test and not
+// an example.
+func TestEncodeDecode_RoundTrips(t *testing.T) {
+	rnd := rand.New(rand.NewSource(0xC0FFEE))
+	for trial := 0; trial < 500; trial++ {
+		var in BucketCounts
+		for i := range in {
+			switch rnd.Intn(4) {
+			case 0: // leave it empty — sparse histograms are the norm
+			case 1:
+				in[i] = uint64(rnd.Intn(10))
+			case 2:
+				in[i] = uint64(rnd.Intn(1_000_000))
+			case 3:
+				in[i] = uint64(rnd.Uint32())
+			}
+		}
+		blob := Encode(in)
+		if len(blob) != EncodedSize {
+			t.Fatalf("trial %d: blob is %d bytes, want %d", trial, len(blob), EncodedSize)
+		}
+		out, ok, err := Decode(blob)
+		if err != nil {
+			t.Fatalf("trial %d: Decode: %v", trial, err)
+		}
+		if !ok {
+			t.Fatalf("trial %d: ok=false on a blob we just encoded", trial)
+		}
+		if out != in {
+			t.Fatalf("trial %d: round trip changed the histogram\n in=%v\nout=%v", trial, in, out)
+		}
+		// And the quantile must survive, which is what actually matters
+		// to a reader.
+		for _, q := range []float64{0.5, 0.95, 0.99} {
+			gv, gn := Quantile(in, q)
+			ov, on := Quantile(out, q)
+			if gv != ov || gn != on {
+				t.Fatalf("trial %d q=%v: quantile changed across the round trip: (%v,%d) -> (%v,%d)", trial, q, gv, gn, ov, on)
+			}
+		}
+	}
+}
+
+// TestDecode_EmptyIsNotAHistogramOfNothing — a row written before the
+// histogram columns existed has no distribution. Reporting it as a
+// histogram of zero observations would make an unmeasured route
+// indistinguishable from an idle one, which is the failure this whole
+// design exists to remove.
+func TestDecode_EmptyIsNotAHistogramOfNothing(t *testing.T) {
+	for _, blob := range [][]byte{nil, {}} {
+		out, ok, err := Decode(blob)
+		if err != nil {
+			t.Fatalf("Decode(%v): %v", blob, err)
+		}
+		if ok {
+			t.Errorf("Decode(%v) reported ok=true; an absent histogram must not pass as present", blob)
+		}
+		if out != (BucketCounts{}) {
+			t.Errorf("Decode(%v) = %v, want the zero value", blob, out)
+		}
+	}
+}
+
+// TestDecode_WrongLengthIsRefused — a short or long blob came from a
+// different build or a truncated write. Zero-filling it would turn a
+// corrupt row into a route that looks like it served nothing.
+func TestDecode_WrongLengthIsRefused(t *testing.T) {
+	for _, n := range []int{1, EncodedSize - 1, EncodedSize + 1, EncodedSize * 2} {
+		_, ok, err := Decode(make([]byte, n))
+		if err == nil {
+			t.Errorf("Decode(%d bytes) returned no error", n)
+		}
+		if !errors.Is(err, ErrBadEncoding) {
+			t.Errorf("Decode(%d bytes) error = %v, want ErrBadEncoding", n, err)
+		}
+		if ok {
+			t.Errorf("Decode(%d bytes) reported ok=true", n)
+		}
+	}
+}
+
+// TestEncode_SaturatesRatherThanWraps — uint32 caps a bucket at ~4.29
+// billion requests in one window. Reaching that needs ~1.2 M req/s to
+// one route for a whole hour, so it is not a practical concern; what
+// matters is the failure MODE. A clamped count reads as "at least this
+// many", a wrapped one reads as almost none.
+func TestEncode_SaturatesRatherThanWraps(t *testing.T) {
+	var in BucketCounts
+	in[3] = uint64(math.MaxUint32) + 1000
+	out, _, err := Decode(Encode(in))
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if out[3] != uint64(math.MaxUint32) {
+		t.Errorf("bucket 3 = %d, want it clamped to %d; a wrap would have made a saturated bucket look nearly empty",
+			out[3], uint64(math.MaxUint32))
+	}
+}
+
+// TestEncode_IsStableAcrossBuilds — the encoding is persisted, so a
+// change to byte order or width silently misreads every existing row.
+// Pinned against a literal so that change cannot pass review as a
+// refactor.
+func TestEncode_IsStableAcrossBuilds(t *testing.T) {
+	var in BucketCounts
+	in[0] = 1
+	in[1] = 258 // 0x0102 — catches a byte-order flip
+	in[16] = 0x04030201
+
+	blob := Encode(in)
+	if len(blob) != 68 {
+		t.Fatalf("EncodedSize changed to %d; every stored row becomes unreadable", len(blob))
+	}
+	want := map[int][]byte{
+		0:  {0x01, 0x00, 0x00, 0x00},
+		4:  {0x02, 0x01, 0x00, 0x00},
+		64: {0x01, 0x02, 0x03, 0x04},
+	}
+	for off, w := range want {
+		if got := blob[off : off+4]; !bytes.Equal(got, w) {
+			t.Errorf("bytes at offset %d = % x, want % x (little-endian uint32)", off, got, w)
+		}
+	}
 }

@@ -34,7 +34,12 @@
 // through the whole bug it was written to prevent.
 package histogram
 
-import "math"
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"math"
+)
 
 // Buckets is the number of log-spaced buckets covering the realistic
 // HTTP latency range. With BaseMs=0.5, bucket 16 has upper edge
@@ -215,4 +220,68 @@ func Of(durationsMs []float64) BucketCounts {
 		b[IndexOf(d)]++
 	}
 	return b
+}
+
+// ---------------------------------------------------------------------------
+// Storage encoding (spec 2026-10-05-latency-truth, D6)
+// ---------------------------------------------------------------------------
+
+// EncodedSize is the wire size of an encoded BucketCounts: Buckets
+// counts at 4 bytes each.
+//
+// Fixed width rather than varints, so a row's size is knowable without
+// decoding it and a truncated blob is detectable by length alone. At
+// 68 bytes per row this costs 4.9 MB for 50 routes over bucket_1m's
+// 24 h retention — storage was never the reason to throw the
+// distribution away.
+const EncodedSize = Buckets * 4
+
+// ErrBadEncoding is returned by Decode for a blob that is not
+// EncodedSize bytes long.
+//
+// A wrong length means the row was written by a different build or
+// truncated in transit. Refusing it is the point: silently zero-filling
+// would turn a corrupt row into a route that looks like it served
+// nothing, and "served nothing" is the one thing this design will not
+// let a missing measurement pretend to be.
+var ErrBadEncoding = errors.New("histogram: blob is not a valid encoded BucketCounts")
+
+// Encode serialises b as little-endian uint32 counts.
+//
+// uint32 caps a bucket at ~4.29 billion requests in one window. The
+// widest window that reaches this encoding is an hour, so saturating a
+// single bucket would need about 1.2 million requests per second to one
+// route for the whole hour. Saturation clamps rather than wrapping:
+// a clamped count reads as "at least this many", where a wrapped one
+// would read as almost none.
+func Encode(b BucketCounts) []byte {
+	out := make([]byte, EncodedSize)
+	for i, c := range b {
+		if c > math.MaxUint32 {
+			c = math.MaxUint32
+		}
+		binary.LittleEndian.PutUint32(out[i*4:], uint32(c))
+	}
+	return out
+}
+
+// Decode parses a blob written by Encode.
+//
+// A nil or empty blob decodes to the zero histogram with ok=false,
+// which is how a row predating the histogram columns is recognised:
+// those rows have no distribution and must not be reported as one.
+// Callers distinguish "no histogram here" from "a histogram of nothing"
+// by the bool, never by the counts being zero.
+func Decode(blob []byte) (BucketCounts, bool, error) {
+	var out BucketCounts
+	if len(blob) == 0 {
+		return out, false, nil
+	}
+	if len(blob) != EncodedSize {
+		return out, false, fmt.Errorf("%w: got %d bytes, want %d", ErrBadEncoding, len(blob), EncodedSize)
+	}
+	for i := range out {
+		out[i] = uint64(binary.LittleEndian.Uint32(blob[i*4:]))
+	}
+	return out, true, nil
 }

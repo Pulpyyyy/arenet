@@ -583,6 +583,15 @@ func (a *Aggregator) flush(ctx context.Context) {
 			// the route panel — keeps working and simply starts
 			// receiving true values.
 			LatencyP95Ms: p95FromBuckets(rs.latency),
+			// The distributions themselves, so the read path can ask
+			// for any quantile instead of being handed one. Pointers
+			// because nil means "no distribution" and a minute that
+			// observed nothing must not be stored as a histogram of
+			// nothing — see MetricBucket.
+			TotalHist:     histOrNil(rs.latency),
+			TTFBHist:      histOrNil(rs.ttfb),
+			BytesOut:      rs.bytesOut,
+			HijackedCount: rs.hijacked,
 		})
 	}
 	// Reset before the write so a slow / failing flush doesn't
@@ -623,4 +632,20 @@ func p95FromBuckets(b histogram.BucketCounts) int32 {
 		return 0
 	}
 	return int32(math.Round(v))
+}
+
+// histOrNil returns a pointer to b, or nil when b holds no
+// observations.
+//
+// The nil is the point. A minute in which a route served nothing has
+// no distribution, and storing an all-zero histogram for it would make
+// it indistinguishable from a minute whose distribution was never
+// recorded — the pre-v15 rows. Absent and zero stay different facts
+// all the way down to the column.
+func histOrNil(b histogram.BucketCounts) *histogram.BucketCounts {
+	if b.Total() == 0 {
+		return nil
+	}
+	out := b
+	return &out
 }
