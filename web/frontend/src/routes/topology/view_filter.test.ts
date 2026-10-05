@@ -17,17 +17,14 @@
 import { describe, it, expect } from 'vitest';
 import { FLOW_TIER, resolveFlowTier } from './_types';
 import type { FlowEdgeData, TopologyRoute } from './_types';
-
-type TopoView = 'proxy' | 'redirect';
-
-// Mirrors the implementation in +page.svelte. A .svelte file cannot be
-// imported for a pure function, so the partition is restated here and
-// the comment above is the contract both sides answer to.
-function filterForView(all: TopologyRoute[], view: TopoView): TopologyRoute[] {
-	return view === 'redirect'
-		? all.filter((r) => !!r.redirectTarget)
-		: all.filter((r) => !r.redirectTarget);
-}
+// v2.62.1 — imported, no longer restated. The previous version of this
+// file carried its own copy of filterForView with a comment saying so,
+// which is why it stayed green through the bug it was written to
+// prevent: the partition was right in both places while the page's
+// live-tick path passed the UNFILTERED list, and the proxy view showed
+// every node. A test that copies its subject cannot notice the subject
+// going unused.
+import { filterForView, type TopoView } from './_view';
 
 function route(id: string, redirectTarget?: string): TopologyRoute {
 	return {
