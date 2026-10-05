@@ -34,10 +34,15 @@ export function fetchTimeseries(
 	quantile?: MetricQuantile
 ): Promise<TimeseriesResponse> {
 	const qs = new URLSearchParams({ route: routeId, metric, window });
-	// Omitted rather than defaulted to 'p95': the server already
-	// defaults to p95, and sending it explicitly on every call would
-	// make the parameter look mandatory to anyone reading the network
-	// tab, including on the metrics that ignore it.
+	// Absent when the caller passes nothing, in which case the server
+	// applies p95 — so a count metric never carries a quantile it
+	// would ignore.
+	//
+	// Callers that DO have a quantile send it even when it is p95. That
+	// is deliberate: an operator reading their network tab then sees
+	// which quantile produced the chart without having to know what
+	// the default is, and the network tab is exactly where they look
+	// when a figure surprises them.
 	if (quantile) qs.set('quantile', quantile);
 	return request<TimeseriesResponse>('GET', `/metrics/timeseries?${qs.toString()}`);
 }

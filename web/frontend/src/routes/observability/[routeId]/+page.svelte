@@ -7,17 +7,28 @@
 <!--
 Step L L.4 — Per-route historical drill-down.
 
-Renders four independent timeline charts (req / 4xx / 5xx / p95)
-for one route over the selected window. Linkable from:
+Renders three count charts (req / 4xx / 5xx) plus a two-series
+latency chart for one route over the selected window. Linkable from:
   - /observability dashboard top-5 table → "host" cell
   - /topology detail panel footer "Historical →" link
   - direct URL: /observability/<routeId>
 
 Reuses every L.3 primitive — TimelineChart with null-as-gap,
 24h/30d window toggle, AC #13 disabled state, AC #7 empty
-states, trailing in-progress bucket trim. The fourth chart
-(p95) renders the latency series; AC #5 null-for-gap rule is
-particularly important here.
+states, trailing in-progress bucket trim.
+
+v2.65 — the single p95 line became two series, server time and
+time with transfer, with a p50/p95/p99 selector. The legacy
+p95_latency_ms metric is no longer fetched: it is a mean of
+per-bucket percentiles, which is not a percentile. The gap
+between the two curves is the diagnosis — on a real instance a
+route reading "p95 6701 ms" was 0.1 s of server and 23.9 s of a
+visitor downloading a 2.9 MB file.
+
+The AC #5 null-for-gap rule is load-bearing on both latency
+series, and MultiSeriesTimelineChart honours it only when passed
+nullAsGap: a null plotted at zero would claim the route answered
+instantly exactly where nothing was measured.
 
 Viewer-accessible — relies on the API gate (AC #17).
 -->
