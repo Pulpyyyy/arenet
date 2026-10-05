@@ -26,6 +26,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/barto95100/arenet/internal/histogram"
 )
 
 // schemaSQL is the schema applied at every Open. All statements
@@ -177,8 +179,8 @@ func (s *Store) InsertBatch(ctx context.Context, gran Granularity, rows []Metric
 		return fmt.Errorf("observability: begin tx: %w", err)
 	}
 	stmt, err := tx.PrepareContext(ctx, `
-INSERT INTO `+gran.tableName()+` (route_id, ts, req_count, fourxx_count, fivexx_count, waf_block_count, waf_detect_count, throttle_block_count, crowdsec_decision_count, rate_limit_count, latency_p95_ms)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO `+gran.tableName()+` (route_id, ts, req_count, fourxx_count, fivexx_count, waf_block_count, waf_detect_count, throttle_block_count, crowdsec_decision_count, rate_limit_count, latency_p95_ms, total_hist, ttfb_hist, bytes_out, hijacked_count)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(route_id, ts) DO UPDATE SET
   req_count               = excluded.req_count,
   fourxx_count            = excluded.fourxx_count,
@@ -188,7 +190,11 @@ ON CONFLICT(route_id, ts) DO UPDATE SET
   throttle_block_count    = excluded.throttle_block_count,
   crowdsec_decision_count = excluded.crowdsec_decision_count,
   rate_limit_count        = excluded.rate_limit_count,
-  latency_p95_ms          = excluded.latency_p95_ms
+  latency_p95_ms          = excluded.latency_p95_ms,
+  total_hist              = excluded.total_hist,
+  ttfb_hist               = excluded.ttfb_hist,
+  bytes_out               = excluded.bytes_out,
+  hijacked_count          = excluded.hijacked_count
 `)
 	if err != nil {
 		_ = tx.Rollback()
@@ -208,6 +214,13 @@ ON CONFLICT(route_id, ts) DO UPDATE SET
 			r.CrowdSecDecisionCount,
 			r.RateLimitCount,
 			r.LatencyP95Ms,
+			// A nil histogram writes SQL NULL, not 68 zero bytes:
+			// "we have no distribution for this row" must stay
+			// distinguishable from "a distribution of nothing".
+			encodeHistOrNil(r.TotalHist),
+			encodeHistOrNil(r.TTFBHist),
+			r.BytesOut,
+			r.HijackedCount,
 		); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("observability: insert row (route=%s ts=%s): %w", r.RouteID, r.Ts, err)
@@ -234,7 +247,7 @@ func (s *Store) Query(ctx context.Context, gran Granularity, routeID string, fro
 		return nil, fmt.Errorf("observability: store closed")
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT route_id, ts, req_count, fourxx_count, fivexx_count, waf_block_count, waf_detect_count, throttle_block_count, crowdsec_decision_count, rate_limit_count, latency_p95_ms
+SELECT route_id, ts, req_count, fourxx_count, fivexx_count, waf_block_count, waf_detect_count, throttle_block_count, crowdsec_decision_count, rate_limit_count, latency_p95_ms, total_hist, ttfb_hist, bytes_out, hijacked_count
 FROM `+gran.tableName()+`
 WHERE route_id = ? AND ts >= ? AND ts < ?
 ORDER BY ts ASC
@@ -247,8 +260,18 @@ ORDER BY ts ASC
 	for rows.Next() {
 		var b MetricBucket
 		var tsUnix int64
-		if err := rows.Scan(&b.RouteID, &tsUnix, &b.ReqCount, &b.FourxxCount, &b.FivexxCount, &b.WafBlockCount, &b.WafDetectCount, &b.ThrottleBlockCount, &b.CrowdSecDecisionCount, &b.RateLimitCount, &b.LatencyP95Ms); err != nil {
+		var totalBlob, ttfbBlob []byte
+		if err := rows.Scan(&b.RouteID, &tsUnix, &b.ReqCount, &b.FourxxCount, &b.FivexxCount, &b.WafBlockCount, &b.WafDetectCount, &b.ThrottleBlockCount, &b.CrowdSecDecisionCount, &b.RateLimitCount, &b.LatencyP95Ms, &totalBlob, &ttfbBlob, &b.BytesOut, &b.HijackedCount); err != nil {
 			return nil, fmt.Errorf("observability: scan: %w", err)
+		}
+		// NULL on a pre-v15 row leaves these nil, which is how the
+		// caller tells "no distribution recorded" from "a distribution
+		// of nothing". A malformed blob is an error, not a silent zero.
+		if b.TotalHist, err = decodeHistOrNil(totalBlob); err != nil {
+			return nil, fmt.Errorf("observability: total_hist (route=%s ts=%d): %w", b.RouteID, tsUnix, err)
+		}
+		if b.TTFBHist, err = decodeHistOrNil(ttfbBlob); err != nil {
+			return nil, fmt.Errorf("observability: ttfb_hist (route=%s ts=%d): %w", b.RouteID, tsUnix, err)
 		}
 		b.Ts = time.Unix(tsUnix, 0).UTC()
 		out = append(out, b)
@@ -1439,4 +1462,126 @@ func (s *Store) DistinctDecisionSrcIPs(ctx context.Context, from, to time.Time) 
 		return nil, fmt.Errorf("observability: iterate distinct decision_event value: %w", err)
 	}
 	return out, nil
+}
+
+// encodeHistOrNil returns the blob for h, or nil so the driver writes
+// SQL NULL.
+//
+// The nil case is load-bearing. Writing 68 zero bytes instead would
+// make a row with no recorded distribution indistinguishable from a
+// route that genuinely served nothing — the confusion this whole
+// design exists to remove, reintroduced at the storage layer.
+func encodeHistOrNil(h *histogram.BucketCounts) any {
+	if h == nil {
+		return nil
+	}
+	return histogram.Encode(*h)
+}
+
+// decodeHistOrNil turns a nullable blob column into an optional
+// histogram.
+//
+// A NULL column (pre-v15 row) yields nil. A malformed blob is an
+// error rather than a silent zero: it means the row was written by a
+// different build or truncated, and reporting it as "served nothing"
+// would be a lie the operator cannot see through.
+func decodeHistOrNil(blob []byte) (*histogram.BucketCounts, error) {
+	h, ok, err := histogram.Decode(blob)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	return &h, nil
+}
+
+// HistogramAggregate is a window's summed distributions for one route.
+//
+// Returned by AggregateHistogram, which exists because summing is the
+// only valid way to combine distributions and SQLite cannot sum a
+// blob. The SQL layer hands over the rows; the addition happens here,
+// where histogram.BucketCounts.Add is exact.
+type HistogramAggregate struct {
+	// Total and TTFB are the summed distributions. Samples counts the
+	// observations behind Total.
+	Total histogram.BucketCounts
+	TTFB  histogram.BucketCounts
+
+	// Rows is how many bucket rows contributed, and RowsWithHistogram
+	// how many of those actually carried one.
+	//
+	// They differ when the window straddles the v15 upgrade: rows
+	// written before it have no distribution and cannot be
+	// back-filled, because the data was discarded a second after it
+	// was produced. The caller needs to know its answer is partial
+	// rather than being handed a quantile over whatever survived.
+	Rows              int
+	RowsWithHistogram int
+
+	BytesOut      int64
+	HijackedCount int64
+	ReqCount      int64
+}
+
+// AggregateHistogram sums one route's distributions over a window.
+//
+// routeID is matched exactly; pass the empty string to aggregate every
+// route in the window (the system-wide view). Summation is exact and
+// order-independent, so the result is identical however the rows are
+// grouped — which is what makes the hourly and daily rollups lossless
+// and the whole design sound.
+func (s *Store) AggregateHistogram(ctx context.Context, gran Granularity, routeID string, from, to time.Time) (HistogramAggregate, error) {
+	var agg HistogramAggregate
+	if s == nil || s.db == nil {
+		return agg, fmt.Errorf("observability: store closed")
+	}
+
+	query := `
+SELECT total_hist, ttfb_hist, bytes_out, hijacked_count, req_count
+FROM ` + gran.tableName() + `
+WHERE ts >= ? AND ts < ?`
+	args := []any{from.UTC().Unix(), to.UTC().Unix()}
+	if routeID != "" {
+		query += ` AND route_id = ?`
+		args = append(args, routeID)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return agg, fmt.Errorf("observability: aggregate histogram: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var totalBlob, ttfbBlob []byte
+		var bytesOut, hijacked, reqCount int64
+		if err := rows.Scan(&totalBlob, &ttfbBlob, &bytesOut, &hijacked, &reqCount); err != nil {
+			return agg, fmt.Errorf("observability: aggregate scan: %w", err)
+		}
+		agg.Rows++
+		agg.BytesOut += bytesOut
+		agg.HijackedCount += hijacked
+		agg.ReqCount += reqCount
+
+		total, err := decodeHistOrNil(totalBlob)
+		if err != nil {
+			return agg, fmt.Errorf("observability: aggregate total_hist: %w", err)
+		}
+		ttfb, err := decodeHistOrNil(ttfbBlob)
+		if err != nil {
+			return agg, fmt.Errorf("observability: aggregate ttfb_hist: %w", err)
+		}
+		if total != nil {
+			agg.Total.Add(*total)
+			agg.RowsWithHistogram++
+		}
+		if ttfb != nil {
+			agg.TTFB.Add(*ttfb)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return agg, fmt.Errorf("observability: aggregate iterate: %w", err)
+	}
+	return agg, nil
 }

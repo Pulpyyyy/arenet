@@ -60,7 +60,7 @@ import (
 //     on waf_event: the "VARIABLE:key" that triggered the rule).
 //
 // Downgrade is not supported.
-const currentSchemaVersion = 14
+const currentSchemaVersion = 15
 
 // migrate brings db from currentVersion to currentSchemaVersion
 // by replaying every intervening migration step in a single
@@ -128,6 +128,7 @@ var migrateSteps = map[int]func(context.Context, *sql.Tx) error{
 	11: migrateV11toV12,
 	12: migrateV12toV13,
 	13: migrateV13toV14,
+	14: migrateV14toV15,
 }
 
 // migrateV1toV2 — Step M. Adds the waf_block_count column on
@@ -673,4 +674,56 @@ func firstLine(s string) string {
 		}
 	}
 	return s
+}
+
+// migrateV14toV15 — the latency-truth design (spec
+// docs/superpowers/specs/2026-10-05-latency-truth-design.md, D6).
+//
+// Adds, on both bucket tables:
+//
+//   - total_hist / ttfb_hist: the latency DISTRIBUTIONS, 68-byte blobs
+//     of 17 little-endian uint32 counts (histogram.Encode). Storing the
+//     distribution instead of a scalar percentile is the whole point:
+//     percentiles cannot be summed, averaged or maximised, and the
+//     pipeline that received a scalar did all three. Bucket counts sum
+//     exactly, so the quantile is taken once at read time over the
+//     whole window.
+//   - bytes_out: response body bytes served. Volume was recorded
+//     nowhere, so the cause of a slow transfer was reachable only by
+//     reading a raw access log.
+//   - hijacked_count: requests whose connection was taken over (a
+//     WebSocket upgrade), whose TTFB and bytes are unobservable by
+//     construction rather than zero.
+//
+// The two blob columns are NULLABLE ON PURPOSE and are not
+// back-filled. Rows written before this version have no histogram —
+// the information was discarded a second after it was produced and
+// cannot be recovered. NULL is how the read path recognises them, and
+// the alternative (defaulting to 68 zero bytes) would make every
+// historical row read as a route that served nothing, which is the
+// exact confusion this design exists to remove.
+//
+// latency_p95_ms is left in place and keeps being written, now
+// computed correctly from the distribution at flush time, so every
+// existing reader keeps working through the upgrade.
+//
+// SQLite's ALTER TABLE ADD COLUMN is metadata-only, so this is cheap
+// on a large DB: no row rewrite, no table copy.
+func migrateV14toV15(ctx context.Context, tx *sql.Tx) error {
+	stmts := []string{
+		`ALTER TABLE bucket_1m ADD COLUMN total_hist BLOB`,
+		`ALTER TABLE bucket_1m ADD COLUMN ttfb_hist BLOB`,
+		`ALTER TABLE bucket_1m ADD COLUMN bytes_out INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE bucket_1m ADD COLUMN hijacked_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE bucket_1h ADD COLUMN total_hist BLOB`,
+		`ALTER TABLE bucket_1h ADD COLUMN ttfb_hist BLOB`,
+		`ALTER TABLE bucket_1h ADD COLUMN bytes_out INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE bucket_1h ADD COLUMN hijacked_count INTEGER NOT NULL DEFAULT 0`,
+	}
+	for _, s := range stmts {
+		if _, err := tx.ExecContext(ctx, s); err != nil {
+			return fmt.Errorf("exec %q: %w", firstLine(s), err)
+		}
+	}
+	return nil
 }
