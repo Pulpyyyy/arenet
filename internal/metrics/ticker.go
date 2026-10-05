@@ -67,11 +67,20 @@ type RouteMetadata struct {
 // accumulate them for as long as it likes and take the quantile once,
 // at read time, over the whole window.
 //
-// Still positional primitives plus the shared histogram type, because
-// a struct would have to live somewhere both packages can import and
-// the dependency direction above is worth more than the ergonomics.
+// It takes the Delta itself rather than a growing list of positional
+// parameters. The measurements added by the latency-truth work took
+// the payload to seven fields, four of them numeric, and positional
+// numerics of the same type are how a DurMs and a TTFBMs get silently
+// swapped with nothing in the tests noticing.
+//
+// Delta is the registry's own output shape, so this introduces no new
+// type and no new concept — the consumer now receives exactly what the
+// producer produces. It does mean the implementing package imports
+// internal/metrics, which is the harmless direction: the invariant
+// that matters is that metrics depends on no storage or observability
+// code, and that is untouched.
 type TickConsumer interface {
-	Consume(routeID string, reqs, errs4xx, errs5xx uint64, latency histogram.BucketCounts)
+	Consume(routeID string, d Delta)
 }
 
 // Ticker drives the per-tick snapshot loop (spec §4.3). On each tick
@@ -222,7 +231,7 @@ func (t *Ticker) makeSnapshot(ctx context.Context, now time.Time) Snapshot {
 		// fully idle to keep the channel pressure low (the
 		// aggregator's absorb() also ignores zero ReqCount).
 		if t.consumer != nil && (d.Reqs > 0 || d.Errs > 0 || d.Errs4xx > 0) {
-			t.consumer.Consume(rt.ID, d.Reqs, d.Errs4xx, d.Errs, d.LatencyBuckets)
+			t.consumer.Consume(rt.ID, d)
 		}
 	}
 	return Snapshot{T: now.UTC(), Routes: out, Hosts: hosts}

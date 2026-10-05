@@ -65,6 +65,22 @@ type Delta struct {
 	// histograms is the histogram of the union — so the quantile can
 	// be taken once, at read time, over the whole window.
 	LatencyBuckets histogram.BucketCounts `json:"-"`
+
+	// TTFBBuckets is the time-to-first-byte distribution for the tick.
+	// Separate from LatencyBuckets because the two measure different
+	// things: latency runs to the last byte and so carries the
+	// visitor's download time, TTFB stops when the response commits.
+	// Its total can be below Reqs — a hijacked connection has no
+	// first byte to time.
+	TTFBBuckets histogram.BucketCounts `json:"-"`
+
+	// BytesOut is response body bytes the wire accepted during the
+	// tick. Headers and post-Hijack traffic excluded.
+	BytesOut uint64 `json:"bytesOut,omitempty"`
+
+	// Hijacked counts requests whose connection was taken over, whose
+	// TTFB and bytes are unobservable rather than zero.
+	Hijacked uint64 `json:"hijacked,omitempty"`
 }
 
 // HostDelta is the per-(routeID, host) counter difference produced
@@ -98,6 +114,22 @@ type HostDelta struct {
 	// histograms is the histogram of the union — so the quantile can
 	// be taken once, at read time, over the whole window.
 	LatencyBuckets histogram.BucketCounts `json:"-"`
+
+	// TTFBBuckets is the time-to-first-byte distribution for the tick.
+	// Separate from LatencyBuckets because the two measure different
+	// things: latency runs to the last byte and so carries the
+	// visitor's download time, TTFB stops when the response commits.
+	// Its total can be below Reqs — a hijacked connection has no
+	// first byte to time.
+	TTFBBuckets histogram.BucketCounts `json:"-"`
+
+	// BytesOut is response body bytes the wire accepted during the
+	// tick. Headers and post-Hijack traffic excluded.
+	BytesOut uint64 `json:"bytesOut,omitempty"`
+
+	// Hijacked counts requests whose connection was taken over, whose
+	// TTFB and bytes are unobservable rather than zero.
+	Hijacked uint64 `json:"hijacked,omitempty"`
 }
 
 // RouteSnapshot is one route's entry in the per-tick Snapshot. It

@@ -64,9 +64,9 @@ func TestNewTicker_NilLister_Panics(t *testing.T) {
 func TestTicker_MakeSnapshot_JoinsDeltasWithRoutes(t *testing.T) {
 	r := NewRegistry()
 	r.Sync([]string{"r1", "r2"})
-	r.Inc("r1", 200, 0)
-	r.Inc("r1", 200, 0)
-	r.Inc("r2", 503, 0)
+	r.Inc("r1", Observation{Status: 200, DurMs: 0})
+	r.Inc("r1", Observation{Status: 200, DurMs: 0})
+	r.Inc("r2", Observation{Status: 503, DurMs: 0})
 
 	lister := &staticLister{
 		routes: []RouteMetadata{
@@ -125,7 +125,7 @@ func TestTicker_MakeSnapshot_IdleRoutesIncluded(t *testing.T) {
 func TestTicker_MakeSnapshot_ListerError_EmptyRoutes(t *testing.T) {
 	r := NewRegistry()
 	r.Sync([]string{"r1"})
-	r.Inc("r1", 200, 0)
+	r.Inc("r1", Observation{Status: 200, DurMs: 0})
 
 	lister := &staticLister{err: errors.New("storage down")}
 	tk := NewTicker(r, NewBroadcaster(quietLogger()), lister)
@@ -183,7 +183,7 @@ func TestTicker_Run_PublishesAtTickInterval(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r := NewRegistry()
 		r.Sync([]string{"r1"})
-		r.Inc("r1", 200, 0)
+		r.Inc("r1", Observation{Status: 200, DurMs: 0})
 
 		br := NewBroadcaster(quietLogger())
 		s := br.Subscribe()

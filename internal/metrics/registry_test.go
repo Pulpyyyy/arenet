@@ -31,7 +31,7 @@ func TestRegistry_Inc_UnknownRoute_NoOp(t *testing.T) {
 	r := NewRegistry()
 	// No Sync, so no cells exist. Inc must not panic, must not
 	// silently create a cell.
-	r.Inc("unknown-id", 200, 0)
+	r.Inc("unknown-id", Observation{Status: 200, DurMs: 0})
 	if got := len(r.cells); got != 0 {
 		t.Errorf("cells map grew unexpectedly: %d", got)
 	}
@@ -41,9 +41,9 @@ func TestRegistry_Inc_2xx_OnlyReqs(t *testing.T) {
 	r := NewRegistry()
 	r.Sync([]string{"r1"})
 
-	r.Inc("r1", 200, 0)
-	r.Inc("r1", 201, 0)
-	r.Inc("r1", 204, 0)
+	r.Inc("r1", Observation{Status: 200, DurMs: 0})
+	r.Inc("r1", Observation{Status: 201, DurMs: 0})
+	r.Inc("r1", Observation{Status: 204, DurMs: 0})
 
 	got := r.Snapshot()
 	if got["r1"].Reqs != 3 {
@@ -58,10 +58,10 @@ func TestRegistry_Inc_5xx_BothCounters(t *testing.T) {
 	r := NewRegistry()
 	r.Sync([]string{"r1"})
 
-	r.Inc("r1", 500, 0)
-	r.Inc("r1", 502, 0)
-	r.Inc("r1", 503, 0)
-	r.Inc("r1", 599, 0)
+	r.Inc("r1", Observation{Status: 500, DurMs: 0})
+	r.Inc("r1", Observation{Status: 502, DurMs: 0})
+	r.Inc("r1", Observation{Status: 503, DurMs: 0})
+	r.Inc("r1", Observation{Status: 599, DurMs: 0})
 
 	got := r.Snapshot()
 	if got["r1"].Reqs != 4 {
@@ -79,11 +79,11 @@ func TestRegistry_Inc_4xx_TrackedSeparatelyFrom5xx(t *testing.T) {
 	r := NewRegistry()
 	r.Sync([]string{"r1"})
 
-	r.Inc("r1", 400, 0)
-	r.Inc("r1", 401, 0)
-	r.Inc("r1", 403, 0)
-	r.Inc("r1", 404, 0)
-	r.Inc("r1", 499, 0)
+	r.Inc("r1", Observation{Status: 400, DurMs: 0})
+	r.Inc("r1", Observation{Status: 401, DurMs: 0})
+	r.Inc("r1", Observation{Status: 403, DurMs: 0})
+	r.Inc("r1", Observation{Status: 404, DurMs: 0})
+	r.Inc("r1", Observation{Status: 499, DurMs: 0})
 
 	got := r.Snapshot()
 	if got["r1"].Reqs != 5 {
@@ -102,9 +102,9 @@ func TestRegistry_Inc_5xx_DoesNotIncrement4xx(t *testing.T) {
 	r := NewRegistry()
 	r.Sync([]string{"r1"})
 
-	r.Inc("r1", 500, 0)
-	r.Inc("r1", 502, 0)
-	r.Inc("r1", 503, 0)
+	r.Inc("r1", Observation{Status: 500, DurMs: 0})
+	r.Inc("r1", Observation{Status: 502, DurMs: 0})
+	r.Inc("r1", Observation{Status: 503, DurMs: 0})
 
 	got := r.Snapshot()
 	if got["r1"].Errs != 3 {
@@ -124,10 +124,10 @@ func TestRegistry_Inc_LatencyP95(t *testing.T) {
 	// 95 fast requests + 5 slow ones — the p95 should sit in
 	// the fast region, not in the slow tail.
 	for i := 0; i < 95; i++ {
-		r.Inc("r1", 200, 10) // 10 ms
+		r.Inc("r1", Observation{Status: 200, DurMs: 10}) // 10 ms
 	}
 	for i := 0; i < 5; i++ {
-		r.Inc("r1", 200, 1000) // 1000 ms
+		r.Inc("r1", Observation{Status: 200, DurMs: 1000}) // 1000 ms
 	}
 
 	got := r.Snapshot()
@@ -200,8 +200,8 @@ func TestRegistry_Sync_PreservesExistingCounters(t *testing.T) {
 	// Spec §11.2: route update in-place (same ID) preserves counters.
 	r := NewRegistry()
 	r.Sync([]string{"r1"})
-	r.Inc("r1", 200, 0)
-	r.Inc("r1", 503, 0)
+	r.Inc("r1", Observation{Status: 200, DurMs: 0})
+	r.Inc("r1", Observation{Status: 503, DurMs: 0})
 
 	// Re-sync with the same ID — counters MUST be preserved.
 	r.Sync([]string{"r1"})
@@ -240,7 +240,7 @@ func TestRegistry_Sync_NilSlice_DrainsAll(t *testing.T) {
 func TestRegistry_Sync_Idempotent(t *testing.T) {
 	r := NewRegistry()
 	r.Sync([]string{"r1", "r2"})
-	r.Inc("r1", 200, 0)
+	r.Inc("r1", Observation{Status: 200, DurMs: 0})
 
 	// Capture pointers; idempotency means the same cells survive.
 	r1Before := r.cells["r1"]
@@ -267,8 +267,8 @@ func TestRegistry_Snapshot_ResetsCounters(t *testing.T) {
 	r := NewRegistry()
 	r.Sync([]string{"r1"})
 
-	r.Inc("r1", 200, 0)
-	r.Inc("r1", 500, 0)
+	r.Inc("r1", Observation{Status: 200, DurMs: 0})
+	r.Inc("r1", Observation{Status: 500, DurMs: 0})
 
 	first := r.Snapshot()
 	if first["r1"].Reqs != 2 || first["r1"].Errs != 1 {
@@ -288,11 +288,11 @@ func TestRegistry_Snapshot_DeltasNotCumulative(t *testing.T) {
 	r := NewRegistry()
 	r.Sync([]string{"r1"})
 
-	r.Inc("r1", 200, 0)
-	r.Inc("r1", 200, 0)
+	r.Inc("r1", Observation{Status: 200, DurMs: 0})
+	r.Inc("r1", Observation{Status: 200, DurMs: 0})
 	first := r.Snapshot()
 
-	r.Inc("r1", 200, 0)
+	r.Inc("r1", Observation{Status: 200, DurMs: 0})
 	second := r.Snapshot()
 
 	if first["r1"].Reqs != 2 {
@@ -308,7 +308,7 @@ func TestRegistry_Snapshot_AllRoutesIncluded(t *testing.T) {
 	r := NewRegistry()
 	r.Sync([]string{"r1", "r2", "r3"})
 
-	r.Inc("r1", 200, 0)
+	r.Inc("r1", Observation{Status: 200, DurMs: 0})
 	// r2 and r3 are silent.
 
 	got := r.Snapshot()
@@ -363,7 +363,7 @@ func TestRegistry_ConcurrentIncAndSnapshot(t *testing.T) {
 		incWg.Add(1)
 		go func() {
 			defer incWg.Done()
-			r.Inc("r1", 200, 0)
+			r.Inc("r1", Observation{Status: 200, DurMs: 0})
 		}()
 	}
 	incWg.Wait()
@@ -398,7 +398,7 @@ func TestRegistry_ConcurrentIncAndSync(t *testing.T) {
 			case <-done:
 				return
 			default:
-				r.Inc("r1", 200, 0)
+				r.Inc("r1", Observation{Status: 200, DurMs: 0})
 			}
 		}
 	}()
@@ -427,7 +427,7 @@ func BenchmarkRegistry_Inc(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		r.Inc("r1", 200, 0)
+		r.Inc("r1", Observation{Status: 200, DurMs: 0})
 	}
 }
 
@@ -441,7 +441,7 @@ func BenchmarkRegistry_Snapshot_10Routes(b *testing.B) {
 	// Seed each cell with some traffic so Snapshot has work to do.
 	for _, id := range ids {
 		for k := 0; k < 100; k++ {
-			r.Inc(id, 200, 0)
+			r.Inc(id, Observation{Status: 200, DurMs: 0})
 		}
 	}
 
@@ -451,7 +451,7 @@ func BenchmarkRegistry_Snapshot_10Routes(b *testing.B) {
 		_ = r.Snapshot()
 		// Re-seed lightly to keep work non-trivial across iterations.
 		for _, id := range ids {
-			r.Inc(id, 200, 0)
+			r.Inc(id, Observation{Status: 200, DurMs: 0})
 		}
 	}
 }
@@ -465,7 +465,7 @@ func BenchmarkRegistry_Snapshot_100Routes(b *testing.B) {
 	r.Sync(ids)
 	for _, id := range ids {
 		for k := 0; k < 10; k++ {
-			r.Inc(id, 200, 0)
+			r.Inc(id, Observation{Status: 200, DurMs: 0})
 		}
 	}
 
@@ -474,7 +474,7 @@ func BenchmarkRegistry_Snapshot_100Routes(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = r.Snapshot()
 		for _, id := range ids {
-			r.Inc(id, 200, 0)
+			r.Inc(id, Observation{Status: 200, DurMs: 0})
 		}
 	}
 }

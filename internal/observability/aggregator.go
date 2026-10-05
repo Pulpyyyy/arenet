@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/barto95100/arenet/internal/histogram"
+	"github.com/barto95100/arenet/internal/metrics"
 )
 
 // TickDelta is one second of accumulated per-route counters
@@ -55,6 +56,20 @@ type TickDelta struct {
 	Fourxx         uint64
 	Fivexx         uint64
 	LatencyBuckets histogram.BucketCounts
+
+	// TTFBBuckets is the time-to-first-byte distribution. Kept apart
+	// from LatencyBuckets because latency runs to the last byte and so
+	// carries the visitor's download time; TTFB stops when the
+	// response committed. Its total can sit below Reqs — a hijacked
+	// connection has no first byte to time.
+	TTFBBuckets histogram.BucketCounts
+
+	// BytesOut is response body bytes the wire accepted this tick.
+	BytesOut uint64
+
+	// Hijacked counts connections taken over (a WebSocket upgrade),
+	// whose TTFB and bytes are unobservable rather than zero.
+	Hijacked uint64
 
 	// WafBlocks is the count of WAF block events to add to
 	// the current minute's accumulator. Distinct from the
@@ -167,7 +182,11 @@ type routeState struct {
 	// Summed, not maximised — see TickDelta's comment for why max()
 	// was never an approximation of a percentile.
 	latency histogram.BucketCounts
-	samples int // number of non-empty 1-second samples
+	// ttfb accumulates the same way. Summed, never maximised.
+	ttfb     histogram.BucketCounts
+	bytesOut int64
+	hijacked int64
+	samples  int // number of non-empty 1-second samples
 }
 
 // bucketSink is the minimal write surface the aggregator depends
@@ -399,13 +418,16 @@ func (a *Aggregator) BumpRateLimitExceeded(routeID string) {
 //
 // Non-blocking by construction: delegates to Ingest, which drops
 // silently when the ingress channel is full (AC #13).
-func (a *Aggregator) Consume(routeID string, reqs, fourxx, fivexx uint64, latency histogram.BucketCounts) {
+func (a *Aggregator) Consume(routeID string, d metrics.Delta) {
 	a.Ingest(TickDelta{
 		RouteID:        routeID,
-		Reqs:           reqs,
-		Fourxx:         fourxx,
-		Fivexx:         fivexx,
-		LatencyBuckets: latency,
+		Reqs:           d.Reqs,
+		Fourxx:         d.Errs4xx,
+		Fivexx:         d.Errs,
+		LatencyBuckets: d.LatencyBuckets,
+		TTFBBuckets:    d.TTFBBuckets,
+		BytesOut:       d.BytesOut,
+		Hijacked:       d.Hijacked,
 	})
 }
 
@@ -509,6 +531,9 @@ func (a *Aggregator) absorb(d TickDelta) {
 	rs.crowdsecDecisions += int64(d.CrowdSecDecisions)
 	rs.rateLimits += int64(d.RateLimitExceeded)
 	rs.latency.Add(d.LatencyBuckets)
+	rs.ttfb.Add(d.TTFBBuckets)
+	rs.bytesOut += int64(d.BytesOut)
+	rs.hijacked += int64(d.Hijacked)
 	if d.Reqs > 0 {
 		rs.samples++
 	}

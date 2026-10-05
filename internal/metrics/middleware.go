@@ -289,7 +289,17 @@ func (h *RouteMetricsHandler) ServeHTTP(
 		// counter only — identical to the pre-Phase-1 Inc
 		// behavior. So this swap is wire-compatible for every
 		// route that doesn't yet have KnownHosts emitted.
-		h.registry.IncByHost(h.RouteID, matchedHost, status, durMs)
+		h.registry.IncByHost(h.RouteID, matchedHost, Observation{
+			Status: status,
+			DurMs:  durMs,
+			// TTFBValid rather than "TTFBMs != 0": a response that
+			// commits in under a microsecond measures 0.000 ms, so
+			// zero cannot tell "instant" from "never wrote anything".
+			TTFBMs:    rec.ttfbMs,
+			TTFBValid: rec.ttfbCommitted,
+			BytesOut:  rec.bytesOut,
+			Hijacked:  rec.hijacked,
+		})
 
 		// V.1.2 / V.1.3 — normal-traffic geo emission. Read
 		// the sink LIVE from the global atomic pointer; a

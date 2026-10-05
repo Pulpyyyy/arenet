@@ -28,8 +28,8 @@ func TestIncByHost_BumpsBothRouteAndHost(t *testing.T) {
 	r := NewRegistry()
 	r.Sync([]string{"r1"})
 
-	r.IncByHost("r1", "api.example.com", 200, 0)
-	r.IncByHost("r1", "api.example.com", 200, 0)
+	r.IncByHost("r1", "api.example.com", Observation{Status: 200, DurMs: 0})
+	r.IncByHost("r1", "api.example.com", Observation{Status: 200, DurMs: 0})
 
 	// Route cell must have 2 reqs (per-host bump did NOT
 	// double-count).
@@ -62,8 +62,8 @@ func TestIncByHost_EmptyHost_BumpsRouteOnly(t *testing.T) {
 	r := NewRegistry()
 	r.Sync([]string{"r1"})
 
-	r.IncByHost("r1", "", 200, 0)
-	r.IncByHost("r1", "", 500, 0)
+	r.IncByHost("r1", "", Observation{Status: 200, DurMs: 0})
+	r.IncByHost("r1", "", Observation{Status: 500, DurMs: 0})
 
 	got := r.Snapshot()
 	if got["r1"].Reqs != 2 {
@@ -92,7 +92,7 @@ func TestIncByHost_UnknownRoute_NoOp(t *testing.T) {
 	// AND must not create a host cell either.
 	r := NewRegistry()
 
-	r.IncByHost("ghost-route", "api.example.com", 200, 0)
+	r.IncByHost("ghost-route", "api.example.com", Observation{Status: 200, DurMs: 0})
 
 	if len(r.cells) != 0 {
 		t.Errorf("route cells map grew: %d", len(r.cells))
@@ -111,11 +111,11 @@ func TestIncByHost_MultipleHostsPerRoute(t *testing.T) {
 	r := NewRegistry()
 	r.Sync([]string{"r1"})
 
-	r.IncByHost("r1", "primary.example.com", 200, 0)
-	r.IncByHost("r1", "primary.example.com", 200, 0)
-	r.IncByHost("r1", "primary.example.com", 200, 0)
-	r.IncByHost("r1", "alias1.example.com", 200, 0)
-	r.IncByHost("r1", "alias2.example.com", 404, 0)
+	r.IncByHost("r1", "primary.example.com", Observation{Status: 200, DurMs: 0})
+	r.IncByHost("r1", "primary.example.com", Observation{Status: 200, DurMs: 0})
+	r.IncByHost("r1", "primary.example.com", Observation{Status: 200, DurMs: 0})
+	r.IncByHost("r1", "alias1.example.com", Observation{Status: 200, DurMs: 0})
+	r.IncByHost("r1", "alias2.example.com", Observation{Status: 404, DurMs: 0})
 
 	got := r.Snapshot()
 	if got["r1"].Reqs != 5 {
@@ -156,8 +156,8 @@ func TestIncByHost_SyncRemoval_DropsHostCells(t *testing.T) {
 	r := NewRegistry()
 	r.Sync([]string{"r1", "r2"})
 
-	r.IncByHost("r1", "a.example.com", 200, 0)
-	r.IncByHost("r2", "b.example.com", 200, 0)
+	r.IncByHost("r1", "a.example.com", Observation{Status: 200, DurMs: 0})
+	r.IncByHost("r2", "b.example.com", Observation{Status: 200, DurMs: 0})
 
 	// Drop r1, keep r2.
 	r.Sync([]string{"r2"})
@@ -204,7 +204,7 @@ func TestIncByHost_ConcurrentSafe(t *testing.T) {
 				if i%2 == 1 {
 					host = "alias.example.com"
 				}
-				r.IncByHost("r1", host, 200, 0)
+				r.IncByHost("r1", host, Observation{Status: 200, DurMs: 0})
 			}
 		}()
 	}

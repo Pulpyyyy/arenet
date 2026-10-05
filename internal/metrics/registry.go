@@ -90,6 +90,30 @@ type counterCell struct {
 	errs    uint64 // 5xx responses since last Snapshot (Step E name preserved)
 	errs4xx uint64 // 4xx responses since last Snapshot (Step L)
 	latency latencyHist
+
+	// ttfb is the time-to-first-byte distribution, kept apart from
+	// latency because the two answer different questions: latency runs
+	// to the last byte and so includes the visitor's download, while
+	// ttfb stops when the response commits. An asset measured at
+	// 0.108 s ttfb and 24 s total on a real instance is the same
+	// request seen by both.
+	//
+	// Only requests that actually committed a response are observed
+	// here, so its total can be lower than reqs — a hijacked
+	// connection and a handler that errored without writing have no
+	// first byte to time.
+	ttfb latencyHist
+
+	// bytesOut is response body bytes accepted by the wire since the
+	// last Snapshot. Headers excluded; anything after a Hijack
+	// excluded (see hijacked).
+	bytesOut uint64
+
+	// hijacked counts requests whose connection was taken over, which
+	// is what a WebSocket upgrade does. Their ttfb and bytesOut are
+	// unobservable BY CONSTRUCTION, so the count is carried instead of
+	// letting them read as instant zero-byte responses.
+	hijacked uint64
 }
 
 // latencyHist is the metrics-package-internal copy of the
@@ -184,21 +208,67 @@ func NewRegistry() *Registry {
 // Hot path. Must not allocate, must not perform I/O. AC #13: a
 // metrics-DB failure later in the pipeline must not propagate
 // here — Inc only mutates in-memory atomic state.
-func (r *Registry) Inc(routeID string, status int, durMs float64) {
+// Observation is everything one finished request contributes to the
+// counters.
+//
+// A struct rather than seven positional parameters: Inc used to take
+// (routeID, status, durMs) and the three measurements added by the
+// latency-truth work would have pushed it to six, four of them
+// numeric. Positional numerics of the same type are how a DurMs and a
+// TTFBMs get silently swapped, and nothing in the tests would notice
+// because both are plausible milliseconds.
+type Observation struct {
+	Status int
+
+	// DurMs is the TOTAL duration, response body transfer included.
+	DurMs float64
+
+	// TTFBMs is the time to the moment the response committed. Read it
+	// only when TTFBValid — a response that commits in under a
+	// microsecond measures 0.000 after the integer-microsecond
+	// division, so zero cannot distinguish "instant" from "never".
+	// That conflation is the bug the G3 gate caught on its first run.
+	TTFBMs    float64
+	TTFBValid bool
+
+	// BytesOut is response body bytes the wire accepted.
+	BytesOut uint64
+
+	// Hijacked is true when the connection was taken over, making
+	// TTFBMs and BytesOut unobservable rather than zero.
+	Hijacked bool
+}
+
+// observe folds one request into a cell. Hot path: atomics only, no
+// allocation, no I/O.
+func (c *counterCell) observe(obs Observation) {
+	atomic.AddUint64(&c.reqs, 1)
+	switch {
+	case obs.Status >= 500:
+		atomic.AddUint64(&c.errs, 1)
+	case obs.Status >= 400:
+		atomic.AddUint64(&c.errs4xx, 1)
+	}
+	c.latency.observe(obs.DurMs)
+	if obs.TTFBValid {
+		c.ttfb.observe(obs.TTFBMs)
+	}
+	if obs.BytesOut > 0 {
+		atomic.AddUint64(&c.bytesOut, obs.BytesOut)
+	}
+	if obs.Hijacked {
+		atomic.AddUint64(&c.hijacked, 1)
+	}
+}
+
+func (r *Registry) Inc(routeID string, obs Observation) {
 	r.mu.RLock()
 	cell, ok := r.cells[routeID]
 	r.mu.RUnlock()
 	if !ok {
 		return
 	}
-	atomic.AddUint64(&cell.reqs, 1)
-	switch {
-	case status >= 500:
-		atomic.AddUint64(&cell.errs, 1)
-	case status >= 400:
-		atomic.AddUint64(&cell.errs4xx, 1)
-	}
-	cell.latency.observe(durMs)
+	cell.observe(obs)
 }
 
 // IncByHost records a single request against routeID AND, when host
@@ -226,7 +296,7 @@ func (r *Registry) Inc(routeID string, status int, durMs float64) {
 // map is created lazily on the first hit for a host; subsequent
 // hits use the cached cell pointer via the RLock + atomic add
 // pattern).
-func (r *Registry) IncByHost(routeID, host string, status int, durMs float64) {
+func (r *Registry) IncByHost(routeID, host string, obs Observation) {
 	r.mu.RLock()
 	routeCell, ok := r.cells[routeID]
 	if !ok {
@@ -242,14 +312,7 @@ func (r *Registry) IncByHost(routeID, host string, status int, durMs float64) {
 	r.mu.RUnlock()
 
 	// Route-level bump (always).
-	atomic.AddUint64(&routeCell.reqs, 1)
-	switch {
-	case status >= 500:
-		atomic.AddUint64(&routeCell.errs, 1)
-	case status >= 400:
-		atomic.AddUint64(&routeCell.errs4xx, 1)
-	}
-	routeCell.latency.observe(durMs)
+	routeCell.observe(obs)
 
 	if host == "" {
 		return
@@ -280,14 +343,7 @@ func (r *Registry) IncByHost(routeID, host string, status int, durMs float64) {
 		r.mu.Unlock()
 	}
 
-	atomic.AddUint64(&hostCell.reqs, 1)
-	switch {
-	case status >= 500:
-		atomic.AddUint64(&hostCell.errs, 1)
-	case status >= 400:
-		atomic.AddUint64(&hostCell.errs4xx, 1)
-	}
-	hostCell.latency.observe(durMs)
+	hostCell.observe(obs)
 }
 
 // Sync reconciles the Registry's cells with the canonical list of
@@ -371,6 +427,9 @@ func (r *Registry) Snapshot() map[string]Delta {
 			Errs:           errs,
 			Errs4xx:        errs4xx,
 			LatencyBuckets: cell.latency.drainBuckets(),
+			TTFBBuckets:    cell.ttfb.drainBuckets(),
+			BytesOut:       atomic.SwapUint64(&cell.bytesOut, 0),
+			Hijacked:       atomic.SwapUint64(&cell.hijacked, 0),
 		}
 	}
 	return out
@@ -417,6 +476,9 @@ func (r *Registry) SnapshotHosts() []HostDelta {
 				Errs:           errs,
 				Errs4xx:        errs4xx,
 				LatencyBuckets: cell.latency.drainBuckets(),
+				TTFBBuckets:    cell.ttfb.drainBuckets(),
+				BytesOut:       atomic.SwapUint64(&cell.bytesOut, 0),
+				Hijacked:       atomic.SwapUint64(&cell.hijacked, 0),
 			})
 		}
 	}
