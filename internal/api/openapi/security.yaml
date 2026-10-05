@@ -881,7 +881,36 @@ paths:
           required: true
           schema:
             type: string
-            enum: [req_per_sec, four_xx_rate, five_xx_rate, p95_latency_ms, waf_block_rate, throttle_block_rate, auth_failure_rate, crowdsec_decision_rate, rate_limit_rate]
+            enum: [req_per_sec, four_xx_rate, five_xx_rate, p95_latency_ms, total_ms, ttfb_ms, bytes_out, waf_block_rate, throttle_block_rate, auth_failure_rate, crowdsec_decision_rate, rate_limit_rate]
+          description: |
+            `total_ms` and `ttfb_ms` are computed from the stored latency
+            distributions and honour `quantile`. Total runs to the last byte,
+            so it carries the visitor's download time; TTFB stops when the
+            response committed. The gap between them is what tells an operator
+            whether a slow route is their backend or their visitors' bandwidth.
+
+            `bytes_out` is a sum, not a percentile.
+
+            `p95_latency_ms` is legacy from schema v15 onward: it reads the
+            scalar column, which is a correct p95 but fixed at p95. Prefer
+            `total_ms`.
+        - name: quantile
+          in: query
+          required: false
+          description: |
+            Applies to `total_ms` and `ttfb_ms` only; ignored by counts and
+            sums. Defaults to `p95`, which is what every caller written before
+            this parameter receives.
+
+            Only three values are offered, each being a decision an operator
+            makes rather than a free dial. A free-form value would invite
+            asking for p99.99 of a window holding a few hundred requests — a
+            figure the data cannot support, which would then be suppressed,
+            leaving an empty chart and no explanation.
+          schema:
+            type: string
+            enum: [p50, p95, p99]
+            default: p95
         - $ref: '#/components/parameters/SecWindow'
       responses:
         '200':
@@ -904,7 +933,24 @@ paths:
                       required: [ts, value]
                       properties:
                         ts: { type: string, format: date-time }
-                        value: { type: [number, 'null'] }
+                        value:
+                          type: [number, 'null']
+                          description: |
+                            null is a BREAK in the series, never zero. For a
+                            count metric a missing bucket is a real
+                            measurement of no traffic and returns 0; for a
+                            latency metric there is nothing to report, which
+                            covers three cases: the bucket predates schema
+                            v15 and has no distribution, nothing observable
+                            was recorded in it, or it holds too few
+                            observations for the quantile asked for.
+
+                            That last case is why a quiet route shows gaps at
+                            one-minute granularity and fills in at one hour:
+                            twenty observations is a lot for a minute and
+                            nothing for an hour. Drawing a line through those
+                            points would be drawing maxima labelled as
+                            percentiles.
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }

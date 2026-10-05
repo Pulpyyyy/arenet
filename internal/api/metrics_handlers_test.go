@@ -40,6 +40,7 @@ type fakeMetricsReader struct {
 	queryFn           func(ctx context.Context, gran observability.Granularity, routeID string, from, to time.Time) ([]observability.MetricBucket, error)
 	queryAggregatedFn func(ctx context.Context, gran observability.Granularity, from, to time.Time) ([]observability.MetricBucket, error)
 	aggregateHistFn   func(ctx context.Context, gran observability.Granularity, routeID string, from, to time.Time) (observability.HistogramAggregate, error)
+	aggregateByBucket func(ctx context.Context, gran observability.Granularity, from, to time.Time) ([]observability.MetricBucket, error)
 }
 
 func (f *fakeMetricsReader) Query(ctx context.Context, gran observability.Granularity, routeID string, from, to time.Time) ([]observability.MetricBucket, error) {
@@ -61,6 +62,13 @@ func (f *fakeMetricsReader) AggregateHistogram(ctx context.Context, gran observa
 		return f.aggregateHistFn(ctx, gran, routeID, from, to)
 	}
 	return observability.HistogramAggregate{}, nil
+}
+
+func (f *fakeMetricsReader) AggregateHistogramByBucket(ctx context.Context, gran observability.Granularity, from, to time.Time) ([]observability.MetricBucket, error) {
+	if f.aggregateByBucket != nil {
+		return f.aggregateByBucket(ctx, gran, from, to)
+	}
+	return nil, nil
 }
 
 // metricsTestEnv builds a Handler + auto-auth router specifically
@@ -2111,5 +2119,307 @@ func TestMetricsRouteSummary_HistogramErrorIs503(t *testing.T) {
 	m.router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503 — a read failure must not look like an idle route", rec.Code)
+	}
+}
+
+// --- /metrics/timeseries: the distribution-backed metrics -------------------
+
+// seedTimeseriesHistogram returns a reader whose Query hands back one
+// bucket carrying a distribution, so these tests exercise the
+// handler's quantile and gap-fill decisions.
+func seedTimeseriesHistogram(t *testing.T, m *metricsTestEnv, hists []histogram.BucketCounts) {
+	t.Helper()
+	m.env.handler.SetMetricsReader(&fakeMetricsReader{
+		queryFn: func(_ context.Context, _ observability.Granularity, _ string, from, _ time.Time) ([]observability.MetricBucket, error) {
+			rows := make([]observability.MetricBucket, 0, len(hists))
+			for i, h := range hists {
+				b := observability.MetricBucket{
+					Ts:       from.Add(time.Duration(i) * time.Minute),
+					ReqCount: h.Total(),
+					BytesOut: int64(1000 * (i + 1)),
+				}
+				if h.Total() > 0 {
+					hh := h
+					b.TotalHist = &hh
+					b.TTFBHist = &hh
+				}
+				rows = append(rows, b)
+			}
+			return rows, nil
+		},
+	})
+}
+
+func histOf(n int, ms float64) histogram.BucketCounts {
+	s := make([]float64, n)
+	for i := range s {
+		s[i] = ms
+	}
+	return histogram.Of(s)
+}
+
+// timeseriesValues pulls the non-null values out of a response.
+func timeseriesValues(t *testing.T, body []byte) []float64 {
+	t.Helper()
+	var resp struct {
+		Points []struct {
+			Value *float64 `json:"value"`
+		} `json:"points"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("unmarshal: %v; body=%s", err, body)
+	}
+	out := []float64{}
+	for _, p := range resp.Points {
+		if p.Value != nil {
+			out = append(out, *p.Value)
+		}
+	}
+	return out
+}
+
+func TestMetricsTimeseries_TotalAndTtfbAreServed(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	seedTimeseriesHistogram(t, m, []histogram.BucketCounts{histOf(100, 40)})
+
+	for _, metric := range []string{"total_ms", "ttfb_ms", "bytes_out"} {
+		t.Run(metric, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet,
+				"/api/v1/metrics/timeseries?route="+m.routeID+"&metric="+metric+"&window=24h", nil)
+			rec := httptest.NewRecorder()
+			m.router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			if len(timeseriesValues(t, rec.Body.Bytes())) == 0 {
+				t.Errorf("no values returned for %s", metric)
+			}
+		})
+	}
+}
+
+// TestMetricsTimeseries_QuantileChangesTheAnswer — the parameter has to
+// actually do something, and on a bimodal population it does something
+// large. This is the shape a long-polling route has, and the reason
+// the selector is load-bearing: at p95 the slow mass is invisible.
+func TestMetricsTimeseries_QuantileChangesTheAnswer(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	// 900 fast requests, 100 slow ones: the slow tenth sits above p95
+	// but below p99's reach... p99 lands inside it.
+	var h histogram.BucketCounts
+	h.Add(histOf(900, 10))
+	h.Add(histOf(100, 9000))
+	seedTimeseriesHistogram(t, m, []histogram.BucketCounts{h})
+
+	got := map[string]float64{}
+	for _, q := range []string{"p50", "p95", "p99"} {
+		req := httptest.NewRequest(http.MethodGet,
+			"/api/v1/metrics/timeseries?route="+m.routeID+"&metric=total_ms&window=24h&quantile="+q, nil)
+		rec := httptest.NewRecorder()
+		m.router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d; body=%s", q, rec.Code, rec.Body.String())
+		}
+		vals := timeseriesValues(t, rec.Body.Bytes())
+		if len(vals) == 0 {
+			t.Fatalf("%s: no value returned", q)
+		}
+		got[q] = vals[0]
+	}
+
+	if !(got["p50"] <= got["p95"] && got["p95"] <= got["p99"]) {
+		t.Errorf("quantiles are not ordered: p50=%v p95=%v p99=%v", got["p50"], got["p95"], got["p99"])
+	}
+	// p50 must find the fast mass and p99 the slow one. If the
+	// parameter were ignored all three would be equal.
+	if got["p50"] > 100 {
+		t.Errorf("p50 = %v ms, want the fast mass (~10 ms)", got["p50"])
+	}
+	if got["p99"] < 4096 {
+		t.Errorf("p99 = %v ms, want the slow mass (~9000 ms) — the quantile parameter is being ignored", got["p99"])
+	}
+}
+
+// TestMetricsTimeseries_DefaultQuantileIsP95 — every caller written
+// before this parameter must keep getting what it got.
+func TestMetricsTimeseries_DefaultQuantileIsP95(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	var h histogram.BucketCounts
+	h.Add(histOf(900, 10))
+	h.Add(histOf(100, 9000))
+	seedTimeseriesHistogram(t, m, []histogram.BucketCounts{h})
+
+	fetch := func(qs string) float64 {
+		req := httptest.NewRequest(http.MethodGet,
+			"/api/v1/metrics/timeseries?route="+m.routeID+"&metric=total_ms&window=24h"+qs, nil)
+		rec := httptest.NewRecorder()
+		m.router.ServeHTTP(rec, req)
+		vals := timeseriesValues(t, rec.Body.Bytes())
+		if len(vals) == 0 {
+			t.Fatalf("no value for %q", qs)
+		}
+		return vals[0]
+	}
+	if fetch("") != fetch("&quantile=p95") {
+		t.Errorf("absent quantile = %v, explicit p95 = %v; they must agree", fetch(""), fetch("&quantile=p95"))
+	}
+}
+
+func TestMetricsTimeseries_BadQuantileIs400(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	for _, q := range []string{"p999", "0.95", "median", "p0"} {
+		req := httptest.NewRequest(http.MethodGet,
+			"/api/v1/metrics/timeseries?route="+m.routeID+"&metric=total_ms&window=24h&quantile="+q, nil)
+		rec := httptest.NewRecorder()
+		m.router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("quantile=%q: status = %d, want 400", q, rec.Code)
+		}
+	}
+}
+
+// TestMetricsTimeseries_ThinBucketIsNullNotZero is the contract that
+// keeps a quiet route honest.
+//
+// A bucket holding fewer observations than the quantile needs has no
+// percentile to report, and the chart must break rather than draw a
+// point. Zero would be a fake dip to instant; a number would be the
+// slowest request wearing a percentile's name — the defect this whole
+// subsystem was rebuilt to remove.
+func TestMetricsTimeseries_ThinBucketIsNullNotZero(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	thin := int(histogram.MinSamplesFor(0.95)) - 1
+	seedTimeseriesHistogram(t, m, []histogram.BucketCounts{
+		histOf(thin, 40), // too few for a p95
+		histOf(100, 40),  // plenty
+	})
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/metrics/timeseries?route="+m.routeID+"&metric=total_ms&window=24h", nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+
+	var resp struct {
+		Points []struct {
+			Value *float64 `json:"value"`
+		} `json:"points"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Points) < 2 {
+		t.Fatalf("points = %d, want at least 2", len(resp.Points))
+	}
+	if resp.Points[0].Value != nil {
+		t.Errorf("bucket with %d observations returned %v; want null — ceil(0.95*%d) == %d makes that figure the maximum",
+			thin, *resp.Points[0].Value, thin, thin)
+	}
+	if resp.Points[1].Value == nil {
+		t.Errorf("bucket with 100 observations returned null; the threshold is suppressing real data")
+	}
+}
+
+// TestMetricsTimeseries_MissingBucketIsNullForLatencyZeroForCounts —
+// the pre-existing contract, extended to the new metrics. A count of
+// zero IS a measurement; a latency of zero never is.
+func TestMetricsTimeseries_MissingBucketIsNullForLatencyZeroForCounts(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	m.env.handler.SetMetricsReader(&fakeMetricsReader{}) // no rows at all
+
+	for _, tc := range []struct {
+		metric   string
+		wantNull bool
+	}{
+		{"total_ms", true},
+		{"ttfb_ms", true},
+		{"req_per_sec", false},
+		{"bytes_out", false},
+	} {
+		t.Run(tc.metric, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet,
+				"/api/v1/metrics/timeseries?route="+m.routeID+"&metric="+tc.metric+"&window=24h", nil)
+			rec := httptest.NewRecorder()
+			m.router.ServeHTTP(rec, req)
+
+			var resp struct {
+				Points []struct {
+					Value *float64 `json:"value"`
+				} `json:"points"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if len(resp.Points) == 0 {
+				t.Fatal("no points returned")
+			}
+			gotNull := resp.Points[0].Value == nil
+			if gotNull != tc.wantNull {
+				t.Errorf("%s on an empty bucket: null=%v, want %v", tc.metric, gotNull, tc.wantNull)
+			}
+		})
+	}
+}
+
+// TestMetricsTimeseries_AllSentinelSumsHistograms — QueryAggregated
+// groups in SQL and SQLite cannot add blobs, so the "all" view has to
+// take the other path. If it took the SQL one the rows would carry no
+// distribution and every point would be null.
+func TestMetricsTimeseries_AllSentinelSumsHistograms(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	called := false
+	m.env.handler.SetMetricsReader(&fakeMetricsReader{
+		queryAggregatedFn: func(context.Context, observability.Granularity, time.Time, time.Time) ([]observability.MetricBucket, error) {
+			t.Error("the SQL aggregate path was used for a distribution-backed metric; it cannot sum blobs")
+			return nil, nil
+		},
+		aggregateByBucket: func(_ context.Context, _ observability.Granularity, from, _ time.Time) ([]observability.MetricBucket, error) {
+			called = true
+			h := histOf(100, 40)
+			return []observability.MetricBucket{
+				{Ts: from, ReqCount: 100, TotalHist: &h, TTFBHist: &h},
+			}, nil
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/metrics/timeseries?route=all&metric=total_ms&window=24h", nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	if !called {
+		t.Error("AggregateHistogramByBucket was never called")
+	}
+	if len(timeseriesValues(t, rec.Body.Bytes())) == 0 {
+		t.Error("no values for route=all")
+	}
+}
+
+// TestMetricsTimeseries_AllSentinelStillUsesSQLForCounts — the mirror
+// case. A count metric must NOT pay for the Go-side grouping.
+func TestMetricsTimeseries_AllSentinelStillUsesSQLForCounts(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	sqlPath := false
+	m.env.handler.SetMetricsReader(&fakeMetricsReader{
+		queryAggregatedFn: func(_ context.Context, _ observability.Granularity, from, _ time.Time) ([]observability.MetricBucket, error) {
+			sqlPath = true
+			return []observability.MetricBucket{{Ts: from, ReqCount: 7}}, nil
+		},
+		aggregateByBucket: func(context.Context, observability.Granularity, time.Time, time.Time) ([]observability.MetricBucket, error) {
+			t.Error("the Go grouping path was used for a plain count")
+			return nil, nil
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/metrics/timeseries?route=all&metric=req_per_sec&window=24h", nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	if !sqlPath {
+		t.Error("QueryAggregated was never called for a count metric")
 	}
 }
