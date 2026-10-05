@@ -27,6 +27,7 @@ import (
 
 	"github.com/barto95100/arenet/internal/audit"
 	"github.com/barto95100/arenet/internal/auth"
+	"github.com/barto95100/arenet/internal/histogram"
 	"github.com/barto95100/arenet/internal/observability"
 	"github.com/barto95100/arenet/internal/storage"
 )
@@ -38,6 +39,7 @@ import (
 type fakeMetricsReader struct {
 	queryFn           func(ctx context.Context, gran observability.Granularity, routeID string, from, to time.Time) ([]observability.MetricBucket, error)
 	queryAggregatedFn func(ctx context.Context, gran observability.Granularity, from, to time.Time) ([]observability.MetricBucket, error)
+	aggregateHistFn   func(ctx context.Context, gran observability.Granularity, routeID string, from, to time.Time) (observability.HistogramAggregate, error)
 }
 
 func (f *fakeMetricsReader) Query(ctx context.Context, gran observability.Granularity, routeID string, from, to time.Time) ([]observability.MetricBucket, error) {
@@ -52,6 +54,13 @@ func (f *fakeMetricsReader) QueryAggregated(ctx context.Context, gran observabil
 		return f.queryAggregatedFn(ctx, gran, from, to)
 	}
 	return nil, nil
+}
+
+func (f *fakeMetricsReader) AggregateHistogram(ctx context.Context, gran observability.Granularity, routeID string, from, to time.Time) (observability.HistogramAggregate, error) {
+	if f.aggregateHistFn != nil {
+		return f.aggregateHistFn(ctx, gran, routeID, from, to)
+	}
+	return observability.HistogramAggregate{}, nil
 }
 
 // metricsTestEnv builds a Handler + auto-auth router specifically
@@ -1871,5 +1880,236 @@ func TestMetricsRouteSummary_QueryError_503(t *testing.T) {
 	m.router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503 — a read failure must not look like zero traffic", rec.Code)
+	}
+}
+
+// --- /metrics/route-summary: the v15 quantiles -------------------------------
+
+// seedHistogramAggregate wires a fake reader that returns a fixed
+// HistogramAggregate, so these tests exercise the handler's
+// decision-making rather than the storage layer's summation (which
+// internal/observability already proves exact).
+func seedHistogramAggregate(t *testing.T, m *metricsTestEnv, agg observability.HistogramAggregate) {
+	t.Helper()
+	m.env.handler.SetMetricsReader(&fakeMetricsReader{
+		aggregateHistFn: func(context.Context, observability.Granularity, string, time.Time, time.Time) (observability.HistogramAggregate, error) {
+			return agg, nil
+		},
+	})
+}
+
+func fastHistogram(n int) histogram.BucketCounts {
+	samples := make([]float64, n)
+	for i := range samples {
+		samples[i] = 40
+	}
+	return histogram.Of(samples)
+}
+
+// TestMetricsRouteSummary_V15WireShape pins the literal JSON. A typed
+// decode would pass against a camelCase mismatch the frontend cannot
+// read, which has shipped here once already.
+func TestMetricsRouteSummary_V15WireShape(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	total := fastHistogram(100)
+	ttfb := histogram.Of(func() []float64 {
+		s := make([]float64, 100)
+		for i := range s {
+			s[i] = 5
+		}
+		return s
+	}())
+	seedHistogramAggregate(t, m, observability.HistogramAggregate{
+		Total: total, TTFB: ttfb,
+		Rows: 24, RowsWithHistogram: 24,
+		BytesOut: 2_899_675, HijackedCount: 3, ReqCount: 100,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/route-summary?route="+m.routeID, nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var wire map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, key := range []string{"totalMs", "ttfbMs", "samples", "bytesOut", "hijacked"} {
+		if _, ok := wire[key]; !ok {
+			t.Errorf("wire key %q missing; got %s", key, rec.Body.String())
+		}
+	}
+	if got := wire["samples"]; got != float64(100) {
+		t.Errorf("samples = %v, want 100", got)
+	}
+	if got := wire["bytesOut"]; got != float64(2_899_675) {
+		t.Errorf("bytesOut = %v, want 2899675", got)
+	}
+	if got := wire["hijacked"]; got != float64(3) {
+		t.Errorf("hijacked = %v, want 3", got)
+	}
+	// TTFB must be well below total: that separation is the point.
+	ttfbMs, totalMs := wire["ttfbMs"], wire["totalMs"]
+	if ttfbMs == nil || totalMs == nil {
+		t.Fatalf("quantiles are null with 100 samples: ttfb=%v total=%v", ttfbMs, totalMs)
+	}
+	if ttfbMs.(float64) >= totalMs.(float64) {
+		t.Errorf("ttfbMs %v is not below totalMs %v", ttfbMs, totalMs)
+	}
+	// partialHistogram carries omitempty: absent means "complete".
+	if _, present := wire["partialHistogram"]; present {
+		t.Errorf("partialHistogram present on a complete window; want omitted")
+	}
+}
+
+// TestMetricsRouteSummary_BelowThresholdIsNull is the contract that
+// matters most here.
+//
+// With nineteen samples, ceil(0.95*19) == 19: the "p95" IS the slowest
+// request. Publishing it would reintroduce, at the read layer, exactly
+// the defect this whole design removed from the write layer.
+func TestMetricsRouteSummary_BelowThresholdIsNull(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	n := int(histogram.MinSamplesFor(0.95)) - 1
+	if n < 1 {
+		t.Fatalf("threshold %d leaves no room for this test", histogram.MinSamplesFor(0.95))
+	}
+	total := fastHistogram(n)
+	seedHistogramAggregate(t, m, observability.HistogramAggregate{
+		Total: total, TTFB: total, Rows: 1, RowsWithHistogram: 1, ReqCount: int64(n),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/route-summary?route="+m.routeID, nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+
+	var wire map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if v := wire["totalMs"]; v != nil {
+		t.Errorf("totalMs = %v with %d samples; want null — at %d samples the 95th percentile is the maximum", v, n, n)
+	}
+	if v := wire["ttfbMs"]; v != nil {
+		t.Errorf("ttfbMs = %v with %d samples; want null", v, n)
+	}
+	// But the count is still reported, so the operator can see WHY
+	// there is no figure rather than being shown a blank.
+	if got := wire["samples"]; got != float64(n) {
+		t.Errorf("samples = %v, want %d — a suppressed quantile must still say how little data it had", got, n)
+	}
+}
+
+// TestMetricsRouteSummary_AtThresholdPublishes — the boundary in the
+// other direction, so the gate cannot drift into suppressing real
+// data.
+func TestMetricsRouteSummary_AtThresholdPublishes(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	n := int(histogram.MinSamplesFor(0.95))
+	total := fastHistogram(n)
+	seedHistogramAggregate(t, m, observability.HistogramAggregate{
+		Total: total, TTFB: total, Rows: 1, RowsWithHistogram: 1, ReqCount: int64(n),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/route-summary?route="+m.routeID, nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+
+	var wire map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if wire["totalMs"] == nil {
+		t.Errorf("totalMs is null at exactly %d samples; the threshold is inclusive", n)
+	}
+}
+
+// TestMetricsRouteSummary_TTFBGatedOnItsOwnCount — TTFB is observed
+// only on requests that committed a response, so its population is its
+// own and must meet the threshold on its own.
+//
+// The fixture gives TTFB a SMALL BUT NON-EMPTY population on purpose.
+// An empty one proves nothing: Quantile already returns a zero count
+// for it and the inner guard suppresses the field whatever the
+// threshold does. Only a population that is non-empty and below
+// twenty exercises the gate — a route mostly serving WebSocket
+// upgrades, with a handful of ordinary requests among them.
+//
+// The first version of this test used an empty histogram and passed
+// with the threshold replaced by `if true`. Fault injection caught the
+// test, not the code.
+func TestMetricsRouteSummary_TTFBGatedOnItsOwnCount(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	ttfbN := int(histogram.MinSamplesFor(0.95)) - 1
+	seedHistogramAggregate(t, m, observability.HistogramAggregate{
+		Total: fastHistogram(100),
+		TTFB:  fastHistogram(ttfbN),
+		Rows:  24, RowsWithHistogram: 24, HijackedCount: 100 - int64(ttfbN), ReqCount: 100,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/route-summary?route="+m.routeID, nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+
+	var wire map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if wire["totalMs"] == nil {
+		t.Error("totalMs is null though the total population is 100")
+	}
+	if v := wire["ttfbMs"]; v != nil {
+		t.Errorf("ttfbMs = %v with only %d committed responses; want null — TTFB must meet the threshold on its OWN population, not on the total's",
+			v, ttfbN)
+	}
+	// And the reason has to be visible: most requests were hijacked,
+	// so they never had a first byte to time.
+	if got := wire["hijacked"]; got != float64(100-ttfbN) {
+		t.Errorf("hijacked = %v, want %d — the reason TTFB is absent has to be legible", got, 100-ttfbN)
+	}
+}
+
+// TestMetricsRouteSummary_PartialWindowIsFlagged — a window straddling
+// the v15 upgrade has rows with no distribution. They cannot be
+// back-filled, so the quantiles describe only part of it and the UI
+// has to be able to say so.
+func TestMetricsRouteSummary_PartialWindowIsFlagged(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	seedHistogramAggregate(t, m, observability.HistogramAggregate{
+		Total: fastHistogram(100), TTFB: fastHistogram(100),
+		Rows: 24, RowsWithHistogram: 9, ReqCount: 400,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/route-summary?route="+m.routeID, nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+
+	var wire map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &wire); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if wire["partialHistogram"] != true {
+		t.Errorf("partialHistogram = %v, want true (9 of 24 rows carried a distribution)", wire["partialHistogram"])
+	}
+}
+
+// TestMetricsRouteSummary_HistogramErrorIs503 — a failed read must not
+// come back as a 200 full of nulls, which an operator would read as
+// "this route is idle".
+func TestMetricsRouteSummary_HistogramErrorIs503(t *testing.T) {
+	m := newMetricsTestEnv(t)
+	m.env.handler.SetMetricsReader(&fakeMetricsReader{
+		aggregateHistFn: func(context.Context, observability.Granularity, string, time.Time, time.Time) (observability.HistogramAggregate, error) {
+			return observability.HistogramAggregate{}, errors.New("disk on fire")
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/route-summary?route="+m.routeID, nil)
+	rec := httptest.NewRecorder()
+	m.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503 — a read failure must not look like an idle route", rec.Code)
 	}
 }

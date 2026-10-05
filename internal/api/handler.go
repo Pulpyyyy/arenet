@@ -76,6 +76,11 @@ type CaddyReloader interface {
 type MetricsReader interface {
 	Query(ctx context.Context, gran observability.Granularity, routeID string, from, to time.Time) ([]observability.MetricBucket, error)
 	QueryAggregated(ctx context.Context, gran observability.Granularity, from, to time.Time) ([]observability.MetricBucket, error)
+	// AggregateHistogram (schema v15) sums the window's latency
+	// distributions so a quantile can be computed over the whole
+	// window rather than derived from per-bucket percentiles.
+	// routeID == "" aggregates every route.
+	AggregateHistogram(ctx context.Context, gran observability.Granularity, routeID string, from, to time.Time) (observability.HistogramAggregate, error)
 }
 
 // WafEventReader is the read surface the Step M security
