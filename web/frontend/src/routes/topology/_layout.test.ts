@@ -1337,6 +1337,29 @@ describe('buildTopologyGraph — redirecting routes', () => {
 		expect(x(without)).toBeLessThan(x(withHub));
 	});
 
+	it('leaves the two columns far enough apart to read as two', () => {
+		// v2.68 — reclaiming the hub's column put a 300 px destination
+		// card 70 px from col 0: "on dirait qu'ils sont les uns sur les
+		// autres au niveau horizontale". The span also has to carry the
+		// dashed stroke and its status-code label.
+		//
+		// Measured off the GRAPH, not off REDIRECT_COL_X, so moving the
+		// cluster back to the hub's x fails this — asserting the
+		// constant against itself would not.
+		const { nodes } = buildTopologyGraph([redirectRoute({ id: 'r-1' })], new Set(), {
+			hideHub: true
+		});
+		const group = nodes.find((n) => n.id === 'route-group-r-1');
+		const dest = nodes.find((n) => n.id.startsWith('redirect-to-'))!;
+		// A route with no alias gets no container, so fall back to the
+		// FQDN card — whose right edge is one padding further left,
+		// which only makes the assertion stricter.
+		const col0Right = group
+			? group.position.x + (group.width as number)
+			: nodes.find((n) => n.id === 'fqdn-r-1')!.position.x + 200;
+		expect(dest.position.x - col0Right).toBeGreaterThanOrEqual(190);
+	});
+
 	it('marks every source edge when routes converge on one destination', () => {
 		const { edges } = buildTopologyGraph([
 			redirectRoute({ id: 'r-1', host: 'a.example.com' }),

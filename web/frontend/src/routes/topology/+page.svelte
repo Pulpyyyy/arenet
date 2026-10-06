@@ -634,6 +634,66 @@
 		flex: 0 0 auto;
 	}
 
+	/* v2.68 — viewport-fit chain, same shape as /logs (see the
+	   Z.5.7 comment there, which this deliberately mirrors rather
+	   than inventing a second pattern).
+
+	   .topo-page already asked for `height: 100%`, but the shell
+	   above it is `min-height: 100vh` — a minimum, not a height —
+	   so the percentage resolved against an auto-height parent and
+	   behaved like `auto`. The page then grew to its tallest column,
+	   which is the sidebar: the canvas kept its aspect, the panels
+	   ran past the fold, and the operator had to scroll the DOCUMENT
+	   to reach the Top flows rows. The sidebar's own `overflow-y:
+	   auto` never engaged because nothing ever constrained it.
+
+	   :has() scopes all three overrides to this route, so every other
+	   page keeps its natural page scroll. On a browser without :has()
+	   the rules are ignored and the page degrades to exactly the
+	   behaviour it has today. */
+	:global(.app-shell:has(.topo-page)) {
+		height: 100vh;
+		height: 100dvh;
+		min-height: 0;
+		overflow: hidden;
+	}
+	:global(.app-col:has(.topo-page)) {
+		min-height: 0;
+		overflow: hidden;
+	}
+	/* box-sizing is load-bearing: .app-main carries padding: 22px
+	   globally and there is no universal reset, so without it the
+	   padding would push the content past the bounded parent and put
+	   the scrollbar straight back. */
+	:global(.app-main:has(.topo-page)) {
+		box-sizing: border-box;
+		flex: 1;
+		min-height: 0;
+		overflow: hidden;
+		display: flex;
+		flex-direction: column;
+	}
+
+	/* Below ~900px the canvas and a 280px sidebar side by side leave
+	   neither anything to work with, and pinning that to the viewport
+	   would make both unusable. Let the page scroll instead. */
+	@media (max-width: 900px) {
+		:global(.app-main:has(.topo-page)) {
+			height: auto;
+			overflow: visible;
+		}
+		.topo-page {
+			height: auto;
+		}
+		.topo-content {
+			flex-wrap: wrap;
+		}
+		.topo-canvas-wrap {
+			flex: 1 1 100%;
+			min-height: 420px;
+		}
+	}
+
 
 	.topo-content {
 		flex: 1 1 auto;

@@ -125,6 +125,35 @@ const ALIAS_WIDTH = 170;
 const ROUTE_GROUP_PADDING = 10;
 const ROUTE_GROUP_WIDTH = FQDN_WIDTH + ROUTE_GROUP_PADDING * 2;
 
+/** Right edge of col 0, in canvas coordinates. The route-group
+ *  container is the widest thing in that column and it starts one
+ *  padding to the LEFT of COL_X.FQDN, so its right edge is one
+ *  padding to the right of the FQDN card's. */
+const COL0_RIGHT_EDGE = COL_X.FQDN + FQDN_WIDTH + ROUTE_GROUP_PADDING;
+
+/** Clear canvas between col 0 and the destination column in the
+ *  Redirects view — the span the dashed stroke and its status-code
+ *  label have to themselves.
+ *
+ *  Equal to the width of the card the edge leaves, which is the one
+ *  proportion on this canvas an operator can check by eye. */
+const REDIRECT_EDGE_SPAN = FQDN_WIDTH;
+
+/** x of the destination cluster in the Redirects view.
+ *
+ *  v2.67.0 reclaimed the vacated hub column, which put the 300 px
+ *  destination card at COL_X.CADDY — 70 px from col 0's right edge.
+ *  The operator read two cards that close as a single block: "on
+ *  dirait qu'ils sont les uns sur les autres au niveau horizontale".
+ *
+ *  70 px is the same pitch the Proxy view uses between col 0 and the
+ *  hub, where it reads fine — the hub is a small junction card, not a
+ *  second column of text. Here the gap has to separate two wide cards
+ *  AND carry the only thing joining them, so it gets a span of its
+ *  own. Still well left of COL_X.BACKEND, so the Redirects canvas
+ *  stays narrower than the Proxy one. */
+export const REDIRECT_COL_X = COL0_RIGHT_EDGE + REDIRECT_EDGE_SPAN;
+
 // Sujet 1 Phase 3.e (2026-06-17). Alias x-offset is the
 // horizontal centring delta so each AliasNode shares the same
 // vertical axis of symmetry as the primary FQDN above. With
@@ -690,7 +719,7 @@ export function buildTopologyGraph(
                 nodes.push({
                         id: spec.clusterId,
                         type: 'backend-cluster',
-                        position: { x: hideHub ? COL_X.CADDY : COL_X.BACKEND, y: clusterYs[i] },
+                        position: { x: hideHub ? REDIRECT_COL_X : COL_X.BACKEND, y: clusterYs[i] },
                         width: CLUSTER_WIDTH,
                         height: clusterHeights[i],
                         data: clusterData,
