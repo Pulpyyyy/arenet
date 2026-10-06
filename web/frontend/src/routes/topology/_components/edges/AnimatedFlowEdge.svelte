@@ -190,11 +190,48 @@
         let isRedirect = $derived(redirectCode !== null);
 
         let baseStroke = $derived(tierStrokeStyle(tier));
-        let strokeStyle = $derived(
-                (isStructural || isRedirect) && !baseStroke.includes('stroke-dasharray')
-                        ? `${baseStroke} stroke-dasharray: 5 4;`
-                        : baseStroke
-        );
+
+        // A redirect edge must stay legible at zero traffic.
+        //
+        // tierStrokeStyle sends the 'dead' tier to stroke-opacity 0.2 in
+        // grey, which is close to invisible on a dark canvas. For a
+        // proxied route that is right: the cluster is still joined by one
+        // solid edge per upstream, so a dim line recedes without orphaning
+        // anything. In the hub-less Redirects view this edge is the ONLY
+        // thing joining a host to its destination, and a redirect that
+        // nobody has used yet sits at exactly that tier — so the
+        // destination floated unconnected, which is what the operator
+        // reported: "les noeud de gauche et de droite ne sont pas
+        // connecter".
+        //
+        // The edge states a CONFIGURATION, and that configuration is true
+        // whether or not anyone visited. So the dash carries the meaning
+        // ("answered here, not forwarded") and the opacity gets a floor
+        // instead of tracking traffic. Above the floor the tier still
+        // brightens it, so a busy redirect reads as busy.
+        //
+        // Same finding as v2.24.0's near-invisible dead-tier edges, in the
+        // same function, reported by the same operator. The comment below
+        // about structural branches was the first fix; this is the second
+        // place that needed it.
+        const REDIRECT_MIN_STROKE_OPACITY = 0.45;
+        let strokeStyle = $derived.by(() => {
+                let style = baseStroke;
+                if (isRedirect) {
+                        const m = /stroke-opacity:\s*([\d.]+)/.exec(style);
+                        const current = m ? Number(m[1]) : 1;
+                        if (current < REDIRECT_MIN_STROKE_OPACITY) {
+                                style = style.replace(
+                                        /stroke-opacity:\s*[\d.]+/,
+                                        `stroke-opacity: ${REDIRECT_MIN_STROKE_OPACITY}`,
+                                );
+                        }
+                }
+                if ((isStructural || isRedirect) && !style.includes('stroke-dasharray')) {
+                        style = `${style} stroke-dasharray: 5 4;`;
+                }
+                return style;
+        });
 
         // Zero on a redirect edge. The circles still render — the SMIL
         // attributes must stay literally constant for the component's

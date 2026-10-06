@@ -100,3 +100,81 @@ describe('AnimatedFlowEdge — redirect edges', () => {
 		expect(path?.getAttribute('style') ?? '').not.toContain('stroke-dasharray');
 	});
 });
+
+// --- legibility at zero traffic --------------------------------------------
+//
+// The bug that followed the hub removal. tierStrokeStyle sends the
+// 'dead' tier (reqPerSec exactly 0) to stroke-opacity 0.2 in grey,
+// which is close to invisible on a dark canvas. In the hub-less
+// Redirects view the redirect edge is the ONLY thing joining a host to
+// its destination, and a redirect nobody has used yet sits at exactly
+// that tier — so the destination floated unconnected.
+//
+// The operator's words: "les noeud de gauche et de droite ne sont pas
+// connecter en adequation par rapport a la configuration". The edge
+// was there and correct; it could not be seen.
+
+function strokeOpacity(container: HTMLElement): number {
+	const style = container.querySelector('path')?.getAttribute('style') ?? '';
+	const m = /stroke-opacity:\s*([\d.]+)/.exec(style);
+	return m ? Number(m[1]) : NaN;
+}
+
+describe('AnimatedFlowEdge — a redirect stays visible without traffic', () => {
+	it('lifts the dead tier out of near-invisibility', () => {
+		// A configured redirect is a fact whether or not anyone visited.
+		const dead = render(Edge, {
+			props: props(flow({ reqPerSec: 0, redirectStatusCode: 301 }))
+		});
+		expect(strokeOpacity(dead.container)).toBeGreaterThanOrEqual(0.45);
+	});
+
+	it('leaves a proxy edge at the dead tier dim, as before', () => {
+		// The control. A proxied cluster is still joined by one solid
+		// edge per upstream, so a dim line recedes without orphaning
+		// anything — and changing that would undo the v2.25.1 decision
+		// that dashes must not over-stand-out.
+		const { container } = render(Edge, { props: props(flow({ reqPerSec: 0 })) });
+		expect(strokeOpacity(container)).toBeLessThan(0.45);
+	});
+
+	it('still brightens a busy redirect above the floor', () => {
+		// The floor is a minimum, not a flattening: a redirect carrying
+		// real traffic must read as busier than one carrying none.
+		const quiet = render(Edge, {
+			props: props(flow({ reqPerSec: 0, redirectStatusCode: 301 }))
+		});
+		const busy = render(Edge, {
+			props: props(flow({ reqPerSec: 0, errorRate5xx: 0.05, redirectStatusCode: 301 }))
+		});
+		expect(strokeOpacity(busy.container)).toBeGreaterThan(strokeOpacity(quiet.container));
+	});
+
+	it('keeps the dash on a redirect whatever the opacity', () => {
+		const { container } = render(Edge, {
+			props: props(flow({ reqPerSec: 0, redirectStatusCode: 301 }))
+		});
+		const style = container.querySelector('path')?.getAttribute('style') ?? '';
+		expect(style).toContain('stroke-dasharray');
+	});
+
+	it("does not override the bad tier's own dash pattern", () => {
+		// tierStrokeStyle already emits `stroke-dasharray: 4 4` for
+		// 'bad', so the redirect dash must not be appended on top of
+		// it — the outage pattern is the one that should survive.
+		//
+		// Asserted on the PATTERN, not on the number of declarations.
+		// The first version of this test counted occurrences of
+		// "stroke-dasharray" and expected one, and it could not fail:
+		// getAttribute('style') returns CSSOM-normalised text, which
+		// deduplicates properties, so a doubled declaration is
+		// invisible to the DOM and harmless in CSS (last wins). What IS
+		// observable is which pattern won.
+		const { container } = render(Edge, {
+			props: props(flow({ errorRate5xx: 0.5, redirectStatusCode: 301 }))
+		});
+		const style = container.querySelector('path')?.getAttribute('style') ?? '';
+		expect(style).toContain('stroke-dasharray: 4 4');
+		expect(style).not.toContain('stroke-dasharray: 5 4');
+	});
+});
