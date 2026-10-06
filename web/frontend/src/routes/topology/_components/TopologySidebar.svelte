@@ -12,14 +12,22 @@
    2. Top flux           — live list of routes sorted by req/s desc,
       with a per-row tier-colored progress bar relative to the
       busiest route. Surfaces warn/bad badges (p99 spike, 5xx %).
-   3. Actions rapides   — quick operator actions. Buttons are
-      cosmetic placeholders for Phase 1; wiring lands in Phase 2.
+      This is the panel that scrolls: it is the only one whose
+      length grows with the instance.
+   3. Actions rapides   — quick operator actions. One button, and it
+      works. Phase 1 shipped three cosmetic placeholders here with
+      "wiring lands in Phase 2" written right above them; Phase 2
+      never came back, and they stayed dead in production until the
+      operator clicked them. See downloadSnapshot for what became of
+      the other two.
 -->
 <script lang="ts">
         import type { TopologyRoute, FlowTier } from '../_types';
         import { resolveFlowTier } from '../_types';
+        import { fetchSnapshot } from '../_api';
         import { t } from '$lib/i18n';
         import { language } from '$lib/stores/language.svelte';
+        import { pushToast } from '$lib/stores/toast';
 
         let { routes }: { routes: TopologyRoute[] } = $props();
 
@@ -97,6 +105,62 @@
         // wrapped in a $derived so the legend re-renders on language
         // switch. Reading language.current inside the derived callback
         // registers the Svelte 5 reactive dependency.
+        // v2.68 — the one action in panel 3 that does something.
+        //
+        // All three buttons shipped in Phase 1 as cosmetic placeholders —
+        // the component's own doc comment said "wiring lands in Phase 2"
+        // — and Phase 2 never came back for them. The operator found them
+        // the way anyone eventually does: "a quoi sert les 3 boutons […]
+        // car au click dessus il ne se passe rien".
+        //
+        // The other two are gone rather than wired. "Reload Caddy config"
+        // has no endpoint because it has no job: Arenet reloads Caddy
+        // itself on every change, with rollback on failure, so a manual
+        // reload button would only invite the belief that a reload is
+        // sometimes needed. "Drain an upstream" is a real feature and
+        // therefore not a button: it needs per-upstream state in storage,
+        // config translation and an API. It belongs in the backlog, not
+        // in a panel where it pretends to already exist.
+        //
+        // The snapshot is a genuine quick action: the exact JSON the
+        // canvas was built from, which is what anyone reporting a
+        // topology oddity needs to attach. Re-fetched rather than
+        // serialised from `routes`, so the file carries the server's own
+        // generatedAt and the full route set instead of the current
+        // view's filtered slice.
+        let snapshotting = $state(false);
+
+        async function downloadSnapshot(): Promise<void> {
+                if (snapshotting) return;
+                snapshotting = true;
+                try {
+                        const snap = await fetchSnapshot();
+                        // Same stamp format as the backup export, so the two
+                        // downloads sort together in a Downloads folder.
+                        const stamp = new Date()
+                                .toISOString()
+                                .replace(/[-:]/g, '')
+                                .replace('T', '-')
+                                .slice(0, 15);
+                        const blob = new Blob([JSON.stringify(snap, null, 2)], {
+                                type: 'application/json'
+                        });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `arenet-topology-${stamp}.json`;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        URL.revokeObjectURL(url);
+                } catch (err) {
+                        const detail = err instanceof Error ? err.message : String(err);
+                        pushToast(`${t('topology.sidebar.snapshotFailed')} — ${detail}`, 'danger');
+                } finally {
+                        snapshotting = false;
+                }
+        }
+
         const LEGEND_ROWS: { tier: FlowTier; label: string }[] = $derived(
                 language.current
                         ? [
@@ -149,7 +213,7 @@
              canvas toolbar already shows a live/reconnecting dot,
              so the "live" pill here was redundant noise.
         ========================================================= -->
-        <section class="panel">
+        <section class="panel panel-topflux">
                 <h3>{language.current && t('topology.sidebar.panelTopFluxTitle')}</h3>
                 <ul class="topflux-list">
                         {#each sortedRoutes as route (route.id)}
@@ -183,9 +247,15 @@
         <section class="panel">
                 <h3>{language.current && t('topology.sidebar.panelActionsTitle')}</h3>
                 <ul class="actions-list">
-                        <li><button type="button" class="action-btn">{language.current && t('topology.sidebar.actionDrainUpstream')}</button></li>
-                        <li><button type="button" class="action-btn">{language.current && t('topology.sidebar.actionReloadCaddy')}</button></li>
-                        <li><button type="button" class="action-btn">{language.current && t('topology.sidebar.actionSnapshotJSON')}</button></li>
+                        <li>
+                                <button
+                                        type="button"
+                                        class="action-btn"
+                                        data-testid="topology-action-snapshot"
+                                        disabled={snapshotting}
+                                        onclick={() => void downloadSnapshot()}
+                                >{language.current && t('topology.sidebar.actionSnapshotJSON')}</button>
+                        </li>
                 </ul>
         </section>
 </aside>
@@ -196,6 +266,11 @@
                 display: flex;
                 flex-direction: column;
                 gap: 14px;
+                /* Fallback only — on a short viewport the panels' own
+                   minimums can still exceed the column, and a sidebar
+                   that scrolls is strictly better than a dead end.
+                   Normally the Top-flows list below is the scroller and
+                   this never engages. */
                 overflow-y: auto;
                 min-height: 0;
                 padding-right: 2px;
@@ -206,6 +281,28 @@
                 border: 1px solid var(--border, oklch(28% 0.009 250));
                 border-radius: 8px;
                 padding: 14px 14px 12px 14px;
+                /* Legend and Actions are their content's height; only
+                   Top flows (below) takes the slack. */
+                flex: 0 0 auto;
+        }
+
+        /* v2.68 — Top flows is the one panel whose length is unbounded
+           (one row per route), so it is the one that scrolls. It used to
+           push the legend and the action buttons off the fold instead,
+           and because nothing above it was height-bounded the overflow
+           became a DOCUMENT scroll: the operator had to scroll the whole
+           page away from the canvas to read a req/s figure.
+
+           min-height keeps it from being squeezed to a sliver by the two
+           fixed panels on a short viewport — past that point the sidebar
+           itself scrolls, which is the fallback above. */
+        .panel-topflux {
+                flex: 1 1 auto;
+                min-height: 140px;
+                display: flex;
+                flex-direction: column;
+                /* The h3 stays put; the list scrolls under it. */
+                overflow: hidden;
         }
 
         .panel h3 {
@@ -288,6 +385,16 @@
                 padding: 0;
                 display: flex;
                 flex-direction: column;
+                /* min-height:0 is load-bearing: a flex item's automatic
+                   minimum is its content size, so without it the list
+                   refuses to shrink and overflows the panel instead of
+                   scrolling inside it. */
+                flex: 1 1 auto;
+                min-height: 0;
+                overflow-y: auto;
+                /* Room for the scrollbar so the last row's text doesn't
+                   sit under it. */
+                padding-right: 4px;
         }
 
         .topflux-row {
@@ -398,8 +505,30 @@
                 transition: background 0.15s ease, border-color 0.15s ease;
         }
 
-        .action-btn:hover {
+        .action-btn:hover:not(:disabled) {
                 background: var(--surface-hi, oklch(26% 0.008 250));
                 border-color: var(--border-hi, oklch(34% 0.011 250));
+        }
+
+        .action-btn:disabled {
+                opacity: 0.55;
+                cursor: progress;
+        }
+
+        /* Below ~900px the page gives up its viewport-fit (see the media
+           query in +page.svelte) and the canvas takes the full width, so
+           the sidebar wraps underneath it and stops being a column with
+           a height to divide. */
+        @media (max-width: 900px) {
+                .topo-sidebar {
+                        flex: 1 1 100%;
+                        overflow-y: visible;
+                }
+                .panel-topflux {
+                        overflow: visible;
+                }
+                .topflux-list {
+                        overflow-y: visible;
+                }
         }
 </style>

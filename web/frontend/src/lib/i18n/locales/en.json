@@ -2472,9 +2472,8 @@
 			"legendWarn": "high latency (p99 > 300 ms) or a few 5xx",
 			"legendBad": "upstream errors above 1%",
 			"legendNote": "Thickness is computed on the 60-second rolling average. The animation points in the dominant traffic direction — incoming requests towards the services.",
-			"actionDrainUpstream": "Drain an upstream…",
-			"actionReloadCaddy": "Reload Caddy config",
-			"actionSnapshotJSON": "Snapshot topology (JSON)"
+			"actionSnapshotJSON": "Download topology snapshot (JSON)",
+			"snapshotFailed": "Snapshot download failed"
 		},
 		"disabled": {
 			"tooltip": "Disabled — not serving traffic"
