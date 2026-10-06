@@ -1269,6 +1269,74 @@ describe('buildTopologyGraph — redirecting routes', () => {
 		expect((edge.data as FlowEdgeData).redirectStatusCode).toBeUndefined();
 	});
 
+	// --- hideHub: the Redirects view wires hosts to destinations ------
+	//
+	// The operator chose keeping the hub when shown three mockups, then
+	// asked for it gone after living with it: "cette notion de noeud a
+	// gauche avec rond au milieu et rien vers les noeuds a droite est
+	// bizarre". The hub is the literal truth for a proxied route, and a
+	// hop that carries nothing in a view where every route redirects.
+
+	it('drops the Caddy hub', () => {
+		const { nodes } = buildTopologyGraph([redirectRoute()], new Set(), { hideHub: true });
+		expect(nodes.find((n) => n.id === 'caddy-hub')).toBeUndefined();
+	});
+
+	it('keeps the hub by default, so the proxy view is untouched', () => {
+		const { nodes } = buildTopologyGraph([makeRoute()]);
+		expect(nodes.find((n) => n.id === 'caddy-hub')).toBeDefined();
+	});
+
+	it('points the host edge straight at the destination', () => {
+		const { edges, nodes } = buildTopologyGraph([redirectRoute({ id: 'r-1' })], new Set(), {
+			hideHub: true
+		});
+		const dest = nodes.find((n) => n.id.startsWith('redirect-to-'))!;
+		const edge = edges.find((e) => e.id === 'e-fqdn-r-1-caddy')!;
+		expect(edge).toBeDefined();
+		expect(edge.target).toBe(dest.id);
+	});
+
+	it('leaves no edge sourced from the hub it removed', () => {
+		// An edge whose source node does not exist is an invisible
+		// edge, and Svelte Flow will not warn about it.
+		const { edges, nodes } = buildTopologyGraph(
+			[redirectRoute({ id: 'r-1' }), redirectRoute({ id: 'r-2', host: 'b.example.com' })],
+			new Set(),
+			{ hideHub: true }
+		);
+		const ids = new Set(nodes.map((n) => n.id));
+		for (const e of edges) {
+			expect(ids.has(e.source)).toBe(true);
+			expect(ids.has(e.target)).toBe(true);
+		}
+	});
+
+	it('carries the traffic AND the redirect mark on the merged edge', () => {
+		// One edge now says two true things: the particles count the
+		// redirects actually issued, the dash and the code say
+		// "answered here, not forwarded".
+		const { edges } = buildTopologyGraph(
+			[redirectRoute({ id: 'r-1', reqPerSec: 12, redirectStatusCode: 302 })],
+			new Set(),
+			{ hideHub: true }
+		);
+		const data = edges.find((e) => e.id === 'e-fqdn-r-1-caddy')!.data as FlowEdgeData;
+		expect(data.reqPerSec).toBe(12);
+		expect(data.redirectStatusCode).toBe(302);
+	});
+
+	it('moves the destination into the vacated column', () => {
+		// Leaving the hub's column empty would waste a third of the
+		// canvas, which is the opposite of what the operator asked for
+		// when they said the nodes were too far apart.
+		const withHub = buildTopologyGraph([redirectRoute()]);
+		const without = buildTopologyGraph([redirectRoute()], new Set(), { hideHub: true });
+		const x = (g: typeof withHub) =>
+			g.nodes.find((n) => n.id.startsWith('redirect-to-'))!.position.x;
+		expect(x(without)).toBeLessThan(x(withHub));
+	});
+
 	it('marks every source edge when routes converge on one destination', () => {
 		const { edges } = buildTopologyGraph([
 			redirectRoute({ id: 'r-1', host: 'a.example.com' }),

@@ -311,10 +311,39 @@ type ClusterSpec = {
  * expansion — matches the pre-3.e shape so callers that don't pass
  * the set get the Phase 3.d layout byte-equal.
  */
+/** Build-time options. */
+export type TopologyGraphOptions = {
+        /**
+         * Drop the Caddy hub and wire each host straight to its
+         * redirect destination. Set by the Redirects view.
+         *
+         * The hub is the literal truth for a proxied route — traffic
+         * really does pass through Arenet to reach the upstream. For a
+         * redirect Arenet answers the client and the client goes on by
+         * itself, so in a view where every route is a redirect the hub
+         * is a hop that carries nothing, identical on every row. The
+         * operator described what that looks like: "cette notion de
+         * noeud a gauche avec rond au milieu et rien vers les noeuds a
+         * droite est bizarre".
+         *
+         * They chose keeping it when shown three mockups, then asked
+         * for it gone after living with it. Both reads were
+         * defensible; the one that survived contact with the screen
+         * wins.
+         */
+        hideHub?: boolean;
+};
+
 export function buildTopologyGraph(
         routes: TopologyRoute[],
         collapsedRouteIds: ReadonlySet<string> = new Set<string>(),
+        opts: TopologyGraphOptions = {},
 ): TopologyGraph {
+        const hideHub = opts.hideHub === true;
+        // routeID -> destination cluster id, for the hub-less wiring.
+        // Filled by the clusterSpecs loop, read by the edge loop after
+        // it.
+        const redirectClusterByRoute = new Map<string, string>();
         const nodes: TopologyNode[] = [];
         const edges: TopologyEdge[] = [];
 
@@ -536,7 +565,9 @@ export function buildTopologyGraph(
         });
 
         // Col 1 — Caddy hub
-        nodes.push(buildCaddyNode(routes, COL_X.CADDY));
+        if (!hideHub) {
+                nodes.push(buildCaddyNode(routes, COL_X.CADDY));
+        }
 
         // Col 2 — Backend clusters as sub-flow groups + N upstream children
         // (+ per-path-pool section headers).
@@ -601,6 +632,10 @@ export function buildTopologyGraph(
                                 redirectTarget: route.redirectTarget,
                                 redirectSources: sources,
                         });
+                        // Every source host points at this destination, so
+                        // the hub-less wiring can find it from any of them.
+                        const clusterId = `redirect-to-${encodeURIComponent(groupKey)}`;
+                        sources.forEach((src) => redirectClusterByRoute.set(src.id, clusterId));
                         return;
                 }
                 clusterSpecs.push({
@@ -655,7 +690,7 @@ export function buildTopologyGraph(
                 nodes.push({
                         id: spec.clusterId,
                         type: 'backend-cluster',
-                        position: { x: COL_X.BACKEND, y: clusterYs[i] },
+                        position: { x: hideHub ? COL_X.CADDY : COL_X.BACKEND, y: clusterYs[i] },
                         width: CLUSTER_WIDTH,
                         height: clusterHeights[i],
                         data: clusterData,
@@ -725,6 +760,25 @@ export function buildTopologyGraph(
         //    same window). Clamping protects the AnimatedFlowEdge
         //    tier resolver from a negative reqPerSec sneaking
         //    through.
+        // Where a host's traffic edge points.
+        //
+        // With the hub it is the hub. Without it, the host's own
+        // destination — and that single edge then carries two honest
+        // facts at once: the particles count the redirects actually
+        // issued, and the dash plus the code say "answered here, not
+        // forwarded". Nothing is lost by merging them, because the
+        // thing the hub used to show (Arenet is what answers) is
+        // exactly what the dash already says.
+        const trafficTarget = (route: TopologyRoute): string =>
+                hideHub ? (redirectClusterByRoute.get(route.id) ?? 'caddy-hub') : 'caddy-hub';
+
+        // The redirect marker, applied to the merged edge so a
+        // hub-less view still reads as a redirect rather than a proxy.
+        const withRedirectMark = (route: TopologyRoute, data: FlowEdgeData): FlowEdgeData => {
+                if (!hideHub || !redirectClusterByRoute.has(route.id)) return data;
+                return { ...data, redirectStatusCode: route.redirectStatusCode ?? 301 };
+        };
+
         routes.forEach((route) => {
                 const aliasMetrics = route.aliasMetrics ?? [];
                 const collapsed = collapsedRouteIds.has(route.id);
@@ -739,12 +793,12 @@ export function buildTopologyGraph(
                 // the rebalance + per-alias edges kick back in.
                 if (collapsed) {
                         edges.push(
-                                makeFlowEdge(`e-fqdn-${route.id}-caddy`, `fqdn-${route.id}`, 'caddy-hub', {
+                                makeFlowEdge(`e-fqdn-${route.id}-caddy`, `fqdn-${route.id}`, trafficTarget(route), withRedirectMark(route, {
                                         kind: 'flow',
                                         reqPerSec: route.reqPerSec,
                                         p99LatencyMs: route.p99LatencyMs,
                                         errorRate5xx: route.errorRate5xx,
-                                }),
+                                })),
                         );
                         return;
                 }
@@ -755,12 +809,12 @@ export function buildTopologyGraph(
                 );
                 const primaryRps = Math.max(0, route.reqPerSec - activeAliasRpsSum);
                 edges.push(
-                        makeFlowEdge(`e-fqdn-${route.id}-caddy`, `fqdn-${route.id}`, 'caddy-hub', {
+                        makeFlowEdge(`e-fqdn-${route.id}-caddy`, `fqdn-${route.id}`, trafficTarget(route), withRedirectMark(route, {
                                 kind: 'flow',
                                 reqPerSec: primaryRps,
                                 p99LatencyMs: route.p99LatencyMs,
                                 errorRate5xx: route.errorRate5xx,
-                        }),
+                        })),
                 );
 
                 aliasMetrics.forEach((alias, aIdx) => {
@@ -769,13 +823,17 @@ export function buildTopologyGraph(
                                 makeFlowEdge(
                                         `e-alias-${route.id}-${aIdx}-caddy`,
                                         `alias-${route.id}-${aIdx}`,
-                                        'caddy-hub',
-                                        {
+                                        // Same target as the route's own edge: an alias
+                                        // of a redirecting host redirects too, so it
+                                        // must land on the destination rather than on a
+                                        // hub that is not in this view.
+                                        trafficTarget(route),
+                                        withRedirectMark(route, {
                                                 kind: 'flow',
                                                 reqPerSec: alias.reqPerSec,
                                                 p99LatencyMs: alias.p99LatencyMs,
                                                 errorRate5xx: alias.errorRate5xx,
-                                        },
+                                        }),
                                 ),
                         );
                 });
@@ -827,6 +885,11 @@ export function buildTopologyGraph(
                                         // its particles.
                                         data.redirectStatusCode = src.redirectStatusCode ?? 301;
                                 }
+                                // With the hub gone there is no source for this
+                                // edge: the host now points straight at the
+                                // destination, and that single edge already carries
+                                // both the traffic and the redirect mark.
+                                if (hideHub && redirectClusterByRoute.has(src.id)) return;
                                 edges.push(makeFlowEdge(
                                         `e-caddy-cluster-${src.id}`,
                                         'caddy-hub',

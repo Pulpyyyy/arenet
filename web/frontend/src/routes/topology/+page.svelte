@@ -175,7 +175,12 @@
 	// there's nothing to switch between. The function now only
 	// distinguishes "first build" (full reassignment, no prior
 	// state) from "tick" (in-place data updates via the flow API).
-	function rebuildGraph(routesIn: TopologyRoute[]): void {
+	// `view` travels as a parameter rather than being read from state
+	// inside the body. The body runs under untrack() — see the effect
+	// below — and a state read there can hand back the PREVIOUS value,
+	// which is exactly the v2.61.1 bug where nodes vanished on a
+	// switch and came back with the next WebSocket frame.
+	function rebuildGraph(routesIn: TopologyRoute[], view: TopoView): void {
 		// v2.48 — fold the alias stacks on arrival, once. A route
 		// with no alias has nothing to fold, so seeding only the
 		// ones that do keeps the chevron meaningful everywhere it
@@ -188,7 +193,12 @@
 		// the layout builder. The builder is pure; the set
 		// arrives as a read-only snapshot of the store's current
 		// value.
-		const graph = buildTopologyGraph(routesIn, collapsedRoutes.collapsed);
+		const graph = buildTopologyGraph(routesIn, collapsedRoutes.collapsed, {
+			// The Caddy hub is the literal truth for a proxied route and
+			// a hop that carries nothing for a redirect, so the
+			// Redirects view wires hosts straight to their destination.
+			hideHub: view === 'redirect'
+		});
 
 		// First call: reassign the full arrays. No existing state
 		// to reconcile against. The builder's positions are the
@@ -277,7 +287,7 @@
 		try {
 			const snap = await fetchSnapshot();
 			routes = snap.routes;
-			rebuildGraph(filterForView(snap.routes, topoView));
+			rebuildGraph(filterForView(snap.routes, topoView), topoView);
 			pageStatus = 'connected';
 			// Now that we have the initial graph, open the live
 			// stream. The WS handler's initial-emit-on-connect
@@ -316,7 +326,7 @@
 				// choice. The comment above filterForView already
 				// claimed "the WS handler owns the per-frame rebuild";
 				// it did, and it was the handler that forgot to filter.
-				rebuildGraph(filterForView(nextRoutes, topoView));
+				rebuildGraph(filterForView(nextRoutes, topoView), topoView);
 				liveStatus = 'live';
 			},
 			() => {
@@ -380,7 +390,7 @@
 		// reactive graph, and keeps `routes` from becoming a
 		// dependency that would duplicate the WS handler's rebuild.
 		untrack(() => {
-			rebuildGraph(filterForView(routes, view));
+			rebuildGraph(filterForView(routes, view), view);
 		});
 	});
 
@@ -474,7 +484,9 @@
 	// dragged nodes back would make the graph unusable while reading
 	// it. This is a button because it has to be a decision.
 	function relayout(): void {
-		const graph = buildTopologyGraph(filterForView(routes, topoView), collapsedRoutes.collapsed);
+		const graph = buildTopologyGraph(filterForView(routes, topoView), collapsedRoutes.collapsed, {
+			hideHub: topoView === 'redirect'
+		});
 		nodes = graph.nodes;
 		edges = graph.edges;
 		lastDragPosByNode.clear();
