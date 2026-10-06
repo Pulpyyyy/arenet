@@ -22,7 +22,7 @@
    - C3: the group container holds the children (parentId+extent).
 -->
 <script lang="ts">
-        import { type NodeProps } from '@xyflow/svelte';
+        import { Handle, Position, type NodeProps } from '@xyflow/svelte';
         import type { BackendClusterNodeData, LBPolicy } from '../../_types';
 
         let { data }: NodeProps & { data: BackendClusterNodeData } = $props();
@@ -62,6 +62,25 @@
         // unknown number of routes and read exactly like a single one.
         let redirectSources = $derived(data.redirectSourceHosts ?? []);
 
+        // Whether an edge terminates on THIS node rather than on one of
+        // its upstream children.
+        //
+        // A cluster with children is never an edge endpoint: _layout.ts
+        // draws one edge per upstream, each landing on the child's own
+        // handle. With zero children — a redirect, or a route whose pool
+        // is empty — the edge lands on the parent, and Svelte Flow needs
+        // a handle to anchor it or it silently draws nothing.
+        //
+        // That is what went wrong: the comment below claimed the
+        // zero-upstream case worked "without relying on a custom handle",
+        // and it did not. Every redirect destination since v2.61 has sat
+        // on the canvas with no visible connection to the host pointing at
+        // it, which the operator reported three times before I looked here
+        // — once as "rien vers les noeuds a droite" while the hub was
+        // still in place, which should have told me the edge, not the hub,
+        // was the problem.
+        let isEdgeTarget = $derived(data.totalCount === 0);
+
         function formatHeaderCountLine(d: BackendClusterNodeData): string {
                 if (d.redirectTarget) {
                         const n = d.redirectSourceHosts?.length ?? 0;
@@ -100,13 +119,24 @@
 </script>
 
 <div class="cluster-node" data-state={clusterState}>
-        <!-- No <Handle> on the parent. Critique 6 (2026-06-03): the
-             orphan target handle was visually confusing — it implied
-             "connect here" but no edge ever targets the parent now
-             that children are real nodes. The empty-upstreams
-             fallback edge case (route with 0 upstreams) is handled
-             in _layout.ts by emitting a node-level target without
-             relying on a custom handle. -->
+        <!-- A handle ONLY when an edge actually terminates here, i.e.
+             when the cluster has no upstream children.
+             Critique 6 (2026-06-03) removed the handle because an
+             always-present one implied "connect here" on every cluster
+             while no edge ever targeted the parent. That reasoning held
+             for a cluster WITH children and was wrong for one without:
+             Svelte Flow anchors an edge on a handle, and with none it
+             draws nothing at all.
+             Rendered invisible, so the anchor exists without bringing
+             back the dot that Critique 6 objected to. -->
+        {#if isEdgeTarget}
+                <Handle
+                        type="target"
+                        position={Position.Left}
+                        class="anchor-only"
+                        isConnectable={false}
+                />
+        {/if}
         <header class="cluster-header">
                 <div class="cluster-title">
                         <span class="cluster-label">{data.clusterLabel}</span>
@@ -157,6 +187,17 @@
 </div>
 
 <style>
+        /* The anchor handle exists for edge geometry, not for the eye. */
+        :global(.anchor-only) {
+                opacity: 0;
+                pointer-events: none;
+                width: 1px;
+                min-width: 1px;
+                height: 1px;
+                min-height: 1px;
+                border: 0;
+        }
+
         .redirect-sources {
                 list-style: none;
                 margin: 2px 0 0;
