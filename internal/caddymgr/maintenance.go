@@ -23,14 +23,24 @@ import (
 	"strings"
 )
 
-// maintenanceRetryAfterSentinel is replaced at emission time with the
-// route's Retry-After value inside the maintenance page body. Kept as
-// a distinct placeholder (rather than reusing an error-page runtime
-// placeholder) because the retry-after value is a per-route STATIC
-// int baked in at config-build time, not a Caddy runtime expression —
-// there is no {http....} equivalent for "this route's configured
-// Retry-After seconds".
-const maintenanceRetryAfterSentinel = "{arenet.maintenance.retry_after}"
+// v2.69.0 removed {arenet.maintenance.retry_after}, the bare-integer
+// sentinel this file carried since v2.18.0. It existed to put the delay
+// in the page body, and "Retry in 86400s" is not a delay a visitor can
+// read — which is what retry_after_human below is for.
+//
+// Removing a sentinel is normally a silent public break, because
+// static_response expands its body with repl.ReplaceKnown (Caddy
+// v2.11.4 staticresp.go:208) and ReplaceKnown is documented as
+// "Unrecognized placeholders will remain in the output"
+// (replacer.go:151-157): an unsubstituted token is PRINTED on the 503,
+// not dropped. It was safe here only because the operator confirmed the
+// installed base is two instances, both theirs. That reasoning does not
+// transfer to the next sentinel someone wants to retire.
+//
+// The guard that keeps this from rotting lives in
+// maintenance_example_page_test.go, whose mustNotContain still lists
+// the dead token: a shipped example that reaches for it now fails the
+// suite instead of printing it to the public.
 
 // maintenanceMessageSentinel is replaced at emission time with the
 // global operator-authored maintenance message
@@ -49,9 +59,13 @@ const maintenanceMessageSentinel = "{arenet.maintenance.message}"
 // browser when the maintenance window is expected to end (v2.18.1).
 // When Retry-After is 0 the sentinel is replaced with the empty string
 // — content="0" would reload instantly, hammering the server in a loop.
-// Only the built-in default page carries this sentinel; custom pages
-// don't (auto-refresh is default-page-only), but they can add their own
-// meta refresh using {arenet.maintenance.retry_after}.
+// The built-in default page carries this sentinel; a custom page does
+// not, but it can opt in simply by putting the sentinel in its own
+// <head> — the substitution below runs over the whole body, not just
+// the default page, and it brings the Retry-After 0 guard with it. The
+// older advice here was to hand-write content="N" from the raw
+// retry_after sentinel, which reimplemented that guard badly and is
+// moot now that the raw sentinel is gone.
 const maintenanceRefreshMetaSentinel = "{arenet.maintenance.refresh_meta}"
 
 // maintenanceRetryAfterHumanSentinel is replaced at emission time with
@@ -59,31 +73,18 @@ const maintenanceRefreshMetaSentinel = "{arenet.maintenance.refresh_meta}"
 // "1 hour 30 minutes" — and with the empty string when Retry-After is 0
 // (v2.69.0).
 //
-// The raw sentinel above stays raw, and the operator pushed back on
-// that: "retire donc le retry_after et garde seulement le bon non ?
-// pourquoi avoir les deux". Two reasons, one decisive.
+// This is now the ONLY way to state the delay in a page body. The
+// operator asked for exactly that — "pourquoi avoir les deux …?" — and
+// accepted the one consequence: the words are English, so the shipped
+// French example reads "1 day" inside French prose. A page in another
+// language either lives with that or writes its own fixed wording,
+// which is the operator's stated design (English default, customise the
+// page for anything else).
 //
-// Decisive: removing a sentinel does not hide it, it REVEALS it.
-// static_response expands its body with repl.ReplaceKnown (Caddy
-// v2.11.4 staticresp.go:208), and ReplaceKnown is documented as
-// "Unrecognized placeholders will remain in the output"
-// (replacer.go:151-157). Stop substituting the token and every custom
-// maintenance page already deployed that uses it starts printing the
-// literal text "{arenet.maintenance.retry_after}" on a public 503.
-// Silent, public, and in every installation but ours.
-//
-// The other: it is the only language-neutral form. A page written in
-// anything but English composes its own sentence around the number,
-// because formatRetryAfterHuman emits English words and the served
-// page has no locale to key off. The shipped French example is exactly
-// that case.
-//
-// What the raw sentinel is NOT for, and I had this wrong in the first
-// draft of this comment: building your own <meta refresh>.
-// {arenet.maintenance.refresh_meta} does that in a custom page too —
-// the substitution runs over the whole body, not just the default page
-// — and it carries the Retry-After 0 guard that a hand-written
-// content="0" would reload-loop without.
+// The words are English because there is nothing to localise against:
+// the value is baked into a static body at config-build time and
+// nothing in the data model says what language the page is in. Giving
+// it a locale is a feature with storage and UI, not a formatter change.
 const maintenanceRetryAfterHumanSentinel = "{arenet.maintenance.retry_after_human}"
 
 // maintenanceRetryAfterLineSentinel is replaced at emission time with
@@ -215,15 +216,14 @@ func buildMaintenanceBody(pageHTML string, retryAfter int, message string) strin
 	}
 
 	// Substitution order is free here, and I checked rather than
-	// assumed: the three retry-after sentinels all close with '}', so
-	// "{arenet.maintenance.retry_after}" is NOT a substring of
-	// "…retry_after_human}" or "…retry_after_line}" and no pass can eat
-	// another's token. That stops being true the moment one of them is
-	// renamed to drop or move the brace, which is what
+	// assumed: both retry-after sentinels close with '}', so
+	// "…retry_after_human}" is not a substring of "…retry_after_line}"
+	// or the reverse, and neither pass can eat the other's token. That
+	// stops being true the moment one is renamed to drop or move the
+	// brace, which is what
 	// TestBuildMaintenanceBody_SentinelsDoNotShadowEachOther pins.
 	out := strings.ReplaceAll(pageHTML, maintenanceRetryAfterHumanSentinel, retryHuman)
 	out = strings.ReplaceAll(out, maintenanceRetryAfterLineSentinel, retryLine)
-	out = strings.ReplaceAll(out, maintenanceRetryAfterSentinel, strconv.Itoa(retryAfter))
 	out = strings.ReplaceAll(out, maintenanceRefreshMetaSentinel, refreshMeta)
 	return strings.ReplaceAll(out, maintenanceMessageSentinel, renderedMsg)
 }

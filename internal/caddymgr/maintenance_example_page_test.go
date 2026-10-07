@@ -72,6 +72,14 @@ func assertExampleMaintenancePageSurvives(t *testing.T, filename string) {
 		"backdrop-filter preserved": "backdrop-filter",
 		"conic-gradient preserved":  "conic-gradient",
 		"data-URI noise preserved":  "data:image/svg+xml",
+		// v2.69.0 — retry_after_human substitutes to NOTHING at
+		// Retry-After 0, which would leave the hero showing a label with
+		// no value. Both examples collapse the block with :has(:empty),
+		// so that selector has to survive the sanitizer. Asserted rather
+		// than assumed: bluemonday is an HTML sanitizer and what it does
+		// to a modern selector inside <style> is not obvious from its
+		// docs.
+		":has(:empty) collapse preserved": ".eta-hero:has(.eta-v:empty){display:none}",
 	}
 	for label, needle := range mustContain {
 		if !strings.Contains(body, needle) {
@@ -96,9 +104,13 @@ func assertExampleMaintenancePageSurvives(t *testing.T, filename string) {
 	// against a CSS comment in the French example that merely MENTIONED
 	// the English rendering — a true statement in a comment is not a
 	// visitor-facing string, and the test could not tell the difference.
+	// Both now show the words, because v2.69.0 removed the integer
+	// sentinel the French one used to carry. "30 minutes" is the one
+	// rendering where English and French agree, which is luck, not
+	// design — the file's own CSS comment says so to anyone copying it.
 	wantDelay := map[string]string{
 		"maintenance-page-example-en.html": `<span class="eta-v">30 minutes</span>`,
-		"maintenance-page-example-fr.html": `<span class="eta-v">1800s</span>`,
+		"maintenance-page-example-fr.html": `<span class="eta-v">30 minutes</span>`,
 	}
 	want, ok := wantDelay[filename]
 	if !ok {
@@ -123,6 +135,17 @@ func assertExampleMaintenancePageSurvives(t *testing.T, filename string) {
 		if strings.Contains(body, needle) {
 			t.Errorf("%s: %q must not appear in the served body", label, needle)
 		}
+	}
+
+	// Retry-After 0: the delay substitutes away entirely, so no stray
+	// "0"/"0s" may reach the hero. The CSS above is what hides the empty
+	// block; this asserts the substitution it depends on.
+	zeroBody := buildMaintenanceBody(sanitized, 0, "")
+	if strings.Contains(zeroBody, `<span class="eta-v">0`) {
+		t.Errorf("zero Retry-After left a bare 0 in the hero; body=%q", zeroBody)
+	}
+	if !strings.Contains(zeroBody, `<span class="eta-v"></span>`) {
+		t.Error("zero Retry-After did not leave an EMPTY eta-v span (needed for the :has(:empty) collapse)")
 	}
 
 	// Empty message must collapse cleanly (the .message:empty rule), so an

@@ -130,13 +130,13 @@ func TestBuildConfigJSON_MaintenanceRoute_NoBypass(t *testing.T) {
 // rather than collapsing to one). An empty message substitutes to
 // nothing (the built-in default's generic line then stands alone).
 func TestBuildMaintenanceBody_SubstitutesMessage(t *testing.T) {
-	html := `<p class="msg">{arenet.maintenance.message}</p><p>retry {arenet.maintenance.retry_after}s</p>`
+	html := `<p class="msg">{arenet.maintenance.message}</p><p>retry {arenet.maintenance.retry_after_human}</p>`
 	got := buildMaintenanceBody(html, 300, "Back at 14:00")
 	if !strings.Contains(got, "Back at 14:00") {
 		t.Errorf("message not substituted; body=%q", got)
 	}
-	if !strings.Contains(got, "retry 300s") {
-		t.Errorf("retry_after not substituted; body=%q", got)
+	if !strings.Contains(got, "retry 5 minutes") {
+		t.Errorf("retry_after_human not substituted; body=%q", got)
 	}
 	if strings.Contains(got, "{arenet.maintenance.message}") {
 		t.Errorf("message sentinel left unsubstituted; body=%q", got)
@@ -232,18 +232,24 @@ func TestBuildMaintenanceBody_RefreshMeta_ZeroRetryOmits(t *testing.T) {
 	}
 }
 
-// A CUSTOM page has no refresh_meta sentinel, so buildMaintenanceBody
-// leaves it untouched (auto-refresh is default-page-only per the locked
-// decision). The {arenet.maintenance.retry_after} placeholder stays
-// available so a custom author can add their own meta refresh.
+// A CUSTOM page that does not ASK for auto-refresh must not be given it:
+// no refresh_meta sentinel in, no <meta http-equiv> out. Auto-refresh is
+// opt-in, not "default page only" — a custom page gets it by writing the
+// sentinel itself, which TestBuildMaintenanceBody_RefreshMeta_
+// PositiveRetry already covers on an arbitrary body.
+//
+// The second assertion proves the body really went through substitution
+// rather than being returned untouched, which is the only way the first
+// one means anything. It used to make that point with the raw
+// retry_after sentinel; v2.69.0 removed it, so the humanised one does.
 func TestBuildMaintenanceBody_RefreshMeta_CustomPageUntouched(t *testing.T) {
-	html := `<head><title>custom</title></head><body>retry {arenet.maintenance.retry_after}</body>`
+	html := `<head><title>custom</title></head><body>retry {arenet.maintenance.retry_after_human}</body>`
 	got := buildMaintenanceBody(html, 1800, "")
 	if strings.Contains(got, "http-equiv") {
 		t.Errorf("custom page (no sentinel) must not gain an auto meta refresh; body=%q", got)
 	}
-	if !strings.Contains(got, "retry 1800") {
-		t.Errorf("retry_after placeholder should still work on custom page; body=%q", got)
+	if !strings.Contains(got, "retry 30 minutes") {
+		t.Errorf("the custom body was not substituted at all; body=%q", got)
 	}
 }
 
@@ -391,52 +397,47 @@ func TestBuildMaintenanceBody_HumanSentinel(t *testing.T) {
 	}
 }
 
-// Non-regression, and the reason the humanised form is a SECOND
-// sentinel rather than a change to the first.
+// v2.69.0 removed {arenet.maintenance.retry_after}. This pins the
+// removal from the other side: the token is now ordinary text, and
+// buildMaintenanceBody must not quietly start expanding it again.
 //
-// Caddy's static_response expands its body with repl.ReplaceKnown
-// (v2.11.4 staticresp.go:208), documented as "Unrecognized placeholders
-// will remain in the output" (replacer.go:151-157). So dropping this
-// substitution would not remove the token from custom pages already
-// deployed — it would print "{arenet.maintenance.retry_after}" as
-// literal text on their public 503. This test is what stands between
-// that and a well-meant cleanup.
-func TestBuildMaintenanceBody_RawSentinelStaysRaw(t *testing.T) {
-	html := `<meta http-equiv="refresh" content="{arenet.maintenance.retry_after}">`
+// The asymmetry matters because of how Caddy serves the body.
+// static_response expands it with repl.ReplaceKnown (v2.11.4
+// staticresp.go:208), documented as "Unrecognized placeholders will
+// remain in the output" (replacer.go:151-157) — so a page still
+// carrying the dead token PRINTS it on a public 503 rather than
+// dropping it. That is the behaviour a reader needs to know about, and
+// the reason maintenance_example_page_test.go keeps the token in its
+// mustNotContain list.
+func TestBuildMaintenanceBody_DeadRawSentinelIsNotExpanded(t *testing.T) {
+	html := `<p>retry {arenet.maintenance.retry_after}</p>`
 	got := buildMaintenanceBody(html, 86400, "")
-	if !strings.Contains(got, `content="86400"`) {
-		t.Errorf("raw retry_after no longer renders the integer; body=%q", got)
-	}
-	if strings.Contains(got, "1 day") {
-		t.Errorf("raw retry_after was humanised; body=%q", got)
+	if got != html {
+		t.Errorf("the removed sentinel is being substituted again: %q", got)
 	}
 }
 
 // TestBuildMaintenanceBody_SentinelsDoNotShadowEachOther pins what
-// buildMaintenanceBody's substitution-order comment asserts. The three
-// retry-after sentinels all close with '}', so none is a substring of
-// another and the order of the ReplaceAll passes is free. Rename one so
-// a brace moves or disappears and one pass starts eating another's
+// buildMaintenanceBody's substitution-order comment asserts. Both
+// retry-after sentinels close with '}', so neither is a substring of
+// the other and the order of the ReplaceAll passes is free. Rename one
+// so a brace moves or disappears and one pass starts eating the other's
 // token — this is what notices.
 func TestBuildMaintenanceBody_SentinelsDoNotShadowEachOther(t *testing.T) {
-	for _, pair := range [][2]string{
-		{maintenanceRetryAfterSentinel, maintenanceRetryAfterHumanSentinel},
-		{maintenanceRetryAfterSentinel, maintenanceRetryAfterLineSentinel},
-		{maintenanceRetryAfterHumanSentinel, maintenanceRetryAfterLineSentinel},
-	} {
-		if strings.Contains(pair[1], pair[0]) {
-			t.Errorf("%q is a substring of %q: substitution order now matters", pair[0], pair[1])
-		}
-		if strings.Contains(pair[0], pair[1]) {
-			t.Errorf("%q is a substring of %q: substitution order now matters", pair[1], pair[0])
-		}
+	if strings.Contains(maintenanceRetryAfterLineSentinel, maintenanceRetryAfterHumanSentinel) {
+		t.Errorf("%q is a substring of %q: substitution order now matters",
+			maintenanceRetryAfterHumanSentinel, maintenanceRetryAfterLineSentinel)
+	}
+	if strings.Contains(maintenanceRetryAfterHumanSentinel, maintenanceRetryAfterLineSentinel) {
+		t.Errorf("%q is a substring of %q: substitution order now matters",
+			maintenanceRetryAfterLineSentinel, maintenanceRetryAfterHumanSentinel)
 	}
 
-	// And the behaviour that property protects: all three in one body,
-	// each rendering its own thing.
-	html := maintenanceRetryAfterSentinel + "|" + maintenanceRetryAfterHumanSentinel + "|" + maintenanceRetryAfterLineSentinel
+	// And the behaviour that property protects: both in one body, each
+	// rendering its own thing.
+	html := maintenanceRetryAfterHumanSentinel + "|" + maintenanceRetryAfterLineSentinel
 	got := buildMaintenanceBody(html, 3600, "")
-	want := `3600|1 hour|<p class="retry">Retry in 1 hour</p>`
+	want := `1 hour|<p class="retry">Retry in 1 hour</p>`
 	if got != want {
 		t.Errorf("buildMaintenanceBody = %q, want %q", got, want)
 	}

@@ -1593,7 +1593,7 @@
 			"toastSaved": "Maintenance page saved",
 			"errFailedLoad": "failed to load the maintenance page",
 			"errFailedSave": "failed to save the maintenance page",
-			"helpRetryAfter": "To show the per-route retry delay, use {arenet.maintenance.retry_after_human} for words a visitor can read, or {arenet.maintenance.retry_after} for the raw seconds. Both are substituted at serve time.",
+			"helpRetryAfter": "{arenet.maintenance.retry_after_human} shows the per-route retry delay in words, substituted at serve time. It is empty when Retry-After is 0, so collapse the block around it with a :has(:empty) rule \u2014 the shipped example pages do.",
 			"helpEmpty": "An empty page means Arenet serves its branded default maintenance page.",
 			"builtinBadge": "Arenet Default (built-in)",
 			"builtinTooltip": "This is the built-in Arenet default page — editing it and clicking Save turns it into your custom page.",
@@ -1603,7 +1603,6 @@
 			"placeholdersTitle": "Available placeholders",
 			"previewMessage": "Preview: your global maintenance message appears here.",
 			"ph": {
-				"retryAfter": "The delay as a bare number of seconds (86400) — for a page written in a language Arenet cannot word for you. On an English page prefer retry_after_human",
 				"retryAfterHuman": "The same delay in words (\u201c1 day\u201d, \u201c30 minutes\u201d) \u2014 English only, and empty when Retry-After is 0",
 				"message": "The route's message, or this global message as fallback",
 				"refreshMeta": "Auto-refresh meta tag built from Retry-After (built-in default only; empty when Retry-After is 0)",

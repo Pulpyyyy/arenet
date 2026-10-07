@@ -196,7 +196,7 @@ Resolution : **per-route message if set → else the global message → else not
 
 ### Auto-refresh (v2.18.1)
 
-The built-in default page carries a `<meta http-equiv="refresh">` built from the route's Retry-After (via the `{arenet.maintenance.refresh_meta}` placeholder), so a visitor's browser reloads itself when the window is expected to end. Retry-After `0` emits no meta (a `content="0"` would loop). Custom pages don't get it automatically, but they don't have to hand-build it either: drop `{arenet.maintenance.refresh_meta}` in your own `<head>` and you get the same tag, with the same `0` guard. (This page used to tell you to write `content="{arenet.maintenance.retry_after}"` yourself. That works, but it reimplements the guard — at Retry-After `0` it emits `content="0"`, which reloads the page in a loop.)
+The built-in default page carries a `<meta http-equiv="refresh">` built from the route's Retry-After (via the `{arenet.maintenance.refresh_meta}` placeholder), so a visitor's browser reloads itself when the window is expected to end. Retry-After `0` emits no meta (a `content="0"` would loop). Custom pages don't get it automatically: drop `{arenet.maintenance.refresh_meta}` in your own `<head>` and you get the same tag, with the same `0` guard.
 
 ### Maintenance placeholders
 
@@ -204,18 +204,17 @@ Unlike the `{http.request.*}` / `{time.*}` Caddy placeholders used in error-page
 
 | Placeholder | Expands to |
 | ----------- | ---------- |
-| `{arenet.maintenance.retry_after}` | The **triggering route's** configured Retry-After as a bare number of seconds (`86400`). Its job is pages Arenet cannot word for you: a page written in any language other than English composes its own sentence around the number. For an English page, prefer `retry_after_human` — a visitor does not read `86400` as a day |
-| `{arenet.maintenance.retry_after_human}` | The same delay **in words**: `1 day`, `30 minutes`, `1 hour 30 minutes`. Exact, never rounded. Empty when Retry-After is `0`. **English only** — the served page has no locale for Arenet to key off, so a non-English page should keep the integer form |
+| `{arenet.maintenance.retry_after_human}` | The **triggering route's** Retry-After **in words**: `1 day`, `30 minutes`, `1 hour 30 minutes`. Exact, never rounded. Empty when Retry-After is `0` — collapse the block that holds it with a `:has(:empty)` rule, as the shipped examples do. **English only**: the served page has no locale for Arenet to key off, so a page in another language either accepts that or writes its own fixed wording |
 | `{arenet.maintenance.message}` | The route's message, or the global message as fallback (HTML-escaped, line breaks → `<br>`). Empty when neither is set |
 | `{arenet.maintenance.refresh_meta}` | A `<meta http-equiv="refresh" content="N">` tag (N = Retry-After) ; empty when Retry-After is `0`. Present in the built-in default page's `<head>` — add it to a custom page if you want auto-refresh |
 
-None is a Caddy runtime expression — all are baked into the response body at config-build time. `retry_after`, `retry_after_human` and `refresh_meta` are per-route (each route shows *its own* value inside the otherwise-identical shared HTML) ; `message` resolves per-route-then-global. The `{http.request.*}` / `{time.*}` Caddy placeholders documented above also still work inside the maintenance page body (method, URI, request UUID, timestamp).
+None is a Caddy runtime expression — all are baked into the response body at config-build time. `retry_after_human` and `refresh_meta` are per-route (each route shows *its own* value inside the otherwise-identical shared HTML) ; `message` resolves per-route-then-global. The `{http.request.*}` / `{time.*}` Caddy placeholders documented above also still work inside the maintenance page body (method, URI, request UUID, timestamp).
 
 > **Note (security).** `{env.*}` and `{file.*}` Caddy placeholders are **neutralized** inside operator-supplied maintenance/error page bodies and the global message — they render as literal text instead of expanding — so an admin can't accidentally (or a compromised admin can't deliberately) leak a process-environment secret or an on-disk file into the public response.
 
 ### Example page to start from
 
-A polished, ready-to-copy example maintenance page ships in the repo at [`docs/examples/maintenance-page-example-en.html`](https://github.com/barto95100/arenet/blob/main/docs/examples/maintenance-page-example-en.html) (a French version is at [`maintenance-page-example-fr.html`](https://github.com/barto95100/arenet/blob/main/docs/examples/maintenance-page-example-fr.html)). It's a dark, animated page that uses **only** the placeholders Arenet actually substitutes — `{arenet.maintenance.refresh_meta}` in `<head>` (auto-refresh), `{arenet.maintenance.message}` (collapses cleanly when empty, via a `.message:empty` rule), `{arenet.maintenance.retry_after}`, and the `{http.request.*}` / `{time.now.year}` request vars. Copy its contents into the Maintenance editor and adapt the wording/branding. A regression test keeps it valid against sanitizer changes, so what you copy is always what Arenet will actually serve.
+A polished, ready-to-copy example maintenance page ships in the repo at [`docs/examples/maintenance-page-example-en.html`](https://github.com/barto95100/arenet/blob/main/docs/examples/maintenance-page-example-en.html) (a French version is at [`maintenance-page-example-fr.html`](https://github.com/barto95100/arenet/blob/main/docs/examples/maintenance-page-example-fr.html)). It's a dark, animated page that uses **only** the placeholders Arenet actually substitutes — `{arenet.maintenance.refresh_meta}` in `<head>` (auto-refresh), `{arenet.maintenance.message}` (collapses cleanly when empty, via a `.message:empty` rule), `{arenet.maintenance.retry_after_human}`, and the `{http.request.*}` / `{time.now.year}` request vars. Copy its contents into the Maintenance editor and adapt the wording/branding. A regression test keeps it valid against sanitizer changes, so what you copy is always what Arenet will actually serve.
 
 ### Reset to default
 
@@ -272,7 +271,7 @@ The placeholders inside these pages (`{http.error.id}`, `{http.request.uuid}`, `
 
 - [Routes](Routes) — where to attach a template to a route ; [Route states](Routes#route-states-active-maintenance-disabled) for how a route enters Maintenance
 - `internal/caddymgr/error_pages.go` — the built-in default + 3-layer resolution at serve time
-- `internal/caddymgr/maintenance.go` — maintenance 503 handler, `client_ip` bypass, `{arenet.maintenance.retry_after}` substitution
+- `internal/caddymgr/maintenance.go` — maintenance 503 handler, `client_ip` bypass, `{arenet.maintenance.*}` substitution
 - `internal/storage/error_template.go` — sanitizer + storage layer
 - `web/frontend/src/routes/settings/error-pages/+page.svelte` — the template editor UI + the Maintenance tab
 - [Caddy placeholder reference](https://caddyserver.com/docs/conventions#placeholders) — full list of `{http.request.*}` and `{time.*}` placeholders

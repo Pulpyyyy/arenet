@@ -414,11 +414,9 @@
 
 	// v2.69.0 — the maintenance preview substituted NOTHING: the iframe
 	// took maintenanceHtml verbatim, so the operator judged their page
-	// with "{arenet.maintenance.retry_after}" sitting in the middle of
-	// it. That mattered little while the sentinel was a bare number; it
-	// matters now that the built-in page's whole retry line is one, since
-	// the operator would see a raw token where a sentence belongs and
-	// have no way to see the duration this release is about.
+	// with the raw sentinels sitting in the middle of it, and could not
+	// see the retry sentence at all — the built-in page's whole retry
+	// line is one sentinel.
 	//
 	// Sibling of clientSidePreview above and literal for the same
 	// reason — the operator sees the SHAPE prod will serve. The source of
@@ -427,12 +425,14 @@
 	// a case in TestFormatRetryAfterHuman that names this file, so a
 	// change there fails the Go suite instead of silently making this
 	// preview lie.
-	const MAINTENANCE_PREVIEW_RETRY_SECONDS = 1800;
-	const MAINTENANCE_PREVIEW_RETRY_HUMAN = '30 minutes';
+	// 1800 seconds is the preview's notional Retry-After. It is written
+	// out rather than inlined into the string because it is what makes
+	// '30 minutes' checkable: TestFormatRetryAfterHuman's 1800 case is
+	// the other half of this pair.
+	const MAINTENANCE_PREVIEW_RETRY_HUMAN = '30 minutes'; // = 1800 seconds
 
 	function maintenancePreview(body: string): string {
 		const replacements: Record<string, string> = {
-			'{arenet.maintenance.retry_after}': String(MAINTENANCE_PREVIEW_RETRY_SECONDS),
 			'{arenet.maintenance.retry_after_human}': MAINTENANCE_PREVIEW_RETRY_HUMAN,
 			'{arenet.maintenance.retry_after_line}': `<p class="retry">Retry in ${MAINTENANCE_PREVIEW_RETRY_HUMAN}</p>`,
 			'{arenet.maintenance.message}': t('errorPages.maintenance.previewMessage'),
@@ -496,16 +496,11 @@
 	// offers). {env.*}/{file.*} are intentionally absent — they're
 	// neutralized for security.
 	//
-	// The count in that first sentence used to say "two" and was wrong
-	// by one before retry_after_human made it wrong by two, so it no
-	// longer carries a number.
-	//
 	// {arenet.maintenance.retry_after_line} is deliberately NOT here: it
 	// expands to the built-in page's whole <p class="retry"> paragraph,
 	// English prose and a class a custom page has no reason to inherit.
 	// A custom page composes its own sentence around retry_after_human.
 	const maintenancePlaceholders = $derived([
-		{ token: '{arenet.maintenance.retry_after}', desc: t('errorPages.maintenance.ph.retryAfter') },
 		{
 			token: '{arenet.maintenance.retry_after_human}',
 			desc: t('errorPages.maintenance.ph.retryAfterHuman')

@@ -179,7 +179,9 @@ func TestBuildErrorRoutesForRoute_HostMatcherIncludesAliases(t *testing.T) {
 // must neutralize these dangerous namespaces while leaving the
 // documented-safe {http.request.*} and {arenet.*} placeholders intact.
 func TestSanitizeErrorPageBody_NeutralizesEnvAndFilePlaceholders(t *testing.T) {
-	in := `<p>{env.SECRET_TOKEN}</p><p>{file./etc/passwd}</p><p>host {http.request.host}</p><p>{arenet.maintenance.retry_after}</p>`
+	// The {arenet.*} sample is a sentinel that actually exists, so this
+	// asserts the sanitizer against a string the product really emits.
+	in := `<p>{env.SECRET_TOKEN}</p><p>{file./etc/passwd}</p><p>host {http.request.host}</p><p>` + maintenanceRetryAfterHumanSentinel + `</p>`
 	got := SanitizeErrorPageBody(in)
 
 	// Dangerous namespaces neutralized (the literal live prefix must
@@ -194,7 +196,7 @@ func TestSanitizeErrorPageBody_NeutralizesEnvAndFilePlaceholders(t *testing.T) {
 	if !strings.Contains(got, "{http.request.host}") {
 		t.Errorf("documented {http.request.host} was wrongly neutralized: %q", got)
 	}
-	if !strings.Contains(got, "{arenet.maintenance.retry_after}") {
+	if !strings.Contains(got, maintenanceRetryAfterHumanSentinel) {
 		t.Errorf("documented {arenet.*} placeholder was wrongly neutralized: %q", got)
 	}
 }

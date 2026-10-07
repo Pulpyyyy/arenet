@@ -1593,7 +1593,7 @@
 			"toastSaved": "Page de maintenance enregistrée",
 			"errFailedLoad": "échec du chargement de la page de maintenance",
 			"errFailedSave": "échec de l'enregistrement de la page de maintenance",
-			"helpRetryAfter": "Pour afficher le délai de nouvelle tentative par route, utilisez {arenet.maintenance.retry_after_human} pour des mots lisibles par un visiteur, ou {arenet.maintenance.retry_after} pour les secondes brutes. Les deux sont substitués au moment de la requête.",
+			"helpRetryAfter": "{arenet.maintenance.retry_after_human} affiche le délai de nouvelle tentative par route en mots, substitué au moment de la requête. Il est vide quand Retry-After vaut 0 : replie donc le bloc qui l'entoure avec une règle :has(:empty) — les pages d'exemple livrées le font.",
 			"helpEmpty": "Une page vide signifie qu'Arenet sert sa page de maintenance branded par défaut.",
 			"builtinBadge": "Défaut Arenet (intégré)",
 			"builtinTooltip": "Ceci est la page de maintenance par défaut intégrée à Arenet — la modifier puis cliquer sur Enregistrer en fait votre page personnalisée.",
@@ -1603,7 +1603,6 @@
 			"placeholdersTitle": "Placeholders disponibles",
 			"previewMessage": "Aperçu : votre message de maintenance global s'affiche ici.",
 			"ph": {
-				"retryAfter": "Le délai en nombre brut de secondes (86400) — pour une page écrite dans une langue qu'Arenet ne peut pas rédiger. Sur une page en anglais, préférez retry_after_human",
 				"retryAfterHuman": "Le même délai en mots (« 1 day », « 30 minutes ») — en anglais uniquement, et vide si Retry-After = 0",
 				"message": "Le message de la route, ou ce message global en repli",
 				"refreshMeta": "Balise meta d'auto-refresh construite depuis le Retry-After (page par défaut uniquement ; vide si Retry-After = 0)",

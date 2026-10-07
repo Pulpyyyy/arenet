@@ -560,7 +560,7 @@ describe('/settings/error-pages — Maintenance tab', () => {
 		expect(screen.queryByText('Arenet Default (built-in)')).toBeNull();
 	});
 
-	it('documents the maintenance placeholders (retry_after + message) in the editor palette', async () => {
+	it('documents the maintenance placeholders in the editor palette', async () => {
 		apiMock.list.mockResolvedValue([]);
 		apiMock.getMaintenancePage.mockResolvedValue({ html: '', isDefault: true, message: '' });
 		render(Page);
@@ -569,14 +569,16 @@ describe('/settings/error-pages — Maintenance tab', () => {
 		await waitFor(() => {
 			expect(apiMock.getMaintenancePage).toHaveBeenCalledTimes(1);
 		});
-		// retry_after now appears both as a clickable palette <code> and in
-		// the help text — at least one is enough to prove it's documented.
-		expect(screen.getAllByText(/\{arenet\.maintenance\.retry_after\}/).length).toBeGreaterThan(0);
-		// v2.18.1 — the new message placeholder is also offered.
+		// v2.18.1 — the message placeholder is offered.
 		expect(screen.getByText('{arenet.maintenance.message}')).toBeInTheDocument();
-		// v2.69.0 — and the humanised one, which is the token an operator
-		// wants for anything a visitor reads.
+		// v2.69.0 — and retry_after_human, the one and only way to state
+		// the delay. The palette is where an operator learns which
+		// placeholders exist, so the set it shows is the contract.
 		expect(screen.getByText('{arenet.maintenance.retry_after_human}')).toBeInTheDocument();
+		// The bare-integer sentinel it replaced must not be advertised:
+		// nothing substitutes it any more, so a page built from it would
+		// print the token to the public.
+		expect(screen.queryByText('{arenet.maintenance.retry_after}')).toBeNull();
 	});
 
 	// v2.69.0 — the preview substituted nothing: the iframe took the
@@ -588,7 +590,7 @@ describe('/settings/error-pages — Maintenance tab', () => {
 	it('substitutes the Arenet sentinels in the maintenance preview', async () => {
 		apiMock.list.mockResolvedValue([]);
 		apiMock.getMaintenancePage.mockResolvedValue({
-			html: '<p>{arenet.maintenance.retry_after_line}</p><p>raw {arenet.maintenance.retry_after}</p><p>{arenet.maintenance.message}</p>',
+			html: '<p>{arenet.maintenance.retry_after_line}</p><p>bare {arenet.maintenance.retry_after_human}</p><p>{arenet.maintenance.message}</p>',
 			isDefault: false,
 			message: ''
 		});
@@ -606,11 +608,10 @@ describe('/settings/error-pages — Maintenance tab', () => {
 		})) as HTMLIFrameElement;
 		const srcdoc = frame.getAttribute('srcdoc') ?? '';
 
-		// The words, not the token.
+		// The whole sentence, from the line sentinel.
 		expect(srcdoc).toContain('Retry in 30 minutes');
-		// The raw token still renders the integer, because a custom page
-		// may be feeding it to its own meta refresh.
-		expect(srcdoc).toContain('raw 1800');
+		// And the bare duration, from the human sentinel on its own.
+		expect(srcdoc).toContain('bare 30 minutes');
 		// Nothing Arenet substitutes may survive into what the operator
 		// is looking at.
 		expect(srcdoc).not.toContain('{arenet.maintenance.');
