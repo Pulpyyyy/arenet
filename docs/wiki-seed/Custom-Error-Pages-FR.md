@@ -196,7 +196,7 @@ Résolution : **message de la route si défini → sinon le message global → s
 
 ### Auto-refresh (v2.18.1)
 
-La page par défaut intégrée porte une balise `<meta http-equiv="refresh">` construite depuis le Retry-After de la route (via le placeholder `{arenet.maintenance.refresh_meta}`), pour que le navigateur du visiteur se recharge quand la fenêtre est censée finir. Retry-After `0` n'émet aucune balise (un `content="0"` boucherait). Les pages personnalisées ne l'ont pas automatiquement — ajoute ton propre `<meta http-equiv="refresh" content="{arenet.maintenance.retry_after}">` si tu le veux.
+La page par défaut intégrée porte une balise `<meta http-equiv="refresh">` construite depuis le Retry-After de la route (via le placeholder `{arenet.maintenance.refresh_meta}`), pour que le navigateur du visiteur se recharge quand la fenêtre est censée finir. Retry-After `0` n'émet aucune balise (un `content="0"` boucherait). Les pages personnalisées ne l'ont pas automatiquement, mais n'ont pas à la bâtir à la main non plus : mets `{arenet.maintenance.refresh_meta}` dans ton propre `<head>` et tu obtiens la même balise, avec la même protection à `0`. (Cette page conseillait auparavant d'écrire soi-même `content="{arenet.maintenance.retry_after}"`. Ça fonctionne, mais ça réimplémente la protection — à Retry-After `0` ça émet `content="0"`, qui recharge la page en boucle.)
 
 ### Placeholders de maintenance
 
@@ -204,7 +204,7 @@ Contrairement aux placeholders Caddy `{http.request.*}` / `{time.*}` utilisés d
 
 | Placeholder | S'étend en |
 | ----------- | ---------- |
-| `{arenet.maintenance.retry_after}` | La valeur Retry-After configurée sur la **route déclenchante**, entier brut en secondes (`86400`), substituée au moment de servir la réponse. À utiliser là où une machine lit la valeur — ton propre `<meta refresh>`, un attribut `data-` |
+| `{arenet.maintenance.retry_after}` | La valeur Retry-After configurée sur la **route déclenchante**, nombre brut de secondes (`86400`). Son rôle : les pages qu'Arenet ne peut pas rédiger pour toi — une page écrite dans une autre langue que l'anglais compose sa propre phrase autour du nombre. Pour une page en anglais, préfère `retry_after_human` : un visiteur ne lit pas `86400` comme un jour |
 | `{arenet.maintenance.retry_after_human}` | Le même délai **en mots** : `1 day`, `30 minutes`, `1 hour 30 minutes`. Exact, jamais arrondi. Vide quand Retry-After vaut `0`. **En anglais uniquement** — la page servie n'a aucune locale sur laquelle Arenet pourrait s'appuyer, donc une page non anglophone garde plutôt la forme entière |
 | `{arenet.maintenance.message}` | Le message de la route, ou le message global en repli (échappé en HTML, retours à la ligne → `<br>`). Vide si aucun des deux n'est défini |
 | `{arenet.maintenance.refresh_meta}` | Une balise `<meta http-equiv="refresh" content="N">` (N = Retry-After) ; vide quand Retry-After vaut `0`. Présente dans le `<head>` de la page par défaut — ajoute-la à une page personnalisée pour l'auto-refresh |

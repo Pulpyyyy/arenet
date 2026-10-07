@@ -392,9 +392,15 @@ func TestBuildMaintenanceBody_HumanSentinel(t *testing.T) {
 }
 
 // Non-regression, and the reason the humanised form is a SECOND
-// sentinel rather than a change to the first: a custom page may be
-// using the raw value to build its own meta refresh or a
-// machine-readable attribute.
+// sentinel rather than a change to the first.
+//
+// Caddy's static_response expands its body with repl.ReplaceKnown
+// (v2.11.4 staticresp.go:208), documented as "Unrecognized placeholders
+// will remain in the output" (replacer.go:151-157). So dropping this
+// substitution would not remove the token from custom pages already
+// deployed — it would print "{arenet.maintenance.retry_after}" as
+// literal text on their public 503. This test is what stands between
+// that and a well-meant cleanup.
 func TestBuildMaintenanceBody_RawSentinelStaysRaw(t *testing.T) {
 	html := `<meta http-equiv="refresh" content="{arenet.maintenance.retry_after}">`
 	got := buildMaintenanceBody(html, 86400, "")

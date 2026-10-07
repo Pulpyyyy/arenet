@@ -1603,7 +1603,7 @@
 			"placeholdersTitle": "Available placeholders",
 			"previewMessage": "Preview: your global maintenance message appears here.",
 			"ph": {
-				"retryAfter": "The triggering route's Retry-After as a plain integer of seconds — use it where a machine reads the value, e.g. your own meta refresh",
+				"retryAfter": "The delay as a bare number of seconds (86400) — for a page written in a language Arenet cannot word for you. On an English page prefer retry_after_human",
 				"retryAfterHuman": "The same delay in words (\u201c1 day\u201d, \u201c30 minutes\u201d) \u2014 English only, and empty when Retry-After is 0",
 				"message": "The route's message, or this global message as fallback",
 				"refreshMeta": "Auto-refresh meta tag built from Retry-After (built-in default only; empty when Retry-After is 0)",

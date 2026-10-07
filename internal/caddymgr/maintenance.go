@@ -59,12 +59,31 @@ const maintenanceRefreshMetaSentinel = "{arenet.maintenance.refresh_meta}"
 // "1 hour 30 minutes" — and with the empty string when Retry-After is 0
 // (v2.69.0).
 //
-// The raw sentinel above stays raw. A visitor reading "Retry in 86400s"
-// has no idea that is a day, which is what the operator reported, but a
-// custom page may well be using {arenet.maintenance.retry_after} to
-// build its own <meta refresh> or a machine-readable attribute, so
-// changing what it expands to would break those pages silently. Two
-// sentinels, two jobs.
+// The raw sentinel above stays raw, and the operator pushed back on
+// that: "retire donc le retry_after et garde seulement le bon non ?
+// pourquoi avoir les deux". Two reasons, one decisive.
+//
+// Decisive: removing a sentinel does not hide it, it REVEALS it.
+// static_response expands its body with repl.ReplaceKnown (Caddy
+// v2.11.4 staticresp.go:208), and ReplaceKnown is documented as
+// "Unrecognized placeholders will remain in the output"
+// (replacer.go:151-157). Stop substituting the token and every custom
+// maintenance page already deployed that uses it starts printing the
+// literal text "{arenet.maintenance.retry_after}" on a public 503.
+// Silent, public, and in every installation but ours.
+//
+// The other: it is the only language-neutral form. A page written in
+// anything but English composes its own sentence around the number,
+// because formatRetryAfterHuman emits English words and the served
+// page has no locale to key off. The shipped French example is exactly
+// that case.
+//
+// What the raw sentinel is NOT for, and I had this wrong in the first
+// draft of this comment: building your own <meta refresh>.
+// {arenet.maintenance.refresh_meta} does that in a custom page too —
+// the substitution runs over the whole body, not just the default page
+// — and it carries the Retry-After 0 guard that a hand-written
+// content="0" would reload-loop without.
 const maintenanceRetryAfterHumanSentinel = "{arenet.maintenance.retry_after_human}"
 
 // maintenanceRetryAfterLineSentinel is replaced at emission time with

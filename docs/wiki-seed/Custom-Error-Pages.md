@@ -196,7 +196,7 @@ Resolution : **per-route message if set → else the global message → else not
 
 ### Auto-refresh (v2.18.1)
 
-The built-in default page carries a `<meta http-equiv="refresh">` built from the route's Retry-After (via the `{arenet.maintenance.refresh_meta}` placeholder), so a visitor's browser reloads itself when the window is expected to end. Retry-After `0` emits no meta (a `content="0"` would loop). Custom pages don't get this automatically — add your own `<meta http-equiv="refresh" content="{arenet.maintenance.retry_after}">` if you want it.
+The built-in default page carries a `<meta http-equiv="refresh">` built from the route's Retry-After (via the `{arenet.maintenance.refresh_meta}` placeholder), so a visitor's browser reloads itself when the window is expected to end. Retry-After `0` emits no meta (a `content="0"` would loop). Custom pages don't get it automatically, but they don't have to hand-build it either: drop `{arenet.maintenance.refresh_meta}` in your own `<head>` and you get the same tag, with the same `0` guard. (This page used to tell you to write `content="{arenet.maintenance.retry_after}"` yourself. That works, but it reimplements the guard — at Retry-After `0` it emits `content="0"`, which reloads the page in a loop.)
 
 ### Maintenance placeholders
 
@@ -204,7 +204,7 @@ Unlike the `{http.request.*}` / `{time.*}` Caddy placeholders used in error-page
 
 | Placeholder | Expands to |
 | ----------- | ---------- |
-| `{arenet.maintenance.retry_after}` | The **triggering route's** configured Retry-After as a plain integer of seconds (`86400`), substituted at serve time. Use it where a machine reads the value — your own `<meta refresh>`, a `data-` attribute |
+| `{arenet.maintenance.retry_after}` | The **triggering route's** configured Retry-After as a bare number of seconds (`86400`). Its job is pages Arenet cannot word for you: a page written in any language other than English composes its own sentence around the number. For an English page, prefer `retry_after_human` — a visitor does not read `86400` as a day |
 | `{arenet.maintenance.retry_after_human}` | The same delay **in words**: `1 day`, `30 minutes`, `1 hour 30 minutes`. Exact, never rounded. Empty when Retry-After is `0`. **English only** — the served page has no locale for Arenet to key off, so a non-English page should keep the integer form |
 | `{arenet.maintenance.message}` | The route's message, or the global message as fallback (HTML-escaped, line breaks → `<br>`). Empty when neither is set |
 | `{arenet.maintenance.refresh_meta}` | A `<meta http-equiv="refresh" content="N">` tag (N = Retry-After) ; empty when Retry-After is `0`. Present in the built-in default page's `<head>` — add it to a custom page if you want auto-refresh |
