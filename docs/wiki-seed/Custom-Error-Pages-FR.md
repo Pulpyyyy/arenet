@@ -204,11 +204,12 @@ Contrairement aux placeholders Caddy `{http.request.*}` / `{time.*}` utilisés d
 
 | Placeholder | S'étend en |
 | ----------- | ---------- |
-| `{arenet.maintenance.retry_after}` | La valeur Retry-After configurée sur la **route déclenchante**, en secondes, substituée au moment de servir la réponse |
+| `{arenet.maintenance.retry_after}` | La valeur Retry-After configurée sur la **route déclenchante**, entier brut en secondes (`86400`), substituée au moment de servir la réponse. À utiliser là où une machine lit la valeur — ton propre `<meta refresh>`, un attribut `data-` |
+| `{arenet.maintenance.retry_after_human}` | Le même délai **en mots** : `1 day`, `30 minutes`, `1 hour 30 minutes`. Exact, jamais arrondi. Vide quand Retry-After vaut `0`. **En anglais uniquement** — la page servie n'a aucune locale sur laquelle Arenet pourrait s'appuyer, donc une page non anglophone garde plutôt la forme entière |
 | `{arenet.maintenance.message}` | Le message de la route, ou le message global en repli (échappé en HTML, retours à la ligne → `<br>`). Vide si aucun des deux n'est défini |
 | `{arenet.maintenance.refresh_meta}` | Une balise `<meta http-equiv="refresh" content="N">` (N = Retry-After) ; vide quand Retry-After vaut `0`. Présente dans le `<head>` de la page par défaut — ajoute-la à une page personnalisée pour l'auto-refresh |
 
-Aucun n'est une expression runtime Caddy — tous sont intégrés dans le corps de la réponse au moment de la construction de la config. `retry_after` et `refresh_meta` sont par route (chaque route affiche *sa propre* valeur dans le HTML partagé par ailleurs identique) ; `message` se résout par-route-puis-global. Les placeholders Caddy `{http.request.*}` / `{time.*}` documentés plus haut fonctionnent aussi toujours dans le corps de la page de maintenance (méthode, URI, UUID de requête, timestamp).
+Aucun n'est une expression runtime Caddy — tous sont intégrés dans le corps de la réponse au moment de la construction de la config. `retry_after`, `retry_after_human` et `refresh_meta` sont par route (chaque route affiche *sa propre* valeur dans le HTML partagé par ailleurs identique) ; `message` se résout par-route-puis-global. Les placeholders Caddy `{http.request.*}` / `{time.*}` documentés plus haut fonctionnent aussi toujours dans le corps de la page de maintenance (méthode, URI, UUID de requête, timestamp).
 
 > **Note (sécurité).** Les placeholders Caddy `{env.*}` et `{file.*}` sont **neutralisés** dans les corps de pages de maintenance/erreur fournis par l'opérateur et dans le message global — ils s'affichent en texte littéral au lieu de s'étendre — pour qu'un admin ne puisse pas (accidentellement, ou délibérément si le compte est compromis) faire fuiter un secret d'environnement ou un fichier disque dans la réponse publique.
 

@@ -21,7 +21,15 @@
                                           neither is set — the .msg block
                                           below collapses via :empty so no
                                           empty box shows.
-    {arenet.maintenance.retry_after}   — Retry-After value in seconds.
+    {arenet.maintenance.retry_after}   — Retry-After value as a plain
+                                          integer of seconds (e.g. 86400).
+                                          Use it where a machine reads the
+                                          value, not where a visitor does.
+    {arenet.maintenance.retry_after_human}
+                                       — the same delay in words: "1 day",
+                                          "30 minutes", "1 hour 30 minutes".
+                                          English only, and empty when
+                                          Retry-After is 0.
     {http.request.host} / .method / .uri / .uuid   — Caddy request vars.
     {time.now.year}                    — current year.
 
@@ -97,8 +105,9 @@ a{color:inherit;text-decoration:none}::selection{background:var(--accent-soft);c
 .message{color:var(--fg-muted);font-size:15.5px;line-height:1.62;max-width:400px;margin:0 auto 30px}
 .message:empty{display:none}
 
-/* Retry-After hero stat. {arenet.maintenance.retry_after} is the raw
-   seconds value — Arenet substitutes it as a plain integer. */
+/* Retry-After hero stat. {arenet.maintenance.retry_after_human} is the
+   delay in words; {arenet.maintenance.retry_after} is the raw integer of
+   seconds if you need the number itself. */
 .eta-hero{display:flex;flex-direction:column;align-items:center;gap:6px;margin:0 auto 26px;padding:20px 22px;max-width:340px;border:1px solid var(--border);border-radius:16px;background:linear-gradient(180deg, oklch(22% 0.007 250 / 0.7), oklch(19% 0.006 250 / 0.5));box-shadow:0 0 0 1px oklch(100% 0 0 / 0.02) inset}
 .eta-hero .eta-k{display:inline-flex;align-items:center;gap:7px;font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:0.16em;color:var(--fg-dim)}
 .eta-hero .eta-k::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--tone);box-shadow:0 0 7px var(--tone-glow)}
@@ -147,7 +156,7 @@ a{color:inherit;text-decoration:none}::selection{background:var(--accent-soft);c
 
       <div class="eta-hero">
         <span class="eta-k">Suggested retry in</span>
-        <span class="eta-v">{arenet.maintenance.retry_after}s</span>
+        <span class="eta-v">{arenet.maintenance.retry_after_human}</span>
         <span class="eta-sub">This page will refresh automatically</span>
       </div>
 

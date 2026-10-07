@@ -54,6 +54,99 @@ const maintenanceMessageSentinel = "{arenet.maintenance.message}"
 // meta refresh using {arenet.maintenance.retry_after}.
 const maintenanceRefreshMetaSentinel = "{arenet.maintenance.refresh_meta}"
 
+// maintenanceRetryAfterHumanSentinel is replaced at emission time with
+// the route's Retry-After rendered in words — "1 day", "5 minutes",
+// "1 hour 30 minutes" — and with the empty string when Retry-After is 0
+// (v2.69.0).
+//
+// The raw sentinel above stays raw. A visitor reading "Retry in 86400s"
+// has no idea that is a day, which is what the operator reported, but a
+// custom page may well be using {arenet.maintenance.retry_after} to
+// build its own <meta refresh> or a machine-readable attribute, so
+// changing what it expands to would break those pages silently. Two
+// sentinels, two jobs.
+const maintenanceRetryAfterHumanSentinel = "{arenet.maintenance.retry_after_human}"
+
+// maintenanceRetryAfterLineSentinel is replaced at emission time with
+// the default page's whole "Retry in …" paragraph, or with the empty
+// string when Retry-After is 0.
+//
+// It exists because the paragraph has to disappear entirely at 0, not
+// just lose its value: today the page says "Retry in 0s", and with a
+// humanised value alone it would say "Retry in " with a dangling space.
+// A CSS :empty rule cannot reach it either — the <p> still holds the
+// literal words "Retry in". So the whole line is the substituted unit.
+//
+// Default-page-only, exactly like refresh_meta: a custom page carries
+// no such sentinel and composes its own prose around
+// {arenet.maintenance.retry_after_human}.
+const maintenanceRetryAfterLineSentinel = "{arenet.maintenance.retry_after_line}"
+
+// Seconds per unit, spelled as arithmetic so each is self-evidently
+// right rather than a number to be trusted.
+const (
+	secondsPerMinute = 60
+	secondsPerHour   = 60 * secondsPerMinute
+	secondsPerDay    = 24 * secondsPerHour
+)
+
+// retryAfterUnits are the units formatRetryAfterHuman decomposes into,
+// largest first. Days is the ceiling deliberately, on two grounds: a
+// maintenance window measured in weeks is not a maintenance window, and
+// a "month" is not a fixed number of seconds, so rendering one would be
+// a guess. It also matches the unit list the operator picks from in the
+// route form exactly (web/frontend/src/lib/utils/duration.ts:
+// 'seconds' | 'minutes' | 'hours' | 'days'), so a window entered as
+// "1 day" is read back by the visitor as "1 day".
+var retryAfterUnits = []struct {
+	seconds  int
+	singular string
+}{
+	{secondsPerDay, "day"},
+	{secondsPerHour, "hour"},
+	{secondsPerMinute, "minute"},
+	{1, "second"},
+}
+
+// formatRetryAfterHuman renders a Retry-After seconds count as English
+// words: 86400 → "1 day", 300 → "5 minutes", 5400 → "1 hour 30
+// minutes", 90 → "1 minute 30 seconds".
+//
+// Every non-zero component is emitted, so the text is always EXACTLY
+// the stored value and never a rounded approximation. That can produce
+// a long string for an odd input ("1 day 1 hour 1 minute 1 second"),
+// which is the honest rendering of an odd input; every value the route
+// form can produce with its number+unit selector is one component.
+//
+// Returns the empty string for 0 and for negatives. 0 is reachable —
+// storage validates >= 0 (storage/routes.go:651) and the field is
+// omitempty — and it means "no Retry-After header, no auto-refresh",
+// i.e. no duration to state. Negatives cannot reach here through
+// validation; the guard keeps the function total rather than trusting
+// that.
+//
+// English only, matching the rest of the default page (lang="en").
+func formatRetryAfterHuman(seconds int) string {
+	if seconds <= 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(retryAfterUnits))
+	rest := seconds
+	for _, u := range retryAfterUnits {
+		n := rest / u.seconds
+		if n == 0 {
+			continue
+		}
+		rest -= n * u.seconds
+		word := u.singular
+		if n > 1 {
+			word += "s"
+		}
+		parts = append(parts, strconv.Itoa(n)+" "+word)
+	}
+	return strings.Join(parts, " ")
+}
+
 // buildMaintenanceBody returns the maintenance HTML with the per-route
 // Retry-After and the global message substituted in. `pageHTML` is the
 // operator's stored page (already sanitized via SanitizeErrorPageBody
@@ -87,7 +180,31 @@ func buildMaintenanceBody(pageHTML string, retryAfter int, message string) strin
 		refreshMeta = `<meta http-equiv="refresh" content="` + strconv.Itoa(retryAfter) + `">`
 	}
 
-	out := strings.ReplaceAll(pageHTML, maintenanceRetryAfterSentinel, strconv.Itoa(retryAfter))
+	// The humanised duration and the default page's retry line. Both
+	// collapse to "" at 0, for the same reason refreshMeta does: there
+	// is no duration to state. The line carries the prose so the
+	// paragraph can vanish whole — see the sentinel's doc comment.
+	//
+	// The meta refresh above and the Retry-After header in
+	// buildMaintenanceRoute keep the RAW seconds. The humanised form is
+	// for the reader only; a meta refresh needs an integer and
+	// Retry-After is delta-seconds per RFC 9110 §10.2.3.
+	retryHuman := formatRetryAfterHuman(retryAfter)
+	retryLine := ""
+	if retryHuman != "" {
+		retryLine = `<p class="retry">Retry in ` + retryHuman + `</p>`
+	}
+
+	// Substitution order is free here, and I checked rather than
+	// assumed: the three retry-after sentinels all close with '}', so
+	// "{arenet.maintenance.retry_after}" is NOT a substring of
+	// "…retry_after_human}" or "…retry_after_line}" and no pass can eat
+	// another's token. That stops being true the moment one of them is
+	// renamed to drop or move the brace, which is what
+	// TestBuildMaintenanceBody_SentinelsDoNotShadowEachOther pins.
+	out := strings.ReplaceAll(pageHTML, maintenanceRetryAfterHumanSentinel, retryHuman)
+	out = strings.ReplaceAll(out, maintenanceRetryAfterLineSentinel, retryLine)
+	out = strings.ReplaceAll(out, maintenanceRetryAfterSentinel, strconv.Itoa(retryAfter))
 	out = strings.ReplaceAll(out, maintenanceRefreshMetaSentinel, refreshMeta)
 	return strings.ReplaceAll(out, maintenanceMessageSentinel, renderedMsg)
 }
@@ -169,8 +286,13 @@ func buildMaintenanceRoute(metricsHandler, proxyHandler map[string]any, bypassIP
 // of arenetDefaultPage (error_pages.go:259) — same dark theme, same
 // card layout, same "powered by Arenet" footer — with a blue "Back
 // soon" framing appropriate for a planned outage rather than an
-// error, plus the Retry-After sentinel rendered as a human-readable
-// line.
+// error, plus the retry-after line.
+//
+// v2.69.0: that line used to read "Retry in {arenet.maintenance.
+// retry_after}s", which put "Retry in 86400s" in front of a visitor who
+// has no way to know that is a day. It is now the retry_after_line
+// sentinel, which carries the duration in words and vanishes whole when
+// Retry-After is 0 (where the old line said "Retry in 0s").
 var arenetDefaultMaintenancePage = fmt.Sprintf(`<!doctype html>
 <html lang="en">
 <head>
@@ -199,14 +321,14 @@ var arenetDefaultMaintenancePage = fmt.Sprintf(`<!doctype html>
   <h1>Back soon</h1>
   <p>This service is undergoing scheduled maintenance. Please check back shortly.</p>
   <p class="msg">%s</p>
-  <p class="retry">Retry in %ss</p>
+  %s
   <div class="meta">
     {http.request.method} {http.request.uri_escaped} · request id: {http.request.uuid}<br>
     <a href="https://github.com/barto95100/arenet">powered by Arenet</a>
   </div>
 </div>
 </body>
-</html>`, maintenanceMessageSentinel, maintenanceRetryAfterSentinel)
+</html>`, maintenanceMessageSentinel, maintenanceRetryAfterLineSentinel)
 
 // DefaultMaintenancePageHTML returns the branded default maintenance
 // page HTML served when the operator has not customized the global

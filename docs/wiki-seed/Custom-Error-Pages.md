@@ -204,11 +204,12 @@ Unlike the `{http.request.*}` / `{time.*}` Caddy placeholders used in error-page
 
 | Placeholder | Expands to |
 | ----------- | ---------- |
-| `{arenet.maintenance.retry_after}` | The **triggering route's** configured Retry-After value (seconds), substituted at serve time |
+| `{arenet.maintenance.retry_after}` | The **triggering route's** configured Retry-After as a plain integer of seconds (`86400`), substituted at serve time. Use it where a machine reads the value — your own `<meta refresh>`, a `data-` attribute |
+| `{arenet.maintenance.retry_after_human}` | The same delay **in words**: `1 day`, `30 minutes`, `1 hour 30 minutes`. Exact, never rounded. Empty when Retry-After is `0`. **English only** — the served page has no locale for Arenet to key off, so a non-English page should keep the integer form |
 | `{arenet.maintenance.message}` | The route's message, or the global message as fallback (HTML-escaped, line breaks → `<br>`). Empty when neither is set |
 | `{arenet.maintenance.refresh_meta}` | A `<meta http-equiv="refresh" content="N">` tag (N = Retry-After) ; empty when Retry-After is `0`. Present in the built-in default page's `<head>` — add it to a custom page if you want auto-refresh |
 
-None is a Caddy runtime expression — all are baked into the response body at config-build time. `retry_after` and `refresh_meta` are per-route (each route shows *its own* value inside the otherwise-identical shared HTML) ; `message` resolves per-route-then-global. The `{http.request.*}` / `{time.*}` Caddy placeholders documented above also still work inside the maintenance page body (method, URI, request UUID, timestamp).
+None is a Caddy runtime expression — all are baked into the response body at config-build time. `retry_after`, `retry_after_human` and `refresh_meta` are per-route (each route shows *its own* value inside the otherwise-identical shared HTML) ; `message` resolves per-route-then-global. The `{http.request.*}` / `{time.*}` Caddy placeholders documented above also still work inside the maintenance page body (method, URI, request UUID, timestamp).
 
 > **Note (security).** `{env.*}` and `{file.*}` Caddy placeholders are **neutralized** inside operator-supplied maintenance/error page bodies and the global message — they render as literal text instead of expanding — so an admin can't accidentally (or a compromised admin can't deliberately) leak a process-environment secret or an on-disk file into the public response.
 
