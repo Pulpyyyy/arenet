@@ -1246,6 +1246,32 @@ type matcherSet struct {
 	// omitempty preserves byte-identical JSON for the
 	// pre-R routes.
 	Expression string `json:"expression,omitempty"`
+	// ClientIP (v2.70.0) — Caddy's client_ip matcher as a SET member,
+	// so it ANDs with Host: "this host, and only from these ranges".
+	// That is what lets a maintenance route hand its bypass list the
+	// real route while a sibling catch-all serves everyone else the
+	// 503 (see the maintenance window in maintenance.go).
+	//
+	// A pointer with omitempty, for the same reason Path and
+	// Expression above carry it: every route that does not set this
+	// serialises exactly as it did before the field existed, which is
+	// what the two golden fixtures in this package assert.
+	//
+	// client_ip rather than remote_ip, deliberately. remote_ip reads
+	// the TCP peer, so behind any upstream proxy every request would
+	// appear to come from that proxy and the bypass would either match
+	// nobody or match everybody. client_ip resolves the chain through
+	// Caddy's trusted_proxies. The pre-v2.70.0 bypass subroute chose the
+	// same matcher when it only guarded a static 503; the choice matters
+	// more now that it guards the backend.
+	ClientIP *clientIPMatcher `json:"client_ip,omitempty"`
+}
+
+// clientIPMatcher is Caddy's http.matchers.client_ip config shape.
+// Ranges accepts CIDRs and bare addresses (storage.MaintenanceConfig
+// validates them before they reach here).
+type clientIPMatcher struct {
+	Ranges []string `json:"ranges"`
 }
 
 // wrapInSubroute (Step K.4 parity fix) packages a flat handler
@@ -1437,6 +1463,11 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 		DNS01:  make([]string, 0, len(routes)),
 	}
 
+	// openWindow is the maintenance window of the iteration in flight.
+	// Declared outside the loop so the check after it can tell whether
+	// some exit path forgot to close one — see the error below the loop.
+	var openWindow *maintenanceWindow
+
 	for _, r := range routes {
 		// Handler chain order (spec §11.5) — the metrics handler MUST
 		// run before reverse_proxy so it observes the upstream's status
@@ -1538,38 +1569,33 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 		// r.Disabled check below is defensive belt-and-braces for
 		// direct buildConfigJSON callers (e.g. tests) that don't
 		// pre-filter.
-		// v2.44 — the redirect state joins maintenance here rather
-		// than getting a branch of its own. Both replace the proxy
-		// chain entirely and both need the identical TLS-redirect and
-		// cert-registration tail below: a redirecting route still has
-		// to be reachable on both listeners and still needs its
-		// certificate, or the browser meets a warning instead of a
-		// redirect (spec D8). Duplicating that tail is how it drifts.
+		// Open the maintenance window BEFORE anything in this iteration
+		// can append a route, so httpFrom/httpsFrom really are "the
+		// state before this route". Nothing between the top of the loop
+		// and here appends; checked, not assumed.
 		//
-		// Route.Validate guarantees the two configs are never both
-		// set, so the inner choice is a simple either/or.
-		if (r.MaintenanceConfig != nil || r.RedirectConfig != nil) && !r.Disabled {
-			var replacement map[string]any
-			if r.RedirectConfig != nil {
-				replacement = buildRedirectStateHandler(metricsHandler, r.RedirectConfig)
-			} else {
-				maintenanceHTML := resolveMaintenancePage(opts.MaintenancePageHTML)
-				// v2.18.1 — per-route message wins; fall back to the global
-				// message (MaintenancePageConfig.Message via opts) when the
-				// route sets none. Both empty → empty substitution.
-				effectiveMsg := r.MaintenanceConfig.Message
-				if effectiveMsg == "" {
-					effectiveMsg = opts.MaintenanceMessage
-				}
-				replacement = buildMaintenanceRoute(
-					metricsHandler,
-					proxyHandler,
-					r.MaintenanceConfig.BypassIPs,
-					r.MaintenanceConfig.RetryAfterSeconds,
-					maintenanceHTML,
-					effectiveMsg,
-				)
-			}
+		// openMaintenanceWindow returns nil for every route that is not
+		// in maintenance, so the cost on the normal path is one nil and
+		// not one byte of emitted JSON can move.
+		openWindow = openMaintenanceWindow(
+			r, metricsHandler, opts.MaintenancePageHTML, opts.MaintenanceMessage,
+			len(httpRoutes), len(httpsRoutes),
+		)
+
+		// v2.70.0 — maintenance no longer shares this branch.
+		//
+		// It used to, and that was the defect: short-circuiting here
+		// skipped every remaining line of the body, so a bypassed client
+		// reached a route with no path rules, no headers and no gates.
+		// A maintenance route now runs through the normal assembly like
+		// any other and is gated afterwards by its window, opened just
+		// above and closed on every exit below.
+		//
+		// The redirect state keeps the branch. It has nothing to
+		// preview and no bypass list, and separating the two is what
+		// let the maintenance half move without touching this one.
+		if r.RedirectConfig != nil && !r.Disabled {
+			replacement := buildRedirectStateHandler(metricsHandler, r.RedirectConfig)
 
 			allHosts := r.AllHosts()
 			route := httpRoute{
@@ -1832,6 +1858,13 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 						}
 					}
 				}
+				// Exit path #1 of 2 for a maintenance route. The deny
+				// route is in the window, so it gets gated behind the
+				// bypass list and the 503 follows it: with maintenance
+				// off an unresolvable provider denies, so a bypassed
+				// client is denied too and everyone else meets the 503.
+				httpRoutes, httpsRoutes = closeMaintenanceWindow(openWindow, httpRoutes, httpsRoutes)
+				openWindow = nil
 				continue
 			}
 		}
@@ -2060,6 +2093,24 @@ func buildConfigJSON(routes []storage.Route, opts buildOpts) ([]byte, error) {
 				}
 			}
 		}
+
+		// Exit path #2 of 2 for a maintenance route: the normal end of
+		// the body. Everything this iteration emitted is now in the
+		// window, so gate it behind the bypass list and append the 503.
+		// A no-op for every route that is not in maintenance.
+		httpRoutes, httpsRoutes = closeMaintenanceWindow(openWindow, httpRoutes, httpsRoutes)
+		openWindow = nil
+	}
+
+	// A window left open means some exit path out of the loop body did
+	// not close it, which would emit a maintenance route serving its
+	// real content to the world. Loud by design: this is the guard that
+	// makes two explicit call sites acceptable instead of wrapping the
+	// whole body in a closure.
+	if openWindow != nil {
+		return nil, fmt.Errorf(
+			"internal: maintenance window for route %s left open — a new exit path "+
+				"from the route loop must call closeMaintenanceWindow", openWindow.routeID)
 	}
 
 	// Final catch-all: must be the LAST route. No match block = matches every

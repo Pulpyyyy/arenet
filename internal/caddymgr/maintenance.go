@@ -21,6 +21,8 @@ import (
 	"html"
 	"strconv"
 	"strings"
+
+	"github.com/barto95100/arenet/internal/storage"
 )
 
 // v2.69.0 removed {arenet.maintenance.retry_after}, the bare-integer
@@ -205,8 +207,8 @@ func buildMaintenanceBody(pageHTML string, retryAfter int, message string) strin
 	// is no duration to state. The line carries the prose so the
 	// paragraph can vanish whole — see the sentinel's doc comment.
 	//
-	// The meta refresh above and the Retry-After header in
-	// buildMaintenanceRoute keep the RAW seconds. The humanised form is
+	// The meta refresh above and the Retry-After header on the 503 route
+	// (buildMaintenance503Route) keep the RAW seconds. The humanised form is
 	// for the reader only; a meta refresh needs an integer and
 	// Retry-After is delta-seconds per RFC 9110 §10.2.3.
 	retryHuman := formatRetryAfterHuman(retryAfter)
@@ -241,62 +243,6 @@ func resolveMaintenancePage(storedHTML string) string {
 		return SanitizeErrorPageBody(storedHTML)
 	}
 	return arenetDefaultMaintenancePage
-}
-
-// buildMaintenanceRoute builds the terminal subroute handler for a
-// route in maintenance mode: an OPTIONAL first inner route matching
-// the operator's client_ip bypass allow-list (terminal, dispatches to
-// the normal proxy handler chain), followed by a catch-all inner
-// route serving a static_response 503 (with Retry-After + the
-// maintenance body). metricsHandler is placed first in the 503 inner
-// route so the 503 is counted in the per-route metrics (mirrors the
-// invariant that metrics stays first in every emitted chain,
-// manager.go handlers := []map[string]any{metricsHandler}).
-//
-// When bypassIPs is empty, the bypass inner route is omitted
-// entirely rather than emitted with an empty ranges list: Caddy's
-// client_ip matcher with a zero-length ranges slice is documented as
-// "matches nothing meaningfully" territory we don't want to rely on
-// — omitting the route entirely is the unambiguous "all traffic hits
-// the 503" shape.
-//
-// message is the global operator maintenance message (v2.18.0),
-// substituted (escaped, newlines→<br>) into the body via
-// buildMaintenanceBody. Empty message renders nothing.
-func buildMaintenanceRoute(metricsHandler, proxyHandler map[string]any, bypassIPs []string, retryAfterSeconds int, maintenanceHTML, message string) map[string]any {
-	innerRoutes := make([]map[string]any, 0, 2)
-
-	if len(bypassIPs) > 0 {
-		innerRoutes = append(innerRoutes, map[string]any{
-			"match": []map[string]any{
-				{"client_ip": map[string]any{"ranges": bypassIPs}},
-			},
-			"handle":   []map[string]any{metricsHandler, proxyHandler},
-			"terminal": true,
-		})
-	}
-
-	body := buildMaintenanceBody(maintenanceHTML, retryAfterSeconds, message)
-	headers := map[string]any{
-		"Content-Type": []string{"text/html; charset=utf-8"},
-	}
-	if retryAfterSeconds > 0 {
-		headers["Retry-After"] = []string{strconv.Itoa(retryAfterSeconds)}
-	}
-	staticResp := map[string]any{
-		"handler":     "static_response",
-		"status_code": 503,
-		"body":        body,
-		"headers":     headers,
-	}
-	innerRoutes = append(innerRoutes, map[string]any{
-		"handle": []map[string]any{metricsHandler, staticResp},
-	})
-
-	return map[string]any{
-		"handler": "subroute",
-		"routes":  innerRoutes,
-	}
 }
 
 // arenetDefaultMaintenancePage is the branded default served when the
@@ -359,4 +305,207 @@ var arenetDefaultMaintenancePage = fmt.Sprintf(`<!doctype html>
 // (Step R Phase 2.1's virtual "arenet-default" template entry).
 func DefaultMaintenancePageHTML() string {
 	return arenetDefaultMaintenancePage
+}
+
+// ---------------------------------------------------------------------
+// The maintenance window (v2.70.0)
+//
+// Spec: docs/superpowers/specs/2026-10-08-maintenance-bypass-serves-
+// the-real-route-design.md. Plan: the sibling file under plans/.
+//
+// Until v2.69.0 a maintenance route short-circuited the whole emitter:
+// the branch in buildConfigJSON built a subroute with two inner routes —
+// bypass IPs to a bare reverse_proxy over the route's root pool,
+// everyone else to the 503 — and skipped every remaining line of the
+// per-route body. The bypassed client therefore reached a DIFFERENT
+// route than the one that would go live: no path rules (so no per-path
+// pools, forward auth, basic auth, IP filters, redirects or rate
+// limits), no request/response headers, no gates.
+//
+// The operator found it the way the feature is meant to be used:
+// "depuis mon ip l'accès a la route avec mon ip en bypass c'est ok mais
+// une prefix/header qui match une URI avec forward auth elle tombe en
+// 404 depuis mon ip". A bypass exists to verify a route before
+// reopening it, and it cannot do that while it serves something else.
+//
+// So the emitter no longer branches. A maintenance route runs through
+// the normal assembly and produces exactly the routes it always would;
+// afterwards, those routes are gated behind the bypass allow-list and a
+// catch-all 503 is appended beside them. Caddy ANDs the members of a
+// matcher set and dispatches routes in declaration order, so
+// {host, client_ip} followed by {host} is precisely "bypassed clients
+// get the real route, everyone else gets the 503".
+//
+// The window is what makes that safe for every OTHER route: it is
+// opened only when MaintenanceConfig is non-nil, so a route without one
+// pays a single nil check and not one byte of its emitted JSON can
+// move. That is asserted, not argued — testdata/gated_emission_golden
+// .json was captured from the code as it stood before this change.
+// ---------------------------------------------------------------------
+
+// maintenanceWindow records the span of emitted routes belonging to one
+// route in maintenance, so the span can be gated once the loop has
+// finished producing it.
+type maintenanceWindow struct {
+	routeID string
+
+	// hosts is the route's full hostname set (primary + aliases), the
+	// same slice the gated routes match on, so the 503 catches exactly
+	// what they do not.
+	hosts []string
+
+	// httpFrom / httpsFrom are the lengths of the two route slices as
+	// they stood BEFORE this iteration appended anything, so the window
+	// is everything from that index to the end.
+	httpFrom  int
+	httpsFrom int
+
+	// bypassIPs empty means nobody bypasses: the window is dropped
+	// rather than emitted behind a matcher nothing can satisfy.
+	bypassIPs []string
+
+	tlsEnabled bool
+
+	// httpCarriesRedirectOnly records that the HTTP listener received a
+	// 301-to-https hop rather than the route (TLSEnabled &&
+	// RedirectToHTTPS). Gating a hop is meaningless, and appending a
+	// 503 beside it would turn today's "301 then 503 over TLS" into a
+	// 503 over plain HTTP — a change on a path that is not the bug.
+	// Taken from the same expression the emitter branches on, so the two
+	// cannot drift apart.
+	httpCarriesRedirectOnly bool
+
+	// The 503 itself, resolved at open time while the route and the
+	// options are both in scope.
+	body              string
+	retryAfterSeconds int
+	metricsHandler    map[string]any
+}
+
+// openMaintenanceWindow returns nil for every route that is not in
+// maintenance, which is the whole non-regression argument: the caller's
+// only cost on the normal path is this nil.
+func openMaintenanceWindow(
+	r storage.Route,
+	metricsHandler map[string]any,
+	globalPageHTML, globalMessage string,
+	httpLen, httpsLen int,
+) *maintenanceWindow {
+	if r.MaintenanceConfig == nil || r.Disabled {
+		return nil
+	}
+	// Per-route message wins, global is the fallback, both empty
+	// substitutes to nothing (v2.18.1).
+	msg := r.MaintenanceConfig.Message
+	if msg == "" {
+		msg = globalMessage
+	}
+	return &maintenanceWindow{
+		routeID:                 r.ID,
+		hosts:                   r.AllHosts(),
+		httpFrom:                httpLen,
+		httpsFrom:               httpsLen,
+		bypassIPs:               r.MaintenanceConfig.BypassIPs,
+		tlsEnabled:              r.TLSEnabled,
+		httpCarriesRedirectOnly: r.TLSEnabled && r.RedirectToHTTPS,
+		body: buildMaintenanceBody(
+			resolveMaintenancePage(globalPageHTML),
+			r.MaintenanceConfig.RetryAfterSeconds,
+			msg,
+		),
+		retryAfterSeconds: r.MaintenanceConfig.RetryAfterSeconds,
+		metricsHandler:    metricsHandler,
+	}
+}
+
+// closeMaintenanceWindow gates the routes this iteration emitted behind
+// the bypass allow-list and appends the catch-all 503.
+//
+// It must be called on EVERY path out of the per-route loop body, not
+// just the last one — the forward-auth deny branch continues early. A
+// window left open is caught after the loop and returned as an error
+// rather than silently producing a maintenance route that serves its
+// real content to the world.
+func closeMaintenanceWindow(w *maintenanceWindow, httpRoutes, httpsRoutes []httpRoute) ([]httpRoute, []httpRoute) {
+	if w == nil {
+		return httpRoutes, httpsRoutes
+	}
+
+	resp := buildMaintenance503Route(w)
+
+	// HTTP listener. Under RedirectToHTTPS it holds a 301 hop, which is
+	// left exactly as it is today (see httpCarriesRedirectOnly).
+	if !w.httpCarriesRedirectOnly {
+		httpRoutes = gateRoutesBehindBypass(httpRoutes, w.httpFrom, w.bypassIPs)
+		httpRoutes = append(httpRoutes, resp)
+	}
+
+	if w.tlsEnabled {
+		httpsRoutes = gateRoutesBehindBypass(httpsRoutes, w.httpsFrom, w.bypassIPs)
+		httpsRoutes = append(httpsRoutes, resp)
+	}
+
+	return httpRoutes, httpsRoutes
+}
+
+// gateRoutesBehindBypass adds the client_ip matcher to every route from
+// `from` onwards, or truncates them away when nobody bypasses.
+func gateRoutesBehindBypass(routes []httpRoute, from int, bypassIPs []string) []httpRoute {
+	if len(bypassIPs) == 0 {
+		// Nobody bypasses, so the real routes must not be reachable at
+		// all. Dropped rather than emitted behind an unsatisfiable
+		// matcher: a route Caddy can never dispatch to is dead config,
+		// and "unsatisfiable" is a property of the matcher that a future
+		// edit could accidentally relax.
+		return routes[:from]
+	}
+	for i := from; i < len(routes); i++ {
+		if len(routes[i].Match) == 0 {
+			// A route with no matcher set matches EVERY request, so it
+			// cannot be left alone here — client_ip on its own is the
+			// correct gate. No emitted route currently takes this path;
+			// the branch exists so that one appearing later is gated
+			// rather than silently exposed.
+			routes[i].Match = []matcherSet{{ClientIP: &clientIPMatcher{Ranges: bypassIPs}}}
+			continue
+		}
+		for j := range routes[i].Match {
+			routes[i].Match[j].ClientIP = &clientIPMatcher{Ranges: bypassIPs}
+		}
+	}
+	return routes
+}
+
+// buildMaintenance503Route is a host-only catch-all serving the 503.
+//
+// It is what survived buildMaintenanceRoute, removed in v2.70.0: that
+// function wrapped two inner routes in a subroute — bypass IPs to a
+// bare proxy, everyone else to the 503 — and the bypass half is now the
+// real route, gated by the window above. `git log -S buildMaintenanceRoute`
+// has the old shape.
+//
+// metricsHandler stays first, per the invariant that every emitted
+// chain begins with it. The bypassed route already starts its own chain
+// with the same handler, and the two routes are mutually exclusive by
+// matcher, so a request is counted exactly once.
+func buildMaintenance503Route(w *maintenanceWindow) httpRoute {
+	headers := map[string]any{
+		"Content-Type": []string{"text/html; charset=utf-8"},
+	}
+	if w.retryAfterSeconds > 0 {
+		headers["Retry-After"] = []string{strconv.Itoa(w.retryAfterSeconds)}
+	}
+	return httpRoute{
+		Match: []matcherSet{{Host: w.hosts}},
+		Handle: []map[string]any{
+			w.metricsHandler,
+			{
+				"handler":     "static_response",
+				"status_code": 503,
+				"body":        w.body,
+				"headers":     headers,
+			},
+		},
+		Terminal: true,
+	}
 }

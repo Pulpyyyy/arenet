@@ -17,6 +17,7 @@
 package caddymgr
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -488,5 +489,216 @@ func TestDefaultMaintenancePage_ZeroRetryHasNoRetryLineAndNoRefresh(t *testing.T
 	}
 	if strings.Contains(got, "{arenet.maintenance.") {
 		t.Errorf("a sentinel survived into the served default page; body=%q", got)
+	}
+}
+
+// ---------------------------------------------------------------------
+// v2.70.0 — gates G3-G6 of the maintenance-bypass spec.
+//
+// The operator's report, which is G3: "depuis mon ip l'accès a la route
+// avec mon ip en bypass c'est ok mais une prefix/header qui match une
+// URI avec forward auth elle tombe en 404 depuis mon ip".
+//
+// These assert on the emitted JSON as a STRING within the route that
+// carries the bypass matcher, because the defect was never about the
+// 503 — it was about what sat behind the allow-list.
+// ---------------------------------------------------------------------
+
+// maintenanceProbeRoute is the operator's shape: a path rule with its
+// own upstream pool, custom headers, and a bypass list.
+func maintenanceProbeRoute(bypass []string) storage.Route {
+	return storage.Route{
+		ID: "r-maint", Host: "app.example.com", TLSEnabled: true,
+		Upstreams:       []storage.Upstream{{URL: "http://127.0.0.1:9000", Weight: 1}},
+		LBPolicy:        storage.LBPolicyRoundRobin,
+		WAFMode:         "off",
+		RequestHeaders:  map[string]string{"X-Probe-Req": "yes"},
+		ResponseHeaders: map[string]string{"X-Probe-Resp": "yes"},
+		PathRules: []storage.PathRule{{
+			PathPrefix: "/admin",
+			Upstreams:  []storage.Upstream{{URL: "http://127.0.0.1:9001", Weight: 1}},
+			LBPolicy:   storage.LBPolicyRoundRobin,
+		}},
+		MaintenanceConfig: &storage.MaintenanceConfig{
+			RetryAfterSeconds: 86400,
+			BypassIPs:         bypass,
+		},
+	}
+}
+
+// httpsRoutesOf returns the emitted arenet_https routes as raw JSON, in
+// declaration order — which is load-bearing, since Caddy dispatches in
+// that order.
+func httpsRoutesOf(t *testing.T, routes []storage.Route) []string {
+	t.Helper()
+	out, err := buildConfigJSON(routes, buildOpts{DevMode: true})
+	if err != nil {
+		t.Fatalf("buildConfigJSON: %v", err)
+	}
+	var cfg struct {
+		Apps struct {
+			HTTP struct {
+				Servers map[string]struct {
+					Routes []json.RawMessage `json:"routes"`
+				} `json:"servers"`
+			} `json:"http"`
+		} `json:"apps"`
+	}
+	if err := json.Unmarshal(out, &cfg); err != nil {
+		t.Fatalf("unmarshal emitted config: %v", err)
+	}
+	srv, ok := cfg.Apps.HTTP.Servers["arenet_https"]
+	if !ok {
+		t.Fatal("no arenet_https server emitted")
+	}
+	// Whitespace-normalised, like TestBuildConfigJSON_MaintenanceRoute
+	// already does: buildConfigJSON emits via json.MarshalIndent, so a
+	// key is followed by ": " and a literal `"status_code":503` matches
+	// nothing. Compacting keeps the assertions independent of the
+	// marshaller's indent style.
+	raw := make([]string, 0, len(srv.Routes))
+	for _, r := range srv.Routes {
+		raw = append(raw, strings.Join(strings.Fields(string(r)), ""))
+	}
+	return raw
+}
+
+// bypassedRoute returns the single emitted route gated behind the given
+// CIDR, failing if there is not exactly one.
+func bypassedRoute(t *testing.T, raw []string, cidr string) string {
+	t.Helper()
+	var found []string
+	for _, r := range raw {
+		if strings.Contains(r, `"client_ip"`) && strings.Contains(r, cidr) {
+			found = append(found, r)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("want exactly 1 route gated behind %s, got %d", cidr, len(found))
+	}
+	return found[0]
+}
+
+// G3 — the operator's 404. The path rule's own pool must be reachable
+// behind the bypass matcher, which is exactly what the pre-v2.70.0
+// shape dropped.
+func TestMaintenanceBypass_ReachesThePathRulePool(t *testing.T) {
+	raw := httpsRoutesOf(t, []storage.Route{maintenanceProbeRoute([]string{"203.0.113.7"})})
+	route := bypassedRoute(t, raw, "203.0.113.7")
+
+	if !strings.Contains(route, "127.0.0.1:9001") {
+		t.Errorf("the path rule's own upstream pool is not behind the bypass; route=%s", route)
+	}
+	if !strings.Contains(route, `"path"`) {
+		t.Errorf("no path matcher behind the bypass, so every URI hits the root pool; route=%s", route)
+	}
+	if !strings.Contains(route, "/admin") {
+		t.Errorf("the path prefix itself is missing; route=%s", route)
+	}
+}
+
+// G4 — the headers. Named in the old branch's comment as something it
+// discarded, which made it a decision on paper and a defect in use: a
+// bypassed operator tested their route without its own headers.
+func TestMaintenanceBypass_AppliesTheHeaders(t *testing.T) {
+	raw := httpsRoutesOf(t, []storage.Route{maintenanceProbeRoute([]string{"203.0.113.7"})})
+	route := bypassedRoute(t, raw, "203.0.113.7")
+
+	for _, want := range []string{"X-Probe-Req", "X-Probe-Resp"} {
+		if !strings.Contains(route, want) {
+			t.Errorf("%s missing from the bypassed route; route=%s", want, route)
+		}
+	}
+}
+
+// G5 — everyone else still meets the 503, and the ORDER matters: Caddy
+// dispatches in declaration order, so a 503 declared before the gated
+// route would swallow the bypass and this whole change would be invisible.
+func TestMaintenanceBypass_The503FollowsTheGatedRoute(t *testing.T) {
+	raw := httpsRoutesOf(t, []storage.Route{maintenanceProbeRoute([]string{"203.0.113.7"})})
+
+	gatedAt, respAt := -1, -1
+	for i, r := range raw {
+		switch {
+		case strings.Contains(r, "203.0.113.7"):
+			gatedAt = i
+		case strings.Contains(r, `"status_code":503`) && strings.Contains(r, "app.example.com"):
+			if respAt == -1 {
+				respAt = i
+			}
+		}
+	}
+	if gatedAt == -1 {
+		t.Fatal("no route gated behind the bypass list")
+	}
+	if respAt == -1 {
+		t.Fatalf("no 503 route for the host; routes=%v", raw)
+	}
+	if gatedAt > respAt {
+		t.Errorf("the 503 (index %d) is declared BEFORE the gated route (index %d): "+
+			"Caddy dispatches in order, so the bypass would never match", respAt, gatedAt)
+	}
+	if !strings.Contains(raw[respAt], `"Retry-After"`) {
+		t.Errorf("the 503 lost its Retry-After header; route=%s", raw[respAt])
+	}
+	// And the 503 must stay a catch-all: gate it too and nobody gets it.
+	if strings.Contains(raw[respAt], `"client_ip"`) {
+		t.Errorf("the 503 is itself gated behind client_ip, so unbypassed "+
+			"clients match nothing; route=%s", raw[respAt])
+	}
+}
+
+// G6 — security, not cosmetics. With no bypass list, NOTHING may proxy
+// this host: a leak here exposes a backend the operator believes is
+// closed. Asserted on the upstream dial addresses rather than on a
+// handler name, because that is what a leak would actually reach.
+func TestMaintenanceBypass_EmptyListProxiesNothing(t *testing.T) {
+	raw := httpsRoutesOf(t, []storage.Route{maintenanceProbeRoute(nil)})
+
+	for i, r := range raw {
+		for _, upstream := range []string{"127.0.0.1:9000", "127.0.0.1:9001"} {
+			if strings.Contains(r, upstream) {
+				t.Errorf("route %d reaches upstream %s with an empty bypass list — "+
+					"the backend is exposed during maintenance; route=%s", i, upstream, r)
+			}
+		}
+	}
+	// The 503 must still be there, or the host would 404 instead.
+	var found bool
+	for _, r := range raw {
+		if strings.Contains(r, `"status_code":503`) && strings.Contains(r, "app.example.com") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no 503 emitted for a maintenance route with no bypass; routes=%v", raw)
+	}
+}
+
+// The window must close on the forward-auth deny exit too (spec D6).
+// That path `continue`s early, so it was the one place a post-processing
+// step placed at the end of the loop body would have silently skipped —
+// leaving a maintenance route with no 503 at all.
+func TestMaintenanceBypass_ClosesOnTheForwardAuthDenyExit(t *testing.T) {
+	r := maintenanceProbeRoute([]string{"203.0.113.7"})
+	r.AuthMode = storage.RouteAuthForwardAuth
+	r.ForwardAuth = storage.ForwardAuthRouteConfig{ProviderName: "provider-deleted-since"}
+
+	raw := httpsRoutesOf(t, []storage.Route{r})
+
+	var gated, resp bool
+	for _, x := range raw {
+		if strings.Contains(x, "203.0.113.7") {
+			gated = true
+		}
+		if strings.Contains(x, `"status_code":503`) && strings.Contains(x, "app.example.com") {
+			resp = true
+		}
+	}
+	if !gated {
+		t.Error("the deny route was not gated behind the bypass list")
+	}
+	if !resp {
+		t.Error("no 503 emitted: the window was not closed on the deny exit path")
 	}
 }
