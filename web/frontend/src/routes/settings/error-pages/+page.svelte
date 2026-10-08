@@ -412,6 +412,47 @@
 		return out;
 	}
 
+	// v2.69.0 — the maintenance preview substituted NOTHING: the iframe
+	// took maintenanceHtml verbatim, so the operator judged their page
+	// with the raw sentinels sitting in the middle of it, and could not
+	// see the retry sentence at all — the built-in page's whole retry
+	// line is one sentinel.
+	//
+	// Sibling of clientSidePreview above and literal for the same
+	// reason — the operator sees the SHAPE prod will serve. The source of
+	// truth for the wording is formatRetryAfterHuman in
+	// internal/caddymgr/maintenance.go; 1800 → "30 minutes" is pinned by
+	// a case in TestFormatRetryAfterHuman that names this file, so a
+	// change there fails the Go suite instead of silently making this
+	// preview lie.
+	// 1800 seconds is the preview's notional Retry-After. It is written
+	// out rather than inlined into the string because it is what makes
+	// '30 minutes' checkable: TestFormatRetryAfterHuman's 1800 case is
+	// the other half of this pair.
+	const MAINTENANCE_PREVIEW_RETRY_HUMAN = '30 minutes'; // = 1800 seconds
+
+	function maintenancePreview(body: string): string {
+		const replacements: Record<string, string> = {
+			'{arenet.maintenance.retry_after_human}': MAINTENANCE_PREVIEW_RETRY_HUMAN,
+			'{arenet.maintenance.retry_after_line}': `<p class="retry">Retry in ${MAINTENANCE_PREVIEW_RETRY_HUMAN}</p>`,
+			'{arenet.maintenance.message}': t('errorPages.maintenance.previewMessage'),
+			// Emptied on purpose, not forgotten: substituting the real
+			// <meta http-equiv="refresh"> would make the preview iframe
+			// reload itself while the operator is editing.
+			'{arenet.maintenance.refresh_meta}': '',
+			'{http.request.method}': 'GET',
+			'{http.request.host}': 'preview.example.com',
+			'{http.request.uri}': '/preview/path',
+			'{http.request.uri_escaped}': '/preview/path',
+			'{http.request.uuid}': '00000000-0000-4000-8000-000000000000'
+		};
+		let out = body;
+		for (const [k, v] of Object.entries(replacements)) {
+			out = out.split(k).join(v);
+		}
+		return out;
+	}
+
 	// --- Variables panel ---------------------------------
 
 	function insertPlaceholder(token: string): void {
@@ -449,13 +490,21 @@
 	let maintenanceMessage = $state('');
 
 	// v2.18.1 — placeholders usable in the maintenance page HTML, shown
-	// as a click-to-insert palette under the editor. The two Arenet
+	// as a click-to-insert palette under the editor. The Arenet
 	// sentinels are baked in Go at emission ; the {http.request.*} ones
 	// are expanded by Caddy at serve time (same set the templates editor
 	// offers). {env.*}/{file.*} are intentionally absent — they're
 	// neutralized for security.
+	//
+	// {arenet.maintenance.retry_after_line} is deliberately NOT here: it
+	// expands to the built-in page's whole <p class="retry"> paragraph,
+	// English prose and a class a custom page has no reason to inherit.
+	// A custom page composes its own sentence around retry_after_human.
 	const maintenancePlaceholders = $derived([
-		{ token: '{arenet.maintenance.retry_after}', desc: t('errorPages.maintenance.ph.retryAfter') },
+		{
+			token: '{arenet.maintenance.retry_after_human}',
+			desc: t('errorPages.maintenance.ph.retryAfterHuman')
+		},
 		{ token: '{arenet.maintenance.message}', desc: t('errorPages.maintenance.ph.message') },
 		{ token: '{arenet.maintenance.refresh_meta}', desc: t('errorPages.maintenance.ph.refreshMeta') },
 		{ token: '{http.request.method}', desc: t('errorPages.maintenance.ph.method') },
@@ -723,7 +772,7 @@
 					<iframe
 						title={language.current && t('errorPages.maintenance.previewPaneLabel')}
 						sandbox=""
-						srcdoc={maintenanceHtml}
+						srcdoc={maintenancePreview(maintenanceHtml)}
 						class="preview-frame"
 					></iframe>
 				</div>

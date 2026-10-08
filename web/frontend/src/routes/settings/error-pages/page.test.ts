@@ -560,7 +560,7 @@ describe('/settings/error-pages — Maintenance tab', () => {
 		expect(screen.queryByText('Arenet Default (built-in)')).toBeNull();
 	});
 
-	it('documents the maintenance placeholders (retry_after + message) in the editor palette', async () => {
+	it('documents the maintenance placeholders in the editor palette', async () => {
 		apiMock.list.mockResolvedValue([]);
 		apiMock.getMaintenancePage.mockResolvedValue({ html: '', isDefault: true, message: '' });
 		render(Page);
@@ -569,10 +569,78 @@ describe('/settings/error-pages — Maintenance tab', () => {
 		await waitFor(() => {
 			expect(apiMock.getMaintenancePage).toHaveBeenCalledTimes(1);
 		});
-		// retry_after now appears both as a clickable palette <code> and in
-		// the help text — at least one is enough to prove it's documented.
-		expect(screen.getAllByText(/\{arenet\.maintenance\.retry_after\}/).length).toBeGreaterThan(0);
-		// v2.18.1 — the new message placeholder is also offered.
+		// v2.18.1 — the message placeholder is offered.
 		expect(screen.getByText('{arenet.maintenance.message}')).toBeInTheDocument();
+		// v2.69.0 — and retry_after_human, the one and only way to state
+		// the delay. The palette is where an operator learns which
+		// placeholders exist, so the set it shows is the contract.
+		expect(screen.getByText('{arenet.maintenance.retry_after_human}')).toBeInTheDocument();
+		// The bare-integer sentinel it replaced must not be advertised:
+		// nothing substitutes it any more, so a page built from it would
+		// print the token to the public.
+		expect(screen.queryByText('{arenet.maintenance.retry_after}')).toBeNull();
+	});
+
+	// v2.69.0 — the preview substituted nothing: the iframe took the
+	// editor's text verbatim, so the operator judged their page with raw
+	// sentinels sitting in it. Harmless while a sentinel was a bare
+	// number; not harmless once the built-in page's whole retry line is
+	// one, because the operator would see a token where a sentence
+	// belongs and could never see the duration at all.
+	it('substitutes the Arenet sentinels in the maintenance preview', async () => {
+		apiMock.list.mockResolvedValue([]);
+		apiMock.getMaintenancePage.mockResolvedValue({
+			html: '<p>{arenet.maintenance.retry_after_line}</p><p>bare {arenet.maintenance.retry_after_human}</p><p>{arenet.maintenance.message}</p>',
+			isDefault: false,
+			message: ''
+		});
+		render(Page);
+		await screen.findByText(/No custom template/);
+		await fireEvent.click(screen.getByRole('tab', { name: /Maintenance/ }));
+		await waitFor(() => {
+			expect(apiMock.getMaintenancePage).toHaveBeenCalledTimes(1);
+		});
+
+		const frame = (await waitFor(() => {
+			const el = document.querySelector('iframe.preview-frame');
+			expect(el).not.toBeNull();
+			return el;
+		})) as HTMLIFrameElement;
+		const srcdoc = frame.getAttribute('srcdoc') ?? '';
+
+		// The whole sentence, from the line sentinel.
+		expect(srcdoc).toContain('Retry in 30 minutes');
+		// And the bare duration, from the human sentinel on its own.
+		expect(srcdoc).toContain('bare 30 minutes');
+		// Nothing Arenet substitutes may survive into what the operator
+		// is looking at.
+		expect(srcdoc).not.toContain('{arenet.maintenance.');
+	});
+
+	// Deliberate, not an oversight: substituting the real meta refresh
+	// would make the preview iframe reload itself under the operator's
+	// cursor while they edit.
+	it('leaves the auto-refresh tag out of the preview', async () => {
+		apiMock.list.mockResolvedValue([]);
+		apiMock.getMaintenancePage.mockResolvedValue({
+			html: '<head>{arenet.maintenance.refresh_meta}</head><body>x</body>',
+			isDefault: false,
+			message: ''
+		});
+		render(Page);
+		await screen.findByText(/No custom template/);
+		await fireEvent.click(screen.getByRole('tab', { name: /Maintenance/ }));
+		await waitFor(() => {
+			expect(apiMock.getMaintenancePage).toHaveBeenCalledTimes(1);
+		});
+
+		const frame = (await waitFor(() => {
+			const el = document.querySelector('iframe.preview-frame');
+			expect(el).not.toBeNull();
+			return el;
+		})) as HTMLIFrameElement;
+		const srcdoc = frame.getAttribute('srcdoc') ?? '';
+		expect(srcdoc).not.toContain('http-equiv');
+		expect(srcdoc).not.toContain('{arenet.maintenance.refresh_meta}');
 	});
 });

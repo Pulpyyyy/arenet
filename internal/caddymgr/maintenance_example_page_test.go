@@ -66,18 +66,58 @@ func assertExampleMaintenancePageSurvives(t *testing.T, filename string) {
 		// Placeholders the example uses are substituted.
 		"refresh_meta → auto-refresh tag": `<meta http-equiv="refresh" content="1800">`,
 		"message substituted":             "Scheduled maintenance in progress.",
-		"retry_after substituted":         "1800s",
 		// Visual CSS the example depends on survives the sanitizer.
 		"@keyframes preserved":      "@keyframes",
 		"@media preserved":          "@media",
 		"backdrop-filter preserved": "backdrop-filter",
 		"conic-gradient preserved":  "conic-gradient",
 		"data-URI noise preserved":  "data:image/svg+xml",
+		// v2.69.0 — retry_after_human substitutes to NOTHING at
+		// Retry-After 0, which would leave the hero showing a label with
+		// no value. Both examples collapse the block with :has(:empty),
+		// so that selector has to survive the sanitizer. Asserted rather
+		// than assumed: bluemonday is an HTML sanitizer and what it does
+		// to a modern selector inside <style> is not obvious from its
+		// docs.
+		":has(:empty) collapse preserved": ".eta-hero:has(.eta-v:empty){display:none}",
 	}
 	for label, needle := range mustContain {
 		if !strings.Contains(body, needle) {
 			t.Errorf("%s: %q missing from the served body", label, needle)
 		}
+	}
+
+	// How each example states the delay is a per-file choice, so it is
+	// asserted per file rather than in the shared map above.
+	//
+	// The English example uses {arenet.maintenance.retry_after_human} and
+	// must therefore render words, never the raw "1800s" the operator
+	// complained about. The French one deliberately keeps the integer:
+	// the humanised form is English-only and the served page has no
+	// locale, so English words inside French prose would read worse than
+	// a number. Both must substitute SOMETHING — a sentinel reaching the
+	// browser is the failure either way, and mustNotContain below covers
+	// that.
+	//
+	// Asserted on the rendered ELEMENT, not on the body as a whole. The
+	// first version of this looked anywhere in the body and failed
+	// against a CSS comment in the French example that merely MENTIONED
+	// the English rendering — a true statement in a comment is not a
+	// visitor-facing string, and the test could not tell the difference.
+	// Both now show the words, because v2.69.0 removed the integer
+	// sentinel the French one used to carry. "30 minutes" is the one
+	// rendering where English and French agree, which is luck, not
+	// design — the file's own CSS comment says so to anyone copying it.
+	wantDelay := map[string]string{
+		"maintenance-page-example-en.html": `<span class="eta-v">30 minutes</span>`,
+		"maintenance-page-example-fr.html": `<span class="eta-v">30 minutes</span>`,
+	}
+	want, ok := wantDelay[filename]
+	if !ok {
+		t.Fatalf("no delay expectation defined for %s — add one when shipping a new example", filename)
+	}
+	if !strings.Contains(body, want) {
+		t.Errorf("delay not rendered as expected: %q missing from the served body", want)
 	}
 
 	mustNotContain := map[string]string{
@@ -95,6 +135,17 @@ func assertExampleMaintenancePageSurvives(t *testing.T, filename string) {
 		if strings.Contains(body, needle) {
 			t.Errorf("%s: %q must not appear in the served body", label, needle)
 		}
+	}
+
+	// Retry-After 0: the delay substitutes away entirely, so no stray
+	// "0"/"0s" may reach the hero. The CSS above is what hides the empty
+	// block; this asserts the substitution it depends on.
+	zeroBody := buildMaintenanceBody(sanitized, 0, "")
+	if strings.Contains(zeroBody, `<span class="eta-v">0`) {
+		t.Errorf("zero Retry-After left a bare 0 in the hero; body=%q", zeroBody)
+	}
+	if !strings.Contains(zeroBody, `<span class="eta-v"></span>`) {
+		t.Error("zero Retry-After did not leave an EMPTY eta-v span (needed for the :has(:empty) collapse)")
 	}
 
 	// Empty message must collapse cleanly (the .message:empty rule), so an
