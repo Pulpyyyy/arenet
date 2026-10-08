@@ -294,7 +294,7 @@ Every route has a **3-state lifecycle control**, shown as an icon-only segmented
 | State | Traffic | TLS / `:443` | Config |
 | ----- | ------- | ------------- | ------ |
 | **Active** | Normal reverse-proxy to the upstream pool | Kept if `tlsEnabled` | — |
-| **Maintenance** | 503 + branded maintenance page + `Retry-After` header to everyone, except bypass IPs which reach the real upstream | **Kept** — host/TLS stay served | Upstreams/WAF/etc. untouched, just wrapped |
+| **Maintenance** | 503 + branded maintenance page + `Retry-After` header to everyone, except bypass IPs which get the whole route — path rules, headers, gates | **Kept** — host/TLS stay served | Config untouched; the route is gated behind the allow-list, not replaced |
 | **Disabled** | Route removed from Caddy entirely ; the host falls through to the catch-all (404) | Dropped ; disabling the **last** active HTTPS route removes the `:443` listener (a confirm dialog warns you first) | **Preserved** for one-click re-enable |
 
 If a route somehow carries both a `disabled` flag and a `maintenanceConfig` at once, **Disabled wins** — it's the stronger "serves no traffic at all" state. Priority : **Disabled → 404** (wins) > **Maintenance → 503** > **Active**.
@@ -315,7 +315,11 @@ Maintenance mode is for **"I need to take the app down for a bit, but I still wa
 - The **global maintenance page** (customized in Settings → Error Pages → Maintenance tab, see [Custom Error Pages](Custom-Error-Pages#maintenance-page))
 - A **`Retry-After`** header (seconds, configurable per route)
 
-...**except** requests from IPs/CIDRs on the route's **bypass allow-list**, which are forwarded straight to the real upstream as if the route were Active. This lets you validate the app is actually back up before flipping everyone else over.
+...**except** requests from IPs/CIDRs on the route's **bypass allow-list**, which get the route exactly as it will be once you flip the state back: **as if the route were Active**. Path rules with their own upstream pools, per-path forward auth / basic auth / IP filters / redirects / rate limits, your request and response headers, the route's own auth, WAF, rate limit, country block and CrowdSec — all of it applies to a bypassed request, because it is the same emitted route.
+
+That is the point of the allow-list: a check that does not exercise the real route proves nothing about it. If your IdP or the WAF blocks you while bypassing, that is a fact about the route you are a click away from reopening.
+
+One deliberate exception: on a route with **Automatic HTTP→HTTPS** on, the plain-HTTP listener still answers a `301` to everyone, bypassed or not. The redirect is a hop, not the route, so the allow-list is applied where the route actually lives — on HTTPS.
 
 Configure maintenance in the route's **edit form**, in the **Maintenance** section (shown for every route, not just ones currently in maintenance, so you can pre-fill it before switching the state control):
 

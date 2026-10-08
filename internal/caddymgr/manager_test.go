@@ -1364,6 +1364,30 @@ func TestBuildConfigJSON_LoadsCleanly(t *testing.T) {
 		LBPolicy:   storage.LBPolicyRoundRobin,
 		WAFMode:    "off",
 		TLSEnabled: true,
+		// v2.70.0 gate G7 — path rules and headers folded onto the
+		// maintenance route on purpose. The bypass list now hands the
+		// REAL route to those IPs, so the emitted shape is a matcher set
+		// carrying client_ip ALONGSIDE host:
+		//
+		//   {"host": [...], "client_ip": {"ranges": [...]}}
+		//
+		// which this codebase had never emitted before. Nested beside a
+		// host matcher it has to survive a real Caddy Provision, not a
+		// JSON-shape assertion — so it rides the single canonical
+		// caddy.Validate call like every other shape folded in here.
+		//
+		// No active health check on this route, same reason as
+		// r-pathrules above: Caddy's health-check goroutine races its
+		// own PathRules subroute provisioning under one route.
+		RequestHeaders:  map[string]string{"X-Maint-Req": "yes"},
+		ResponseHeaders: map[string]string{"X-Maint-Resp": "yes"},
+		PathRules: []storage.PathRule{
+			{
+				PathPrefix: "/admin",
+				Upstreams:  []storage.Upstream{{URL: "http://127.0.0.1:9012", Weight: 1}},
+				LBPolicy:   storage.LBPolicyRoundRobin,
+			},
+		},
 		MaintenanceConfig: &storage.MaintenanceConfig{
 			RetryAfterSeconds: 300,
 			BypassIPs:         []string{"192.168.1.0/24"},
@@ -1517,6 +1541,28 @@ func TestBuildConfigJSON_LoadsCleanly(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "/docs") || !strings.Contains(string(raw), "/metrics") {
 		t.Fatalf("expected PathRules /docs and /metrics prefixes in emitted config:\n%s", raw)
+	}
+
+	// v2.70.0 gate G7, in the same spirit as the three above: confirm
+	// the shape this fixture was extended to cover is really in what
+	// Validate is about to provision, rather than trusting that a
+	// comment and a green run mean the same thing.
+	//
+	// The shape is client_ip nested in a matcher set ALONGSIDE host —
+	// the AND that hands a maintenance route's bypass list the real
+	// route. The `"client_ip"` assertion above cannot see it: the
+	// route-level IPFilter emits client_ip too, in a different place.
+	// Compacted because buildConfigJSON marshals with indentation.
+	compactRaw := strings.Join(strings.Fields(string(raw)), "")
+	if !strings.Contains(compactRaw, `"client_ip":{"ranges":["192.168.1.0/24"]}`) {
+		t.Fatalf("expected the maintenance bypass client_ip matcher in emitted config:\n%s", raw)
+	}
+	if !strings.Contains(compactRaw, "127.0.0.1:9012") {
+		t.Fatalf("expected the maintenance route's path-rule pool in emitted config "+
+			"(the bypass must reach it):\n%s", raw)
+	}
+	if !strings.Contains(compactRaw, "X-Maint-Req") {
+		t.Fatalf("expected the maintenance route's request header in emitted config:\n%s", raw)
 	}
 
 	// Unmarshal to *caddy.Config, then run caddy.Validate which

@@ -296,7 +296,7 @@ Chaque route a un **contrôle de cycle de vie à 3 états**, affiché comme un s
 | État | Trafic | TLS / `:443` | Config |
 | ----- | ------- | ------------- | ------ |
 | **Active** | Reverse-proxy normal vers le pool d'upstreams | Conservé si `tlsEnabled` | — |
-| **Maintenance** | 503 + page de maintenance brandée + header `Retry-After` pour tout le monde, sauf les IPs bypass qui atteignent le vrai upstream | **Conservé** — host/TLS restent servis | Upstreams/WAF/etc. intacts, juste enveloppés |
+| **Maintenance** | 503 + page de maintenance brandée + header `Retry-After` pour tout le monde, sauf les IPs bypass qui obtiennent toute la route — règles de chemin, en-têtes, gates | **Conservé** — host/TLS restent servis | Config intacte ; la route est protégée derrière la liste bypass, pas remplacée |
 | **Disabled** | Route totalement retirée de Caddy ; le host tombe sur le catch-all (404) | Supprimé ; désactiver la **dernière** route HTTPS active supprime le listener `:443` (un dialogue de confirmation t'avertit avant) | **Préservée** pour une ré-activation en un clic |
 
 Si une route porte à la fois un flag `disabled` et un `maintenanceConfig`, **Disabled gagne** — c'est l'état "ne sert aucun trafic du tout" le plus fort. Priorité : **Disabled → 404** (gagne) > **Maintenance → 503** > **Active**.
@@ -317,7 +317,11 @@ Le mode maintenance sert pour le cas « je dois couper l'app un moment, mais je 
 - La **page de maintenance globale** (personnalisable dans Settings → Error Pages → onglet Maintenance, voir [Custom Error Pages](Custom-Error-Pages-FR#page-de-maintenance))
 - Un header **`Retry-After`** (secondes, configurable par route)
 
-... **sauf** les requêtes venant des IPs/CIDRs sur la **liste bypass** de la route, qui sont transmises directement au vrai upstream comme si la route était Active. Ça te permet de valider que l'app est vraiment de retour avant de basculer tout le monde.
+... **sauf** les requêtes venant des IPs/CIDRs sur la **liste bypass** de la route, qui obtiennent la route exactement telle qu'elle sera une fois l'état rebasculé : **comme si la route était Active**. Les règles de chemin avec leurs propres pools d'upstreams, les forward auth / basic auth / filtres IP / redirections / limites de débit par chemin, tes en-têtes de requête et de réponse, l'auth de la route, le WAF, la limite de débit, le blocage par pays et CrowdSec — tout s'applique à une requête bypassée, parce que c'est la même route émise.
+
+C'est tout l'intérêt de la liste : une vérification qui n'exerce pas la vraie route ne prouve rien sur elle. Si ton IdP ou le WAF te bloque en bypass, c'est un fait sur la route que tu es à un clic de rouvrir.
+
+Une exception volontaire : sur une route avec **HTTP→HTTPS automatique**, le listener HTTP en clair répond toujours un `301` à tout le monde, bypassé ou non. La redirection est un saut, pas la route, donc la liste s'applique là où la route se trouve réellement — en HTTPS.
 
 Configure la maintenance dans le **formulaire d'édition** de la route, section **Maintenance** (affichée pour toute route, pas seulement celles actuellement en maintenance, pour que tu puisses pré-remplir avant de basculer le contrôle d'état) :
 
