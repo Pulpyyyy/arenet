@@ -4131,7 +4131,10 @@ describe('Routes page — post-apply route check', () => {
 		);
 		await fillAndSubmit();
 		expect(
-			await screen.findByText(/Change undone: app\.test answered before this change and stopped answering after it/)
+			await screen.findByText(/Change undone: app\.test answered before this change and stopped answering after it/, {
+				// The banner; the footer repeats it (aria-hidden) by the Save button.
+				selector: '[data-form-error]'
+			})
 		).toBeInTheDocument();
 		expect(hostInput()).toBeInTheDocument(); // panel still open
 	});
