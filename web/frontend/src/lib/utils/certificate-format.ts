@@ -190,10 +190,25 @@ export function daysUntilExpiry(cert: Certificate, now: Date = new Date()): numb
 }
 
 /**
+ * Predicate: the cert's notAfter is a real timestamp at or before
+ * `now`. Mirrors the backend's EXPIRED derivation
+ * (internal/certinfo/tracker.go:175, `!now.Before(NotAfter)`).
+ * Compares instants rather than daysUntilExpiry, whose ceil on
+ * negatives turns "expired an hour ago" into 0, the same value as
+ * "expires later today". Zero-time entries (never obtained) are not
+ * expired: there is no certificate yet.
+ */
+export function isExpired(cert: Certificate, now: Date = new Date()): boolean {
+	if (isZeroTimestamp(cert.notAfter)) return false;
+	return new Date(cert.notAfter).getTime() <= now.getTime();
+}
+
+/**
  * Predicate: cert is "expiring soon" per the AC #6 tab filter
- * vocabulary. Defined as "notAfter <= now + RENEWAL_WINDOW_DAYS"
- * — matches the backend's RENEWAL_PENDING status derivation so
- * the tab surfaces the same set the badge highlights.
+ * vocabulary. Defined as "now < notAfter <= now + RENEWAL_WINDOW_DAYS"
+ * — matches the backend's RENEWAL_PENDING status derivation (which
+ * is checked after EXPIRED, tracker.go:175-178) so the tab surfaces
+ * the same set the badge highlights.
  *
  * Excludes:
  *   - OBTAIN_FAILED entries: their notAfter is the Go zero-value
@@ -203,12 +218,14 @@ export function daysUntilExpiry(cert: Certificate, now: Date = new Date()): numb
  *     renew). The dedicated ÉCHEC badge already calls them out.
  *   - Zero-time entries from any other path (defensive — the
  *     daysUntilExpiry null return signals "no known expiry").
- *
- * Includes already-expired certs with valid timestamps (the
- * operator surely wants to see those in the bucket too).
+ *   - Already-expired certs (isExpired): an expired cert is not
+ *     "expiring", and the KPI foot line next to this count says
+ *     "auto-renewal scheduled". Expired certs are counted on
+ *     their own.
  */
 export function isExpiringSoon(cert: Certificate, now: Date = new Date()): boolean {
 	if (cert.status === 'OBTAIN_FAILED') return false;
+	if (isExpired(cert, now)) return false;
 	const days = daysUntilExpiry(cert, now);
 	if (days === null) return false;
 	return days <= RENEWAL_WINDOW_DAYS;
