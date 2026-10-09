@@ -153,6 +153,10 @@
 		}
 	];
 
+	// Prefix for the section-label ids the lists point at
+	// (aria-labelledby), unique per mounted instance.
+	const uid = $props.id();
+
 	const isAdmin = $derived(auth.user?.role === 'admin');
 	const visibleSections = $derived(sections.filter((s) => !s.adminOnly || isAdmin));
 
@@ -267,7 +271,13 @@
 	</svg>
 {/snippet}
 
-<aside class="sidebar" aria-label="Primary">
+<!--
+	A navigation landmark (was an <aside>, i.e. "complementary", with
+	a hardcoded English name). Each section is a list named by its
+	label, so a screen reader says "Traffic, list, 3 items" instead of
+	reading a flat run of links.
+-->
+<nav class="sidebar" aria-label={language.current && t('sidebar.navLabel')}>
 	<div class="brand">
 		<img class="brand-logo" src={logoUrl} alt="" aria-hidden="true" width="30" height="30" />
 		<div class="brand-name">AreNET</div>
@@ -279,25 +289,30 @@
 	</div>
 
 	{#each visibleSections as section (section.labelKey)}
+		{@const headingId = `${uid}-${section.labelKey}`}
 		<!--
 			v2.9.12 i18n Phase 2 — section labels resolved live via t().
 			Reading language.current inline registers the reactive
 			dependency so the whole sidebar re-renders on language
 			switch without needing a $derived wrapper per row.
 		-->
-		<div class="nav-section">{language.current && t(section.labelKey)}</div>
-		{#each section.items as item (item.href)}
-			{@const active = isActive(item.href)}
-			<a
-				href={item.href}
-				class="nav-item"
-				class:active
-				aria-current={active ? 'page' : undefined}
-			>
-				{@render itemIcon(item.icon)}
-				<span>{language.current && t(item.labelKey)}</span>
-			</a>
-		{/each}
+		<div class="nav-section" id={headingId}>{language.current && t(section.labelKey)}</div>
+		<ul class="nav-list" aria-labelledby={headingId}>
+			{#each section.items as item (item.href)}
+				{@const active = isActive(item.href)}
+				<li>
+					<a
+						href={item.href}
+						class="nav-item"
+						class:active
+						aria-current={active ? 'page' : undefined}
+					>
+						{@render itemIcon(item.icon)}
+						<span>{language.current && t(item.labelKey)}</span>
+					</a>
+				</li>
+			{/each}
+		</ul>
 	{/each}
 
 	<div class="sidebar-bottom">
@@ -305,8 +320,11 @@
 	</div>
 
 	<div class="sidebar-foot">
+		<!-- role="img": an aria-label on a role-less div is ignored, and
+		     the initials alone read as nonsense letters. -->
 		<div
 			class="avatar"
+			role="img"
 			aria-label={language.current && t('common.signedInAs', { name: userLabel })}
 		>{userInitials}</div>
 		<div class="who">
@@ -328,7 +346,7 @@
 			</svg>
 		</button>
 	</div>
-</aside>
+</nav>
 
 <style>
 	.sidebar {
@@ -405,6 +423,17 @@
 		text-transform: uppercase;
 		color: var(--fg-dim);
 		padding: 14px 10px 6px;
+	}
+
+	/* The lists are semantics only: no bullets or indent, and the same
+	   4px rhythm the items had as direct children of .sidebar. */
+	.nav-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
 	}
 
 	.nav-item {

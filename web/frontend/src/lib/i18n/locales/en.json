@@ -102,11 +102,15 @@
 		"navAuditLog": "Audit log",
 		"navApiDocs": "API docs",
 		"crumbObservability": "Metrics",
-		"crumbRoute": "Route"
+		"crumbRoute": "Route",
+		"navLabel": "Main navigation"
 	},
 	"topbar": {
 		"statusAriaLabel": "Gateway status",
 		"statusHealthy": "Gateway healthy"
+	},
+	"a11y": {
+		"skipToContent": "Skip to content"
 	},
 	"settings": {
 		"languageLabel": "Language",
@@ -285,6 +289,8 @@
 		"updateAvailable": "Update {version} available",
 		"ariaOpen": "Open notifications",
 		"ariaClose": "Close notifications",
+		"ariaUnreadOne": "{action}, 1 unread",
+		"ariaUnreadMany": "{action}, {count} unread",
 		"loadError": "Could not load notifications"
 	},
 	"toast": {

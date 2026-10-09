@@ -60,6 +60,31 @@ describe('NotificationBell', () => {
 		expect(getByTestId('notif-count').textContent).toContain('99+');
 	});
 
+	// The aria-label is the button's whole accessible name, so the
+	// badge is only announced if the label carries the count.
+	it('names the trigger without a count when nothing is unread', () => {
+		const { getByTestId } = render(NotificationBell);
+		expect(getByTestId('notif-trigger')).toHaveAttribute('aria-label', 'Open notifications');
+	});
+
+	it('includes the unread count in the trigger label (singular / plural)', async () => {
+		store.unreadCount = 1;
+		const one = render(NotificationBell);
+		expect(one.getByTestId('notif-trigger')).toHaveAttribute(
+			'aria-label',
+			'Open notifications, 1 unread'
+		);
+		one.unmount();
+
+		store.unreadCount = 150;
+		const many = render(NotificationBell);
+		const trigger = many.getByTestId('notif-trigger');
+		// The real number, not the 99+ the badge is capped at.
+		expect(trigger).toHaveAttribute('aria-label', 'Open notifications, 150 unread');
+		await fireEvent.click(trigger);
+		expect(trigger).toHaveAttribute('aria-label', 'Close notifications, 150 unread');
+	});
+
 	it('calls load() when the panel opens', async () => {
 		const { getByTestId } = render(NotificationBell);
 		await fireEvent.click(getByTestId('notif-trigger'));

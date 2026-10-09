@@ -111,7 +111,7 @@
 	});
 </script>
 
-<div class="topbar" role="banner">
+<header class="topbar">
 	<div class="crumbs">
 		<b>{crumbLabel}</b>
 	</div>
@@ -120,7 +120,7 @@
 		<span class="dot ok" aria-hidden="true"></span>
 		<span>{language.current && t('topbar.statusHealthy')}</span>
 	</div>
-</div>
+</header>
 
 <style>
 	.topbar {

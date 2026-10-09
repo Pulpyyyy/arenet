@@ -102,11 +102,15 @@
 		"navAuditLog": "Journal d'audit",
 		"navApiDocs": "Documentation API",
 		"crumbObservability": "Métriques",
-		"crumbRoute": "Route"
+		"crumbRoute": "Route",
+		"navLabel": "Navigation principale"
 	},
 	"topbar": {
 		"statusAriaLabel": "État de la passerelle",
 		"statusHealthy": "Passerelle saine"
+	},
+	"a11y": {
+		"skipToContent": "Aller au contenu"
 	},
 	"settings": {
 		"languageLabel": "Langue",
@@ -285,6 +289,8 @@
 		"updateAvailable": "Mise à jour {version} disponible",
 		"ariaOpen": "Ouvrir les notifications",
 		"ariaClose": "Fermer les notifications",
+		"ariaUnreadOne": "{action}, 1 non lue",
+		"ariaUnreadMany": "{action}, {count} non lues",
 		"loadError": "Impossible de charger les notifications"
 	},
 	"toast": {

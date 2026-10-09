@@ -135,6 +135,17 @@
 	{@render children?.()}
 	<ToastContainer />
 {:else}
+	<!-- Skip link: first stop for Tab, hidden until focused. Focuses
+	     <main> by hand rather than following the #main hash, which
+	     would overwrite a hash the page uses (/alerting#history). -->
+	<a
+		href="#main"
+		class="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[1001] focus:rounded-md focus:border focus:border-border-strong focus:bg-elevated focus:px-3 focus:py-2 focus:text-sm focus:text-primary"
+		onclick={(e) => {
+			e.preventDefault();
+			document.getElementById('main')?.focus();
+		}}>{language.current && t('a11y.skipToContent')}</a
+	>
 	<!-- authenticated or locked: full layout. Compromised-password
 	     banner above; LockScreen overlay on locked. -->
 	<!-- v2.48 — an account created by an administrator cannot be used
@@ -201,7 +212,7 @@
 					<span>Mode <b>lecture seule</b> — votre compte a le rôle <b>viewer</b>. Contactez un administrateur pour obtenir les droits d'écriture.</span>
 				</div>
 			{/if}
-			<main class="app-main" aria-busy={$loading} aria-live="polite">
+			<main id="main" tabindex="-1" class="app-main focus:outline-none" aria-busy={$loading} aria-live="polite">
 				{#if $loading}
 					<div class="loading-bar">
 						<div class="loading-shimmer"></div>

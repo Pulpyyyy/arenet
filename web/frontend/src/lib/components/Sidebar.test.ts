@@ -78,7 +78,7 @@ vi.mock('$lib/stores/notifications.svelte', () => ({
 	SYNTHETIC_UPDATE_ID: 'synthetic:update'
 }));
 
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { render, screen, waitFor, within } from '@testing-library/svelte';
 import Sidebar from './Sidebar.svelte';
 import { auth } from '$lib/stores/auth.svelte';
 
@@ -267,6 +267,63 @@ describe('Sidebar', () => {
 		pageMock.url = new URL('http://localhost/routes-archive');
 		render(Sidebar);
 		expect(activeHrefs()).toEqual([]);
+	});
+
+	// Landmarks: a named navigation region, one list per section
+	// named by its label, items still links carrying aria-current.
+	it('is a navigation landmark named "Main navigation"', () => {
+		render(Sidebar);
+		const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+		expect(nav.tagName).toBe('NAV');
+		// Not the old "complementary" region.
+		expect(screen.queryByRole('complementary')).toBeNull();
+	});
+
+	it('puts each section in a list named by its label', () => {
+		render(Sidebar);
+		const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+		// Viewer: 3 sections (Administration is admin-only).
+		expect(within(nav).getAllByRole('list')).toHaveLength(3);
+
+		const traffic = within(nav).getByRole('list', { name: 'Traffic' });
+		const items = within(traffic).getAllByRole('listitem');
+		expect(items).toHaveLength(3);
+		const hrefs = items.map((li) => within(li).getByRole('link').getAttribute('href'));
+		expect(hrefs).toEqual(['/routes', '/tcp-services', '/logs']);
+
+		// The current page (/routes) is still marked inside its list.
+		expect(within(traffic).getByRole('link', { name: 'Routes' })).toHaveAttribute(
+			'aria-current',
+			'page'
+		);
+		expect(within(nav).getByRole('list', { name: 'Overview' })).toBeInTheDocument();
+		expect(within(nav).getByRole('list', { name: 'Security' })).toBeInTheDocument();
+	});
+
+	it('adds the Administration list for an admin', () => {
+		auth.user = {
+			username: 'admin',
+			displayName: 'Admin',
+			role: 'admin',
+			mfa: 'none',
+			passwordCompromised: false
+		} as never;
+		render(Sidebar);
+		const admin = screen.getByRole('list', { name: 'Administration' });
+		expect(within(admin).getAllByRole('listitem')).toHaveLength(4);
+	});
+
+	it('announces the avatar as an image named after the user', () => {
+		auth.user = {
+			username: 'jdoe',
+			displayName: 'Jane Doe',
+			role: 'viewer',
+			mfa: 'none',
+			passwordCompromised: false
+		} as never;
+		render(Sidebar);
+		const avatar = screen.getByRole('img', { name: 'Signed in as Jane Doe' });
+		expect(avatar.textContent).toBe('JD');
 	});
 
 	it('exposes a sign-out button in the sidebar-foot', () => {
