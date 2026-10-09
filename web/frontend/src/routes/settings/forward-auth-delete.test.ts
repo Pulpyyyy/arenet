@@ -46,6 +46,7 @@ vi.mock('$lib/api/auth', () => ({
 vi.mock('$lib/stores/toast', () => ({ pushToast: vi.fn() }));
 vi.mock('$app/navigation', () => ({
 	afterNavigate: vi.fn(),
+	beforeNavigate: vi.fn(),
 	goto: vi.fn()
 }));
 
