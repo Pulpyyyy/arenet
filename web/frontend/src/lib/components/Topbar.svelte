@@ -30,10 +30,49 @@
   underlying gating.
 -->
 <script lang="ts">
+	import { onDestroy, onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
+	import { fetchSystemHealth, type HealthReport } from '$lib/api/system';
+	import { gatewayState, healthProblems } from '$lib/utils/gateway-health';
+
+	// The status used to be static markup: "Gateway healthy" with a
+	// green dot, Caddy up or not. It now reads GET /system/health
+	// (Caddy admin, BoltDB, CrowdSec, certificates, metrics store) and
+	// says "unknown" when that cannot be read, never healthy by default.
+	const HEALTH_POLL_MS = 30_000;
+	let health = $state<HealthReport | null>(null);
+	const gwState = $derived(gatewayState(health));
+	const gwProblems = $derived(health ? healthProblems(health) : []);
+
+	async function refreshHealth(): Promise<void> {
+		try {
+			health = await fetchSystemHealth();
+		} catch {
+			health = null;
+		}
+	}
+
+	let healthPoll: ReturnType<typeof setInterval> | null = null;
+	onMount(() => {
+		void refreshHealth();
+		healthPoll = setInterval(() => {
+			if (document.visibilityState !== 'visible') return;
+			void refreshHealth();
+		}, HEALTH_POLL_MS);
+	});
+	onDestroy(() => {
+		if (healthPoll !== null) clearInterval(healthPoll);
+	});
+
+	const statusKey: Record<string, string> = {
+		healthy: 'topbar.statusHealthy',
+		degraded: 'topbar.statusDegraded',
+		unhealthy: 'topbar.statusUnhealthy',
+		unknown: 'topbar.statusUnknown'
+	};
 
 	// v2.9.12 i18n Phase 2 — crumb labels resolved from the active
 	// bundle. Each entry maps a pathname to a bundle key under
@@ -100,9 +139,22 @@
 		<b>{crumbLabel}</b>
 	</div>
 
-	<div class="tb-status" aria-label={language.current && t('topbar.statusAriaLabel')}>
-		<span class="dot ok" aria-hidden="true"></span>
-		<span>{language.current && t('topbar.statusHealthy')}</span>
+	<!-- role="status": a change (healthy → degraded) is announced.
+	     The tooltip names what is wrong. -->
+	<div
+		class="tb-status"
+		role="status"
+		data-testid="gateway-status"
+		data-state={gwState}
+		title={language.current &&
+			(gwState === 'unknown'
+				? t('topbar.statusUnknownTitle')
+				: gwProblems.length > 0
+					? gwProblems.join(' · ')
+					: undefined)}
+	>
+		<span class="dot {gwState}" aria-hidden="true"></span>
+		<span>{language.current && t(statusKey[gwState])}</span>
 	</div>
 </div>
 
@@ -147,8 +199,17 @@
 		border-radius: 50%;
 		flex: none;
 	}
-	.dot.ok {
+	.dot.healthy {
 		background: var(--status-up);
 		box-shadow: 0 0 8px var(--status-up);
+	}
+	.dot.degraded {
+		background: var(--status-warn);
+	}
+	.dot.unhealthy {
+		background: var(--status-down);
+	}
+	.dot.unknown {
+		background: var(--text-muted);
 	}
 </style>

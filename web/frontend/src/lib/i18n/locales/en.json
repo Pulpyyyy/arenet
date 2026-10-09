@@ -103,8 +103,11 @@
 		"navApiDocs": "API docs"
 	},
 	"topbar": {
-		"statusAriaLabel": "Gateway status",
-		"statusHealthy": "Gateway healthy"
+		"statusHealthy": "Gateway healthy",
+		"statusDegraded": "Gateway degraded",
+		"statusUnhealthy": "Gateway unhealthy",
+		"statusUnknown": "Gateway status unknown",
+		"statusUnknownTitle": "The health report (/system/health) could not be read."
 	},
 	"settings": {
 		"languageLabel": "Language",
