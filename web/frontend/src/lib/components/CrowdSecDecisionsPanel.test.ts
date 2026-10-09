@@ -31,7 +31,8 @@ const { toastMock, securityMock } = vi.hoisted(() => ({
 	securityMock: {
 		fetchDecisions: vi.fn(),
 		fetchLAPIDecisions: vi.fn(),
-		fetchScenarios: vi.fn()
+		fetchScenarios: vi.fn(),
+		deleteCrowdSecDecision: vi.fn()
 	}
 }));
 
@@ -46,6 +47,7 @@ beforeEach(() => {
 	securityMock.fetchDecisions.mockReset();
 	securityMock.fetchLAPIDecisions.mockReset();
 	securityMock.fetchScenarios.mockReset();
+	securityMock.deleteCrowdSecDecision.mockReset();
 	// Default: anonymous (auth.user = null). Tests that need
 	// the admin-gated "+ Bannir une IP" button set
 	// auth.user = { role: 'admin', ... } explicitly.
@@ -573,6 +575,137 @@ describe('CrowdSec decisions panel — Live LAPI tab', () => {
 			// Modal mount surfaces a dialog with the "Bannir
 			// une IP" title.
 			expect(screen.getByRole('dialog', { name: /Ban an IP/i })).toBeInTheDocument();
+		});
+	});
+});
+
+// --- Live LAPI tab — Unban ----------------------------------
+
+describe('CrowdSec decisions panel — Unban', () => {
+	const ADMIN = {
+		username: 'admin',
+		displayName: 'Admin',
+		role: 'admin',
+		mfa: 'none',
+		passwordCompromised: false
+	} as never;
+
+	function decision(id: number, origin: string, value: string): LAPIDecisionsResponse['decisions'][number] {
+		return {
+			id,
+			duration: '4h',
+			origin,
+			scenario: origin === 'manual' ? 'manual:admin|typo' : 'crowdsecurity/http-cve',
+			scope: 'ip',
+			type: 'ban',
+			value,
+			expiresAt: new Date(Date.now() + 14400_000).toISOString()
+		};
+	}
+
+	function fixture(ds: LAPIDecisionsResponse['decisions']): LAPIDecisionsResponse {
+		const byOrigin: Record<string, number> = {};
+		for (const d of ds) byOrigin[d.origin] = (byOrigin[d.origin] ?? 0) + 1;
+		return {
+			decisions: ds,
+			meta: { total: ds.length, totalByOrigin: byOrigin, limit: 100, offset: 0 }
+		};
+	}
+
+	const mixed = fixture([
+		decision(1, 'CAPI', '1.1.1.1'),
+		decision(2, 'cscli', '2.2.2.2'),
+		decision(3, 'manual', '3.3.3.3'),
+		decision(4, 'crowdsec', '4.4.4.4'),
+		decision(5, 'arenet', '5.5.5.5'),
+		decision(6, 'lists:firehol', '6.6.6.6')
+	]);
+
+	async function openLiveTab(): Promise<void> {
+		securityMock.fetchDecisions.mockResolvedValue(sampleSnapshot);
+		render(Page);
+		await waitFor(() => expect(securityMock.fetchDecisions).toHaveBeenCalled());
+		await fireEvent.click(screen.getByTestId('tab-live'));
+		await waitFor(() => expect(screen.getByText('3.3.3.3')).toBeInTheDocument());
+	}
+
+	it('shows no Unban action to a viewer', async () => {
+		securityMock.fetchLAPIDecisions.mockResolvedValue(mixed);
+		await openLiveTab();
+		expect(screen.queryAllByTestId('unban-btn')).toHaveLength(0);
+	});
+
+	it('offers Unban on locally-authored rows only (not CAPI / lists)', async () => {
+		auth.user = ADMIN;
+		securityMock.fetchLAPIDecisions.mockResolvedValue(mixed);
+		await openLiveTab();
+
+		for (const v of ['2.2.2.2', '3.3.3.3', '4.4.4.4', '5.5.5.5']) {
+			expect(screen.getByRole('button', { name: `Unban ${v}` })).toBeInTheDocument();
+		}
+		expect(screen.queryByRole('button', { name: 'Unban 1.1.1.1' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Unban 6.6.6.6' })).toBeNull();
+	});
+
+	it('asks for confirmation, calls the API, then refreshes the list', async () => {
+		auth.user = ADMIN;
+		securityMock.fetchLAPIDecisions
+			.mockResolvedValueOnce(mixed)
+			.mockResolvedValue(fixture(mixed.decisions.filter((d) => d.id !== 3)));
+		securityMock.deleteCrowdSecDecision.mockResolvedValue({ id: 3, nbDeleted: 1 });
+		await openLiveTab();
+		const fetchesBefore = securityMock.fetchLAPIDecisions.mock.calls.length;
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Unban 3.3.3.3' }));
+
+		// Nothing is sent before the operator confirms.
+		const dialog = await screen.findByRole('dialog', { name: /Unban 3\.3\.3\.3/ });
+		expect(dialog.textContent ?? '').toMatch(/manual/);
+		expect(securityMock.deleteCrowdSecDecision).not.toHaveBeenCalled();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Unban' }));
+
+		await waitFor(() => {
+			expect(securityMock.deleteCrowdSecDecision).toHaveBeenCalledWith(3);
+		});
+		await waitFor(() => {
+			expect(securityMock.fetchLAPIDecisions.mock.calls.length).toBeGreaterThan(fetchesBefore);
+			expect(screen.queryByText('3.3.3.3')).toBeNull();
+		});
+		expect(toastMock.pushToast).toHaveBeenCalledWith(expect.stringMatching(/3\.3\.3\.3/), 'success');
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+	});
+
+	it('sends nothing when the operator cancels', async () => {
+		auth.user = ADMIN;
+		securityMock.fetchLAPIDecisions.mockResolvedValue(mixed);
+		await openLiveTab();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Unban 2.2.2.2' }));
+		await screen.findByRole('dialog');
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		expect(securityMock.deleteCrowdSecDecision).not.toHaveBeenCalled();
+	});
+
+	it('explains a 412 (no machine credentials) in a danger toast', async () => {
+		auth.user = ADMIN;
+		securityMock.fetchLAPIDecisions.mockResolvedValue(mixed);
+		securityMock.deleteCrowdSecDecision.mockRejectedValue(
+			new ApiError('security automation not configured', 412)
+		);
+		await openLiveTab();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Unban 3.3.3.3' }));
+		await screen.findByRole('dialog');
+		await fireEvent.click(screen.getByRole('button', { name: 'Unban' }));
+
+		await waitFor(() => {
+			expect(toastMock.pushToast).toHaveBeenCalledWith(
+				expect.stringMatching(/Security Automation/),
+				'danger'
+			);
 		});
 	});
 });

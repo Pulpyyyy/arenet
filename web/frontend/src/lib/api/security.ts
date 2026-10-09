@@ -15,6 +15,7 @@ import type {
 	CertEventsAggregateResponse,
 	CertEventsResponse,
 	CountryBlockEventsResponse,
+	CrowdSecDecisionDeleteResponse,
 	DecisionsResponse,
 	GeoEventsResponse,
 	LAPIDecisionsResponse,
@@ -295,6 +296,22 @@ export function fetchScenarios(): Promise<ScenariosResponse> {
  */
 export function createManualBan(req: ManualBanRequest): Promise<ManualBanResponse> {
 	return request<ManualBanResponse>('POST', '/security/crowdsec/decisions', req);
+}
+
+/**
+ * DELETE /api/v1/security/crowdsec/decisions/{id} — unban. LAPI
+ * expires the decision; it only accepts this from the Security
+ * Automation machine credentials, so:
+ *   412 → Security Automation not configured
+ *   404 → LAPI has no such decision
+ *   502 → LAPI unreachable / credentials rejected / other LAPI
+ *         error (CrowdSec 1.6 answers 500 for an unknown id)
+ */
+export function deleteCrowdSecDecision(id: number): Promise<CrowdSecDecisionDeleteResponse> {
+	return request<CrowdSecDecisionDeleteResponse>(
+		'DELETE',
+		`/security/crowdsec/decisions/${encodeURIComponent(String(id))}`
+	);
 }
 
 /**

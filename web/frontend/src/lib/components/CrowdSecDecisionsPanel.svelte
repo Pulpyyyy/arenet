@@ -20,7 +20,13 @@
 	import Spinner from '$lib/components/Spinner.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import BanIPModal from '$lib/components/BanIPModal.svelte';
-	import { fetchDecisions, fetchLAPIDecisions, fetchScenarios } from '$lib/api/security';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import {
+		deleteCrowdSecDecision,
+		fetchDecisions,
+		fetchLAPIDecisions,
+		fetchScenarios
+	} from '$lib/api/security';
 	import type {
 		Decision,
 		LAPIDecision,
@@ -53,6 +59,48 @@
 		// IMMEDIATELY after a successful ban so the operator
 		// sees their new row without waiting for the 30s poll.
 		void loadLive();
+	}
+
+	// Unban (DELETE /security/crowdsec/decisions/{id}), admin-only
+	// like the ban. Offered on decisions authored on this install:
+	// Arenet's manual bans ("manual"), its auto-classify bans
+	// ("arenet"), local scenarios ("crowdsec") and cscli ("cscli")
+	// — where a typo or a false positive here lands. Not on CAPI
+	// or lists:* rows: those come from community / subscribed
+	// feeds, where the lasting fix for a false positive is a
+	// CrowdSec allowlist rather than expiring one entry by hand
+	// (cscli still can).
+	function canUnban(d: LAPIDecision): boolean {
+		return d.origin === 'manual' || d.origin === 'arenet' || isLocalOrigin(d.origin);
+	}
+	let unbanTarget = $state<LAPIDecision | null>(null);
+	let unbanDialogOpen = $state(false);
+	function askUnban(d: LAPIDecision): void {
+		unbanTarget = d;
+		unbanDialogOpen = true;
+	}
+	function unbanErrorMessage(err: unknown): string {
+		if (err instanceof ApiError) {
+			if (err.status === 412) return t('crowdsecDecisions.unbanNotConfigured');
+			if (err.status === 404) return t('crowdsecDecisions.unbanNotFound');
+		}
+		const detail = err instanceof Error ? err.message : String(err);
+		return t('crowdsecDecisions.toastUnbanFailed', { error: detail });
+	}
+	async function confirmUnban(): Promise<void> {
+		const target = unbanTarget;
+		if (target === null) return;
+		try {
+			await deleteCrowdSecDecision(target.id);
+			pushToast(t('crowdsecDecisions.toastUnbanned', { value: target.value }), 'success');
+		} catch (err) {
+			pushToast(unbanErrorMessage(err), 'danger');
+		}
+		unbanDialogOpen = false;
+		unbanTarget = null;
+		// Refresh either way: on success the row is gone; on a
+		// failure the decision may have expired meanwhile.
+		await loadLive();
 	}
 
 	type Tab = 'snapshot' | 'live' | 'scenarios';
@@ -754,6 +802,9 @@
 								<th>Origin</th>
 								<th>Scenario</th>
 								<th>Expires</th>
+								{#if isAdmin}
+									<th>{language.current && t('crowdsecDecisions.colActions')}</th>
+								{/if}
 							</tr>
 						</thead>
 						<tbody>
@@ -801,6 +852,21 @@
 									<td class="ts" title={d.expiresAt ?? ''}>
 										{d.expiresAt ? formatExpiry(d.expiresAt) : d.duration || '—'}
 									</td>
+									{#if isAdmin}
+										<td>
+											{#if canUnban(d)}
+												<button
+													type="button"
+													class="unban-btn"
+													onclick={() => askUnban(d)}
+													aria-label={language.current && t('crowdsecDecisions.unbanAria', { value: d.value })}
+													data-testid="unban-btn"
+												>
+													{language.current && t('crowdsecDecisions.btnUnban')}
+												</button>
+											{/if}
+										</td>
+									{/if}
 								</tr>
 							{/each}
 						</tbody>
@@ -1024,6 +1090,20 @@
 		onClose={closeBanModal}
 		onSuccess={onBanSuccess}
 	/>
+	<ConfirmDialog
+		bind:open={unbanDialogOpen}
+		title={language.current &&
+			t('crowdsecDecisions.unbanConfirmTitle', { value: unbanTarget?.value ?? '' })}
+		message={language.current &&
+			t('crowdsecDecisions.unbanConfirmMessage', {
+				value: unbanTarget?.value ?? '',
+				type: unbanTarget?.type || 'ban',
+				origin: unbanTarget?.origin || '—'
+			})}
+		confirmLabel={language.current && t('crowdsecDecisions.btnUnban')}
+		cancelLabel={language.current && t('common.cancel')}
+		onConfirm={confirmUnban}
+	/>
 {/if}
 
 <style>
@@ -1167,6 +1247,26 @@
 	}
 	.ban-btn:focus-visible {
 		outline: 2px solid var(--text-primary);
+		outline-offset: 1px;
+	}
+	/* Unban row action — quiet until hovered: the table is read
+	   far more often than it is edited. */
+	.unban-btn {
+		background: transparent;
+		color: var(--text-secondary);
+		border: 1px solid var(--border-subtle, var(--bg-hover));
+		padding: 0.1rem 0.5rem;
+		border-radius: 4px;
+		font-size: var(--text-xs, 11px);
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.unban-btn:hover {
+		color: var(--status-down);
+		border-color: var(--status-down);
+	}
+	.unban-btn:focus-visible {
+		outline: 2px solid var(--accent-cyan);
 		outline-offset: 1px;
 	}
 	/* CS.3 Commit B — origin tabs row.

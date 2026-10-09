@@ -3177,6 +3177,19 @@ export interface ManualBanRequest {
 	duration: string;
 	type: 'ban' | 'captcha' | 'throttle';
 	reason: string;
+	// Override for the backend self-ban guard (409
+	// crowdsec_self_ban). Sent only after the operator's
+	// explicit second confirmation; omitted otherwise.
+	confirmSelfBan?: boolean;
+}
+
+/**
+ * 200 response of DELETE /api/v1/security/crowdsec/decisions/{id}
+ * (unban). `nbDeleted` is LAPI's count of expired decisions.
+ */
+export interface CrowdSecDecisionDeleteResponse {
+	id: number;
+	nbDeleted: number;
 }
 
 /**
