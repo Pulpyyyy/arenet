@@ -555,6 +555,12 @@ paths:
         (authorization-code flow). The IdP then redirects back to
         `GET /auth/oidc/callback`.
 
+        An optional `next` is the page to land on once signed in. A
+        same-origin path is kept in the `arenet_oidc_next` cookie (same
+        lifetime and flags, never sent to the IdP); anything else is
+        ignored and an `arenet_oidc_next` left by an earlier attempt is
+        cleared.
+
         `503` when SSO is disabled (`oidc sso is not enabled on this
         instance`), when the IdP discovery document cannot be fetched
         (`oidc identity provider unreachable`) or the client is being
@@ -562,6 +568,15 @@ paths:
       tags: [Auth]
       x-arenet-role: public
       security: []
+      parameters:
+        - name: next
+          in: query
+          required: false
+          description: |
+            Page to land on after signing in: a path starting with exactly
+            one `/`, without backslash or control character, at most 2048
+            bytes, and not `/login` or `/setup`. Otherwise `/routes`.
+          schema: { type: string, examples: ['/certs'] }
       responses:
         '302':
           description: Redirect to the IdP authorization endpoint.
@@ -570,7 +585,7 @@ paths:
               description: IdP authorization URL (with `state`, `nonce`, `client_id`, `redirect_uri`, `scope`).
               schema: { type: string }
             Set-Cookie:
-              description: '`arenet_oidc_state` and `arenet_oidc_nonce`.'
+              description: '`arenet_oidc_state` and `arenet_oidc_nonce`, plus `arenet_oidc_next` when `next` is usable.'
               schema: { type: string }
         '429':
           description: IP blocked by the auth rate limiter.
@@ -602,7 +617,8 @@ paths:
 
         Always answers `302`:
         - success → session cookie set (same as local login, 24 h) and
-          redirect to `/routes`;
+          redirect to the `next` given to `GET /auth/oidc/login` (read
+          back from `arenet_oidc_next` and checked again), else `/routes`;
         - failure → redirect to `/login?error=<reason>` with `reason` one of
           `idp_error` (IdP returned `error`), `invalid_state` (missing or
           mismatched state/nonce cookie, missing code, invalid ID token or
@@ -633,10 +649,10 @@ paths:
           schema: { type: string }
       responses:
         '302':
-          description: Redirect to `/routes` (signed in) or `/login?error=<reason>`.
+          description: Redirect to the requested page or `/routes` (signed in), or `/login?error=<reason>`.
           headers:
             Location:
-              description: '`/routes` or `/login?error=idp_error|invalid_state|idp_unreachable|not_authorized|internal`.'
+              description: '`next` from the sign-in start, `/routes`, or `/login?error=idp_error|invalid_state|idp_unreachable|not_authorized|internal`.'
               schema: { type: string }
             Set-Cookie:
               description: On success `arenet_session` (plus theme / language cookies); the flow cookies are cleared.

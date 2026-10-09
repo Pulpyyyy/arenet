@@ -34,10 +34,12 @@
 	import { fade } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { ApiError } from '$lib/api/types';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
+	import { withNext } from '$lib/utils/safe-next';
 
 	// Reading language.current makes every label re-render on a
 	// language switch — same helper as the routes page.
@@ -53,6 +55,12 @@
 	let passwordInput: HTMLInputElement | undefined = $state();
 	let card: HTMLDivElement | undefined = $state();
 	let signingOut = $state(false);
+
+	// SSO re-authentication comes back to the page behind the lock
+	// (the backend keeps ?next=, same rules as safeNext).
+	const ssoHref = $derived(
+		withNext('/api/v1/auth/oidc/login', page.url.pathname + page.url.search)
+	);
 
 	// Focusable descendants of the card, in tab order (same selector
 	// as Modal's trap).
@@ -179,7 +187,7 @@
 				{tl('auth.lock.viaSso')}
 				{tl('auth.lock.ssoPrompt')}
 			</p>
-			<a class="lockscreen-submit" href="/api/v1/auth/oidc/login">
+			<a class="lockscreen-submit" href={ssoHref}>
 				<span class="lockscreen-submit-label">{tl('auth.lock.ssoButton')}</span>
 			</a>
 		{:else}

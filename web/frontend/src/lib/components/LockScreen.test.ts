@@ -8,6 +8,8 @@
 //   - Tab and Shift+Tab wrap inside the card
 //   - "Sign out" is a way out that is not unlocking: it runs the
 //     store's logout and lands on /login
+//   - the SSO button starts the flow with the page behind the lock as
+//     ?next=, so re-authenticating comes back to it
 //
 // Elements are found by id / test id rather than by their text, so
 // the copy can be translated without touching these tests.
@@ -16,7 +18,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 
-const { authStoreMock, gotoMock } = vi.hoisted(() => ({
+const { authStoreMock, gotoMock, pageMock } = vi.hoisted(() => ({
 	authStoreMock: {
 		state: 'locked' as const,
 		user: { username: 'alice', authSource: 'local' } as {
@@ -27,10 +29,12 @@ const { authStoreMock, gotoMock } = vi.hoisted(() => ({
 		unlock: vi.fn(),
 		clear: vi.fn()
 	},
-	gotoMock: vi.fn()
+	gotoMock: vi.fn(),
+	pageMock: { url: new URL('http://localhost/routes') }
 }));
 
 vi.mock('$app/navigation', () => ({ goto: gotoMock }));
+vi.mock('$app/state', () => ({ page: pageMock }));
 vi.mock('$lib/stores/auth.svelte', () => ({ auth: authStoreMock }));
 
 import LockScreen from './LockScreen.svelte';
@@ -43,6 +47,7 @@ function passwordInput(container: HTMLElement): HTMLInputElement {
 
 beforeEach(() => {
 	authStoreMock.user = { username: 'alice', authSource: 'local' };
+	pageMock.url = new URL('http://localhost/routes');
 	authStoreMock.logout.mockReset();
 	authStoreMock.logout.mockResolvedValue(undefined);
 	gotoMock.mockReset();
@@ -62,6 +67,14 @@ describe('LockScreen', () => {
 		const sso = container.querySelector<HTMLAnchorElement>('a[href="/api/v1/auth/oidc/login"]');
 		expect(sso).not.toBeNull();
 		await waitFor(() => expect(sso).toHaveFocus());
+	});
+
+	it('starts SSO with the page behind the lock as ?next=', () => {
+		authStoreMock.user = { username: 'alice', authSource: 'oidc' };
+		pageMock.url = new URL('http://localhost/certs?tab=acme');
+		const { container } = render(LockScreen);
+		const sso = container.querySelector<HTMLAnchorElement>('a.lockscreen-submit');
+		expect(sso?.getAttribute('href')).toBe('/api/v1/auth/oidc/login?next=%2Fcerts%3Ftab%3Dacme');
 	});
 
 	it('keeps Tab and Shift+Tab inside the card', async () => {

@@ -64,10 +64,11 @@ export function safeNext(raw: string | null | undefined): string {
 }
 
 /**
- * withNext builds the URL of an entry page (/login or /setup) that
- * carries `target` as ?next=. The parameter is left out when the
- * target is unusable, the default landing or the root, which all end
- * on the default landing anyway.
+ * withNext builds the URL of an entry page (/login or /setup, or the
+ * SSO start /api/v1/auth/oidc/login, whose backend applies the same
+ * rules) that carries `target` as ?next=. The parameter is left out
+ * when the target is unusable, the default landing or the root, which
+ * all end on the default landing anyway.
  */
 export function withNext(entry: string, target: string | null | undefined): string {
 	const safe = safeNext(target);
