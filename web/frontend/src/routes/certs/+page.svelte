@@ -44,6 +44,7 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import WildcardApexWizard from '$lib/components/certs/WildcardApexWizard.svelte';
 	import ExternalCertsPanel from '$lib/components/certs/ExternalCertsPanel.svelte';
+	import { absoluteDate } from '$lib/utils/date-format';
 	import { settingsApi } from '$lib/api/settings';
 	import { certificatesApi } from '$lib/api/certificates';
 	import { fetchCertEvents } from '$lib/api/security';
@@ -67,6 +68,7 @@
 		daysUntilExpiry,
 		dominantIssuer,
 		inferChallengeLabel,
+		isExpired,
 		isExpiringSoon,
 		isZeroTimestamp,
 		resolveSource,
@@ -82,7 +84,7 @@
 	// the operator's "what's the state of all my certs?" entry
 	// intent. URL-anchored tabs can be revisited if the dashboard
 	// gains deep-link conventions elsewhere.
-	type DomaineTab = 'all' | 'wildcard' | 'expiring';
+	type DomaineTab = 'all' | 'wildcard' | 'expiring' | 'expired';
 	let activeTab = $state<DomaineTab>('all');
 	// Distinct from the page-level `loading` (which gates the
 	// editor markup): certsLoadError is the soft-fail state for
@@ -179,6 +181,15 @@
 	// already-loaded domain.
 	let drillDownDomain = $state<string | null>(null);
 
+	// Why an ACME issuance failed (cert.lastError) is printed under
+	// the ÉCHEC badge, on one line clipped at this many characters
+	// (the .fail-reason-text max-width is the same count in `ch` of
+	// a monospace font, so the clip and the toggle agree). Longer
+	// reasons get a Show more / Show less toggle; domains whose
+	// reason is expanded are kept here.
+	const FAIL_REASON_PREVIEW_CHARS = 40;
+	let expandedFailReasons = $state<Record<string, boolean>>({});
+
 	const tlsRoutes = $derived(routes.filter((r) => r.tlsEnabled));
 	const tlsCount = $derived(tlsRoutes.length);
 	const managedCount = $derived(domains.length);
@@ -205,6 +216,23 @@
 	// ("renewal scheduled" should not include certs that haven't
 	// been obtained yet).
 	const certsExpiringSoon = $derived(certs.filter((c) => isExpiringSoon(c)).length);
+	// Expired certs are not "expiring": they are counted apart, on
+	// the same KPI's foot line and under their own tab, so the
+	// "auto-renewal scheduled" line never vouches for them.
+	const certsExpired = $derived(certs.filter((c) => isExpired(c)).length);
+	function expiringKpiHint(): string {
+		const parts: string[] = [];
+		if (certsExpiringSoon > 0) parts.push(t('certs.kpiExpiringFootAuto'));
+		if (certsExpired > 0) {
+			parts.push(
+				t('certs.kpiExpiringFootExpired', {
+					count: certsExpired,
+					plural: certsExpired === 1 ? '' : 's'
+				})
+			);
+		}
+		return parts.length > 0 ? parts.join(' · ') : '—';
+	}
 	const principalIssuer = $derived(dominantIssuer(certs));
 	// ACME method KPI: DNS-01 wins as soon as at least one
 	// managed-domain is declared (we're using DNS-01 for at least
@@ -230,6 +258,8 @@
 				return certs.filter((c) => c.source === 'wildcard');
 			case 'expiring':
 				return certs.filter((c) => isExpiringSoon(c));
+			case 'expired':
+				return certs.filter((c) => isExpired(c));
 			case 'all':
 			default:
 				return certs;
@@ -539,7 +569,7 @@
 			testid="kpi-expirent-bientot"
 			label={language.current && t('certs.kpiExpiringLabel', { days: RENEWAL_WINDOW_DAYS })}
 			value={certsExpiringSoon}
-			hint={language.current && (certsExpiringSoon > 0 ? t('certs.kpiExpiringFootAuto') : '—')}
+			hint={language.current && expiringKpiHint()}
 		/>
 		<StatCard
 			testid="kpi-emetteur"
@@ -659,6 +689,17 @@
 				>
 					{language.current && t('certs.tabExpiring')}
 				</button>
+				<button
+					type="button"
+					role="tab"
+					class="tab"
+					class:active={activeTab === 'expired'}
+					aria-selected={activeTab === 'expired'}
+					data-testid="tab-expired"
+					onclick={() => (activeTab = 'expired')}
+				>
+					{language.current && t('certs.tabExpired')}
+				</button>
 			</div>
 		</div>
 
@@ -697,6 +738,8 @@
 						{@const notBeforeMissing = isZeroTimestamp(cert.notBefore)}
 						{@const staleFailedAt = staleFailureSince(cert.domain)}
 						{@const failCount = failureCountSince(cert.domain)}
+						{@const expired = isExpired(cert)}
+						{@const expiring = !expired && days !== null && days <= RENEWAL_WINDOW_DAYS}
 						<tr data-testid="cert-row" data-domain={cert.domain}>
 							<td>
 								<div class="domain-cell">
@@ -730,27 +773,79 @@
 							</td>
 							<td>{cert.issuer || '—'}</td>
 							<td class="mono">
-								{language.current && t('certs.sanCount', { count: (cert.sanList ?? []).length })}
+								{#if (cert.sanList ?? []).length > 0}
+									<!-- The count alone hid which names the cert
+									     covers; the list opens in place. -->
+									<details class="san-list" data-testid="cert-san-list">
+										<summary title={(cert.sanList ?? []).join(', ')}
+											>{language.current && t('certs.sanCount', { count: (cert.sanList ?? []).length })}</summary
+										>
+										<ul
+											aria-label={language.current &&
+												t('certs.sanListAria', { domain: cert.domain })}
+										>
+											{#each cert.sanList ?? [] as san}
+												<li>{san}</li>
+											{/each}
+										</ul>
+									</details>
+								{:else}
+									{language.current && t('certs.sanCount', { count: 0 })}
+								{/if}
 							</td>
 							<td class="dim">
-								{notBeforeMissing ? '—' : relativeTime(cert.notBefore)}
+								{#if notBeforeMissing}
+									—
+								{:else}
+									<time
+										datetime={cert.notBefore}
+										title={language.current && absoluteDate(cert.notBefore, true)}
+										>{relativeTime(cert.notBefore)}</time
+									>
+									<div class="cell-sub" data-testid="cert-issued-date">
+										{language.current && absoluteDate(cert.notBefore)}
+									</div>
+								{/if}
 							</td>
 							<td>
+								<!-- Colour is not the only signal: an expired cert
+								     reads "✕ expired", one inside the renewal
+								     window carries a "⚠" named for screen readers. -->
 								<span
 									class="expiry"
-									class:expiry-warn={days !== null &&
-										days <= RENEWAL_WINDOW_DAYS &&
-										days > 0}
-									class:expiry-down={days !== null && days <= 0}
+									class:expiry-warn={expiring}
+									class:expiry-down={expired}
+									data-testid="cert-expiry"
 								>
 									{#if days === null}
 										—
-									{:else if days <= 0}
+									{:else if expired}
+										<span class="expiry-mark" aria-hidden="true">✕</span>
 										{language.current && t('certs.expiryExpired')}
 									{:else}
-										{language.current && t('certs.expiryDays', { days, plural: days === 1 ? '' : 's' })}
+										{#if expiring}
+											<span
+												class="expiry-mark"
+												role="img"
+												aria-label={language.current && t('certs.expiryExpiringMark')}
+												title={language.current && t('certs.expiryExpiringMark')}>⚠</span
+											>
+										{/if}
+										{language.current &&
+											(days === 0
+												? t('certs.expiryToday')
+												: t('certs.expiryDays', { days, plural: days === 1 ? '' : 's' }))}
 									{/if}
 								</span>
+								{#if days !== null}
+									<div class="dim cell-sub" data-testid="cert-expiry-date">
+										<time
+											datetime={cert.notAfter}
+											title={language.current && absoluteDate(cert.notAfter, true)}
+											>{language.current && absoluteDate(cert.notAfter)}</time
+										>
+									</div>
+								{/if}
 							</td>
 							<td>
 								{#if cert.status === 'OBTAIN_FAILED' && cert.lastError}
@@ -770,13 +865,48 @@
 										{certificateStatusLabel(cert.status)}
 									</Badge>
 								{/if}
+								{#if cert.status === 'OBTAIN_FAILED' && cert.lastError}
+									{@const reasonLong = cert.lastError.length > FAIL_REASON_PREVIEW_CHARS}
+									{@const reasonOpen = expandedFailReasons[cert.domain] === true}
+									{@const reasonAction =
+										language.current && (reasonOpen ? t('certs.failReasonLess') : t('certs.failReasonMore'))}
+									<!-- The reason is readable without hovering:
+									     one selectable line under the badge, with a
+									     toggle when it is longer than that line. -->
+									<div class="fail-reason" data-testid="cert-fail-reason">
+										<span
+											id={`fail-reason-${cert.domain}`}
+											class="fail-reason-text"
+											class:open={reasonOpen}>{cert.lastError}</span
+										>
+										{#if reasonLong}
+											<button
+												type="button"
+												class="fail-reason-toggle"
+												data-testid="cert-fail-reason-toggle"
+												aria-expanded={reasonOpen}
+												aria-controls={`fail-reason-${cert.domain}`}
+												aria-label={language.current &&
+													t('certs.failReasonAria', { action: reasonAction, domain: cert.domain })}
+												onclick={() =>
+													(expandedFailReasons = {
+														...expandedFailReasons,
+														[cert.domain]: !reasonOpen
+													})}
+											>
+												{reasonAction}
+											</button>
+										{/if}
+									</div>
+								{/if}
 							</td>
 							<td class="col-actions">
 								<button
 									type="button"
 									class="row-delete-btn"
 									data-testid={`cert-delete-${cert.domain}`}
-									aria-label={language.current && t('certs.delete.action')}
+									aria-label={language.current &&
+										t('certs.delete.actionAria', { domain: cert.domain })}
 									onclick={() => (deleteTarget = cert.domain)}
 								>
 									{language.current && t('certs.delete.action')}
@@ -1333,6 +1463,18 @@
 		margin-top: 3px;
 	}
 
+	/* SAN cell: "<n> SAN" opens the list of names in place. */
+	.san-list summary {
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.san-list ul {
+		margin: 4px 0 0 0;
+		padding-left: 14px;
+		font-size: 11px;
+		word-break: break-all;
+	}
+
 	/* Cert.B (2026-06-23) — domain cell now hosts the stale-
 	   failure badge alongside the hostname. flex inline-row keeps
 	   the badge on the same line as the domain unless the row
@@ -1434,6 +1576,52 @@
 	}
 	.expiry-down {
 		color: var(--status-down);
+	}
+	.expiry-mark {
+		margin-right: 3px;
+	}
+
+	/* Failure reason under the ÉCHEC badge. One line clipped at
+	   40ch of a monospace font (FAIL_REASON_PREVIEW_CHARS in the
+	   script), wrapped in full once expanded. Selectable text. */
+	.fail-reason {
+		display: flex;
+		align-items: baseline;
+		gap: 6px;
+		margin-top: 4px;
+	}
+	.fail-reason-text {
+		min-width: 0;
+		max-width: 40ch;
+		font-family: var(--font-mono);
+		font-size: 11px;
+		color: var(--fg-muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		user-select: text;
+	}
+	.fail-reason-text.open {
+		white-space: normal;
+		overflow-wrap: anywhere;
+	}
+	.fail-reason-toggle {
+		flex: none;
+		appearance: none;
+		background: transparent;
+		border: none;
+		padding: 0;
+		color: var(--accent);
+		font-size: 11px;
+		font-family: inherit;
+		cursor: pointer;
+	}
+	.fail-reason-toggle:hover {
+		text-decoration: underline;
+	}
+	.fail-reason-toggle:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
 	}
 
 	.empty-row {

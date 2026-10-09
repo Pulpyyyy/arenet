@@ -14,7 +14,10 @@
   Sections:
     - Upload form: name (+ optional description) + 3 textareas
       (cert / chain / key PEM) + Upload button. On success the returned
-      non-blocking `warnings` render as an inline notice.
+      non-blocking `warnings` render as an inline notice. Each PEM
+      field takes a pasted value or a picked file (PemFileButton), and
+      content in the wrong field (key in Certificate, cert in Key,
+      fullchain + Chain…) is flagged inline before upload.
     - Active / Pending CSR tabs (v2.20.0): rows split on
       `status === 'pending_csr'` — NEVER on `csrSubject`
       truthiness/presence (Go's `omitempty` is a no-op on struct-typed
@@ -50,13 +53,16 @@
 	import Badge from '$lib/components/Badge.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import GenerateCSRForm from './GenerateCSRForm.svelte';
+	import PemFileButton from './PemFileButton.svelte';
 	import { externalCertsApi } from '$lib/api/external-certs';
 	import type { ExternalCertificate, CertWarning } from '$lib/api/external-certs';
-	import { ApiError } from '$lib/api/types';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
 	import { pushToast } from '$lib/stores/toast';
 	import { csrAgeBadge } from '$lib/utils/csr-age';
+	import { resolveCertError } from '$lib/utils/cert-errors';
+	import { pemFieldIssue, type PemIssue } from '$lib/utils/cert-input';
+	import { absoluteDate } from '$lib/utils/date-format';
 
 	// Expiry-badge thresholds (days-to-notAfter). Amber inside the
 	// warning window, red inside the danger window OR already expired.
@@ -114,35 +120,28 @@
 	// Cleared on the next upload attempt / form reset.
 	let lastWarnings = $state<CertWarning[]>([]);
 
-	// Backend validation-400 codes (external_cert_parse.go) mapped to
-	// friendly, translated messages. The wire format is
-	// "code: human detail" (English, technical) — split on the first
-	// ": " and look up the leading token here. Unmapped codes fall back
-	// to the raw backend message so unknown errors are never hidden.
-	const UPLOAD_ERROR_CODE_KEYS: Record<string, string> = {
-		chain_specified_twice: 'certificates.external.upload.errors.chainSpecifiedTwice',
-		key_does_not_match_cert: 'certificates.external.upload.errors.keyDoesNotMatchCert',
-		invalid_cert_pem: 'certificates.external.upload.errors.invalidCertPem',
-		invalid_chain_pem: 'certificates.external.upload.errors.invalidChainPem',
-		cert_required: 'certificates.external.upload.errors.certRequired',
-		key_required: 'certificates.external.upload.errors.keyRequired'
-	};
+	// Backend validation-400 codes ("code: human detail") are mapped to
+	// friendly, translated messages by resolveCertError
+	// ($lib/utils/cert-errors), shared with the re-import modal and the
+	// CSR form. Unmapped codes fall back to the raw backend message.
 
-	/**
-	 * Extracts the leading "code" token from a backend error message
-	 * ("code: human detail") and resolves it to a friendly translated
-	 * string via UPLOAD_ERROR_CODE_KEYS. Returns the raw message
-	 * unchanged (and a null code) when the message doesn't match a
-	 * known code, so unrecognized errors are still shown, not hidden.
-	 */
-	function resolveUploadError(rawMessage: string): { message: string; code: string | null } {
-		const sep = rawMessage.indexOf(': ');
-		const code = sep === -1 ? rawMessage : rawMessage.slice(0, sep);
-		const key = UPLOAD_ERROR_CODE_KEYS[code];
-		if (key) {
-			return { message: t(key), code };
-		}
-		return { message: rawMessage, code: null };
+	// Wrong-content checks on the PEM fields, from their BEGIN headers,
+	// shown inline before upload (a key in the Certificate field, a
+	// certificate in the Key field, a fullchain plus a filled Chain
+	// field…). Any of them blocks the upload: the backend would refuse
+	// it, or — a key pasted next to the certificate — store the private
+	// key in the certificate field.
+	const certIssue = $derived(pemFieldIssue('cert', certPEM, { chain: chainPEM }));
+	const chainIssue = $derived(pemFieldIssue('chain', chainPEM));
+	const keyIssue = $derived(pemFieldIssue('key', keyPEM));
+	const reimportCertIssue = $derived(
+		pemFieldIssue('cert', reimportCertPEM, { chain: reimportChainPEM })
+	);
+	const reimportChainIssue = $derived(pemFieldIssue('chain', reimportChainPEM));
+
+	/** i18n key of the inline message for a PEM wrong-content issue. */
+	function pemIssueKey(issue: PemIssue): string {
+		return `certificates.external.upload.mismatch.${issue}`;
 	}
 
 	// Delete-dialog state. deleteTarget holds the cert awaiting
@@ -152,7 +151,13 @@
 	let blockedDialog = $state<{ name: string; routes: string[] } | null>(null);
 
 	const canSubmit = $derived(
-		name.trim() !== '' && certPEM.trim() !== '' && keyPEM.trim() !== '' && !uploading
+		name.trim() !== '' &&
+			certPEM.trim() !== '' &&
+			keyPEM.trim() !== '' &&
+			certIssue === null &&
+			chainIssue === null &&
+			keyIssue === null &&
+			!uploading
 	);
 
 	/**
@@ -236,6 +241,8 @@
 			uploadErrorCode = null;
 			return;
 		}
+		// The inline wrong-content messages already explain the problem.
+		if (certIssue !== null || chainIssue !== null || keyIssue !== null) return;
 		uploading = true;
 		uploadError = null;
 		uploadErrorCode = null;
@@ -253,8 +260,7 @@
 			resetForm();
 			await loadCerts();
 		} catch (err) {
-			const rawMessage = err instanceof ApiError ? err.message : String(err);
-			const resolved = resolveUploadError(rawMessage);
+			const resolved = resolveCertError(err);
 			uploadError = resolved.message;
 			uploadErrorCode = resolved.code;
 		} finally {
@@ -339,6 +345,7 @@
 			reimportError = t('certs.externalCerts.pending.certRequiredError');
 			return;
 		}
+		if (reimportCertIssue !== null || reimportChainIssue !== null) return;
 		reimporting = true;
 		reimportError = null;
 		try {
@@ -357,7 +364,7 @@
 			closeReimport();
 			await loadCerts();
 		} catch (err) {
-			reimportError = err instanceof ApiError ? err.message : String(err);
+			reimportError = resolveCertError(err).message;
 		} finally {
 			reimporting = false;
 		}
@@ -424,7 +431,25 @@
 				spellcheck="false"
 				disabled={uploading}
 				data-testid="external-cert-cert-pem"
+				aria-invalid={certIssue !== null}
+				aria-describedby={certIssue !== null ? 'ext-cert-issue' : undefined}
 			></textarea>
+			<PemFileButton
+				fieldLabel={language.current && t('certificates.external.upload.certLabel')}
+				disabled={uploading}
+				testId="external-cert-cert-file"
+				onLoad={(text) => (certPEM = text)}
+			/>
+			{#if certIssue}
+				<p
+					id="ext-cert-issue"
+					class="form-error field-error-inline"
+					role="alert"
+					data-testid="external-cert-cert-issue"
+				>
+					{language.current && t(pemIssueKey(certIssue))}
+				</p>
+			{/if}
 			<p class="field-help">{language.current && t('certificates.external.upload.certHelp')}</p>
 		</div>
 
@@ -441,7 +466,25 @@
 				spellcheck="false"
 				disabled={uploading}
 				data-testid="external-cert-chain-pem"
+				aria-invalid={chainIssue !== null}
+				aria-describedby={chainIssue !== null ? 'ext-chain-issue' : undefined}
 			></textarea>
+			<PemFileButton
+				fieldLabel={language.current && t('certificates.external.upload.chainLabel')}
+				disabled={uploading}
+				testId="external-cert-chain-file"
+				onLoad={(text) => (chainPEM = text)}
+			/>
+			{#if chainIssue}
+				<p
+					id="ext-chain-issue"
+					class="form-error field-error-inline"
+					role="alert"
+					data-testid="external-cert-chain-issue"
+				>
+					{language.current && t(pemIssueKey(chainIssue))}
+				</p>
+			{/if}
 			<p class="field-help">{language.current && t('certificates.external.upload.chainHelp')}</p>
 			{#if uploadErrorCode === 'chain_specified_twice'}
 				<p
@@ -465,7 +508,25 @@
 				spellcheck="false"
 				disabled={uploading}
 				data-testid="external-cert-key-pem"
+				aria-invalid={keyIssue !== null}
+				aria-describedby={keyIssue !== null ? 'ext-key-issue' : undefined}
 			></textarea>
+			<PemFileButton
+				fieldLabel={language.current && t('certificates.external.upload.keyLabel')}
+				disabled={uploading}
+				testId="external-cert-key-file"
+				onLoad={(text) => (keyPEM = text)}
+			/>
+			{#if keyIssue}
+				<p
+					id="ext-key-issue"
+					class="form-error field-error-inline"
+					role="alert"
+					data-testid="external-cert-key-issue"
+				>
+					{language.current && t(pemIssueKey(keyIssue))}
+				</p>
+			{/if}
 			<p class="field-help">{language.current && t('certificates.external.upload.keyHelp')}</p>
 		</div>
 
@@ -606,13 +667,29 @@
 											})}
 									{/if}
 								</Badge>
+								<!-- Uploaded certs are never renewed by Arenet, unlike
+								     the ACME ones above on the page: say so next to
+								     the exact expiry date. -->
+								<div
+									class="dim cell-sub"
+									data-testid="external-cert-expiry-hint"
+									title={language.current && t('certificates.external.manualRenewalTitle')}
+								>
+									{#if days !== null}
+										<time datetime={cert.notAfter}
+											>{language.current && absoluteDate(cert.notAfter)}</time
+										> ·
+									{/if}
+									{language.current && t('certificates.external.manualRenewal')}
+								</div>
 							</td>
 							<td class="col-actions">
 								<button
 									type="button"
 									class="row-delete-btn"
 									data-testid={`external-cert-delete-${cert.id}`}
-									aria-label={language.current && t('certificates.external.delete.action')}
+									aria-label={language.current &&
+										t('certificates.external.delete.actionAria', { name: cert.name })}
 									onclick={() => (deleteTarget = cert)}
 								>
 									{language.current && t('certificates.external.delete.action')}
@@ -685,7 +762,8 @@
 								type="button"
 								class="row-delete-btn"
 								data-testid={`external-cert-pending-delete-${cert.id}`}
-								aria-label={language.current && t('certificates.external.delete.action')}
+								aria-label={language.current &&
+									t('certs.externalCerts.pending.deleteAria', { name: cert.name })}
 								onclick={() => (deleteTarget = cert)}
 							>
 								{language.current && t('certificates.external.delete.action')}
@@ -823,7 +901,25 @@
 						spellcheck="false"
 						disabled={reimporting}
 						data-testid="external-cert-reimport-cert-pem"
+						aria-invalid={reimportCertIssue !== null}
+						aria-describedby={reimportCertIssue !== null ? 'reimport-cert-issue' : undefined}
 					></textarea>
+					<PemFileButton
+						fieldLabel={language.current && t('certs.externalCerts.pending.certLabel')}
+						disabled={reimporting}
+						testId="external-cert-reimport-cert-file"
+						onLoad={(text) => (reimportCertPEM = text)}
+					/>
+					{#if reimportCertIssue}
+						<p
+							id="reimport-cert-issue"
+							class="form-error field-error-inline"
+							role="alert"
+							data-testid="external-cert-reimport-cert-issue"
+						>
+							{language.current && t(pemIssueKey(reimportCertIssue))}
+						</p>
+					{/if}
 				</div>
 				<div class="field field-full">
 					<label for="reimport-chain"
@@ -838,7 +934,25 @@
 						spellcheck="false"
 						disabled={reimporting}
 						data-testid="external-cert-reimport-chain-pem"
+						aria-invalid={reimportChainIssue !== null}
+						aria-describedby={reimportChainIssue !== null ? 'reimport-chain-issue' : undefined}
 					></textarea>
+					<PemFileButton
+						fieldLabel={language.current && t('certs.externalCerts.pending.chainLabel')}
+						disabled={reimporting}
+						testId="external-cert-reimport-chain-file"
+						onLoad={(text) => (reimportChainPEM = text)}
+					/>
+					{#if reimportChainIssue}
+						<p
+							id="reimport-chain-issue"
+							class="form-error field-error-inline"
+							role="alert"
+							data-testid="external-cert-reimport-chain-issue"
+						>
+							{language.current && t(pemIssueKey(reimportChainIssue))}
+						</p>
+					{/if}
 				</div>
 				{#if reimportError}
 					<p class="form-error" role="alert" data-testid="external-cert-reimport-error">
@@ -854,7 +968,10 @@
 			<Button
 				variant="primary"
 				loading={reimporting}
-				disabled={reimporting || reimportCertPEM.trim() === ''}
+				disabled={reimporting ||
+					reimportCertPEM.trim() === '' ||
+					reimportCertIssue !== null ||
+					reimportChainIssue !== null}
 				data-testid="external-cert-reimport-submit"
 				onclick={() => void confirmReimport()}
 			>

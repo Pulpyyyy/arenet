@@ -17,6 +17,7 @@ import {
 	daysUntilExpiry,
 	dominantIssuer,
 	inferChallengeLabel,
+	isExpired,
 	isExpiringSoon,
 	isZeroTimestamp,
 	RENEWAL_WINDOW_DAYS,
@@ -220,9 +221,30 @@ describe('isExpiringSoon', () => {
 		});
 		expect(isExpiringSoon(c, NOW)).toBe(false);
 	});
-	it('flags already-expired certs (operator wants to see them too)', () => {
+	it('does NOT flag already-expired certs (negative days)', () => {
 		const c = mkCert({
+			status: 'EXPIRED',
 			notAfter: new Date(NOW.getTime() - 3 * 86400000).toISOString(),
+		});
+		expect(daysUntilExpiry(c, NOW)).toBe(-3);
+		expect(isExpiringSoon(c, NOW)).toBe(false);
+	});
+	it('does NOT flag a cert that expired less than a day ago (days rounds to 0)', () => {
+		const c = mkCert({
+			notAfter: new Date(NOW.getTime() - 3600000).toISOString(),
+		});
+		expect(isExpiringSoon(c, NOW)).toBe(false);
+	});
+	it('flags a cert that expires later today (days === 0, not yet expired)', () => {
+		const c = mkCert({
+			notAfter: new Date(NOW.getTime() + 3600000).toISOString(),
+		});
+		expect(daysUntilExpiry(c, NOW)).toBe(0);
+		expect(isExpiringSoon(c, NOW)).toBe(true);
+	});
+	it('flags a cert exactly at the edge of the renewal window', () => {
+		const c = mkCert({
+			notAfter: new Date(NOW.getTime() + RENEWAL_WINDOW_DAYS * 86400000).toISOString(),
 		});
 		expect(isExpiringSoon(c, NOW)).toBe(true);
 	});
@@ -239,6 +261,39 @@ describe('isExpiringSoon', () => {
 			notAfter: '0001-01-01T00:00:00Z',
 		});
 		expect(isExpiringSoon(c, NOW)).toBe(false);
+	});
+});
+
+describe('isExpired', () => {
+	it('is true once notAfter has passed', () => {
+		const c = mkCert({
+			status: 'EXPIRED',
+			notAfter: new Date(NOW.getTime() - 3 * 86400000).toISOString(),
+		});
+		expect(isExpired(c, NOW)).toBe(true);
+	});
+	it('is true less than a day after notAfter (days rounds to 0)', () => {
+		const c = mkCert({
+			notAfter: new Date(NOW.getTime() - 3600000).toISOString(),
+		});
+		expect(isExpired(c, NOW)).toBe(true);
+	});
+	it('is true at notAfter itself (backend: !now.Before(NotAfter))', () => {
+		const c = mkCert({ notAfter: NOW.toISOString() });
+		expect(isExpired(c, NOW)).toBe(true);
+	});
+	it('is false for a cert still valid, even inside the renewal window', () => {
+		expect(isExpired(mkCert({}), NOW)).toBe(false);
+		const c = mkCert({
+			notAfter: new Date(NOW.getTime() + 3600000).toISOString(),
+		});
+		expect(isExpired(c, NOW)).toBe(false);
+	});
+	it('is false for zero-time or malformed notAfter (never obtained)', () => {
+		expect(
+			isExpired(mkCert({ status: 'OBTAIN_FAILED', notAfter: '0001-01-01T00:00:00Z' }), NOW)
+		).toBe(false);
+		expect(isExpired(mkCert({ notAfter: 'not-a-date' }), NOW)).toBe(false);
 	});
 });
 

@@ -2651,6 +2651,7 @@
 		"kpiActiveCertsFoot": "{wildcard} wildcard · {specific} spécifique{plural}",
 		"kpiExpiringLabel": "Expirent < {days} jours",
 		"kpiExpiringFootAuto": "renouvellement auto programmé",
+		"kpiExpiringFootExpired": "{count} déjà expiré{plural}",
 		"kpiIssuerLabel": "Émetteur principal",
 		"kpiACMEMethodLabel": "Méthode ACME",
 		"kpiACMEMethodAuto": "Auto",
@@ -2665,6 +2666,7 @@
 		"tabAll": "Tous",
 		"tabWildcard": "Wildcard",
 		"tabExpiring": "Expirent bientôt",
+		"tabExpired": "Expirés",
 		"certsLoadError": "Impossible de récupérer les certificats (le service backend a répondu en erreur). Le reste de cette page reste utilisable.",
 		"certsEmptyTitle": "Aucun certificat actif.",
 		"certsEmptyHelper": "Les certificats sont auto-provisionnés à la création d'une route TLS ou à la déclaration d'un apex géré.",
@@ -2680,6 +2682,11 @@
 		"staleBadgeText": "⚠ Échec depuis {ago}",
 		"expiryExpired": "expiré",
 		"expiryDays": "{days} jour{plural}",
+		"expiryToday": "aujourd'hui",
+		"expiryExpiringMark": "expire bientôt",
+		"failReasonMore": "Afficher plus",
+		"failReasonLess": "Afficher moins",
+		"failReasonAria": "{action} : pourquoi l'émission a échoué pour {domain}",
 		"statusValid": "VALIDE",
 		"statusRenewalPending": "RENOUV. AUTO",
 		"statusExpired": "EXPIRÉ",
@@ -2734,11 +2741,28 @@
 				"emptyState": {
 					"message": "Aucun fournisseur DNS configuré pour l'instant.",
 					"ctaLabel": "Configurer un fournisseur DNS dans les Réglages"
-				}
+				},
+				"notConfigured": "non configuré",
+				"loadError": "Impossible de charger les fournisseurs DNS (erreur retournée par le backend).",
+				"retry": "Réessayer"
+			},
+			"apexInvalid": "« {value} » ne ressemble pas à un nom de domaine (ex. example.com).",
+			"apexNormalized": "Sera déclaré comme {apex}.",
+			"summaryWithApex": "Demandera {wildcard} + {apex} via {provider} (DNS-01).",
+			"summaryWildcardOnly": "Demandera {wildcard} via {provider} (DNS-01).",
+			"errors": {
+				"alreadyExists": "Une politique wildcard existe déjà pour {apex}.",
+				"wouldCover": "{apex} couvrirait la politique existante de {existing}. Supprime d'abord cette politique, ou déclare un apex plus précis.",
+				"alreadyCovered": "{apex} est déjà couvert par la politique de {existing}.",
+				"providerGone": "Le fournisseur DNS choisi n'existe plus. Choisis-en un autre.",
+				"reloadFailed": "La politique n'a pas pu être appliquée (échec du rechargement de Caddy) : {detail}",
+				"invalidApex": "Le backend a refusé cet apex : indique un nom de domaine nu, comme example.com."
 			}
 		},
+		"sanListAria": "Noms alternatifs (SAN) de {domain}",
 		"delete": {
 			"action": "Supprimer le certificat",
+			"actionAria": "Supprimer le certificat de {domain}",
 			"confirm": {
 				"title": "Supprimer le certificat",
 				"text": "Supprimer définitivement le certificat de {domain} ? Les fichiers .crt/.key/.json seront supprimés du disque. Cette action est irréversible.",
@@ -2771,7 +2795,12 @@
 				"keyAlgorithmECDSA": "ECDSA P-256",
 				"keyAlgorithmECDSAHelp": "Négociation plus rapide, clé plus petite. Certains CA historiques refusent l'ECDSA — vérifiez le support au préalable.",
 				"submit": "Générer la CSR",
-				"submitting": "Génération en cours…"
+				"submitting": "Génération en cours…",
+				"errors": {
+					"cnRequired": "Le nom commun est obligatoire.",
+					"invalidCountry": "Le pays doit être un code ISO à deux lettres (ex. FR, US).",
+					"invalidKeyAlgorithm": "Algorithme de clé inconnu. Choisis RSA 4096 ou ECDSA P-256."
+				}
 			},
 			"pending": {
 				"tab": "CSR en attente",
@@ -2794,6 +2823,7 @@
 				"ageWaiting": "En attente",
 				"ageOld": "Ancien",
 				"ageStale": "Périmé",
+				"deleteAria": "Supprimer la CSR en attente « {name} »",
 				"deleteConfirmTitle": "Supprimer la CSR en attente",
 				"deleteConfirmText": "Cette action supprime définitivement la clé privée générée. Si votre CA signe le certificat plus tard, vous ne pourrez PAS l'importer — vous devrez générer une nouvelle CSR."
 			}
@@ -2811,6 +2841,8 @@
 			"colExpiry": "Expiration",
 			"expiryExpired": "expiré",
 			"expiryDays": "{days} jour{plural}",
+			"manualRenewal": "renouvellement manuel",
+			"manualRenewalTitle": "Arenet ne renouvelle jamais les certificats importés. Importe un remplaçant avant cette date.",
 			"upload": {
 				"nameLabel": "Nom",
 				"descriptionLabel": "Description (optionnel)",
@@ -2832,10 +2864,25 @@
 					"invalidChainPem": "Le champ Chaîne n'est pas un certificat PEM valide.",
 					"certRequired": "Le champ Certificat (PEM) est obligatoire.",
 					"keyRequired": "Le champ Clé privée (PEM) est obligatoire."
+				},
+				"file": {
+					"button": "Charger un fichier…",
+					"buttonAria": "Charger {field} depuis un fichier",
+					"tooLarge": "{name} est trop gros pour être un fichier PEM (1 Mio max).",
+					"readFailed": "Impossible de lire {name}.",
+					"notPem": "{name} n'est pas du texte PEM (pas de ligne -----BEGIN). Si c'est un fichier DER binaire, convertis-le d'abord, ex. openssl x509 -inform der -in {name} -out cert.pem."
+				},
+				"mismatch": {
+					"keyInCert": "Ce champ contient une clé privée. Mets la clé dans le champ Clé privée — seuls les certificats vont ici.",
+					"csrInCert": "Ceci est une demande de signature (CSR), pas un certificat. Colle le certificat que ton CA a signé à partir de celle-ci.",
+					"keyInChain": "Ce champ contient une clé privée. Il n'accepte que les certificats intermédiaires du CA.",
+					"certInKey": "Ce champ contient un certificat, pas une clé privée. Colle la clé générée avec ta CSR (BEGIN … PRIVATE KEY).",
+					"chainTwice": "Ce champ contient une chaîne complète et le champ Chaîne est aussi rempli. Ne mets les intermédiaires qu'à un seul endroit : vide le champ Chaîne, ou ne garde ici que le certificat feuille."
 				}
 			},
 			"delete": {
 				"action": "Supprimer le certificat",
+				"actionAria": "Supprimer le certificat « {name} »",
 				"success": "Certificat « {name} » supprimé",
 				"confirm": {
 					"title": "Supprimer le certificat externe",

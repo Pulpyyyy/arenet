@@ -477,19 +477,32 @@ describe('/certs — runtime KPI cards (T.4)', () => {
 		expect(card.textContent ?? '').toMatch(/3 specific/);
 	});
 
-	it('Expirent < 30 jours excludes OBTAIN_FAILED + zero-time entries', async () => {
+	it('Expirent < 30 jours excludes OBTAIN_FAILED, zero-time AND expired entries', async () => {
 		certsMock.certificatesApi.list.mockResolvedValue(fixtureCerts);
 		render(Page);
 		const card = await screen.findByTestId('kpi-expirent-bientot');
-		// fixtureCerts post-polish: soon (15d, RENEWAL_PENDING) +
-		// expired (-3d, EXPIRED) = 2. The *.test.local OBTAIN_FAILED
-		// row has notAfter = Go zero-time which would have trivially
-		// satisfied "<= now+30d" pre-polish; the new isExpiringSoon
-		// filter correctly excludes it.
-		expect(card.textContent ?? '').toMatch(/2/);
+		// fixtureCerts: only soon (15d, RENEWAL_PENDING) is expiring.
+		// expired (-3d, EXPIRED) is not "expiring" and must not sit
+		// under "auto-renewal scheduled". The *.test.local
+		// OBTAIN_FAILED row has notAfter = Go zero-time which would
+		// have trivially satisfied "<= now+30d" pre-polish.
+		expect(card.querySelector('.value')?.textContent?.trim()).toBe('1');
 		// v2.9.21 i18n — "renouvellement auto programmé" → EN bundle
 		// "auto-renewal scheduled".
 		expect(card.textContent ?? '').toMatch(/auto-renewal scheduled/);
+		// The expired cert is counted apart, by name.
+		expect(card.textContent ?? '').toMatch(/1 already expired/);
+	});
+
+	it('expired certs alone do not claim an auto-renewal is scheduled', async () => {
+		certsMock.certificatesApi.list.mockResolvedValue(
+			fixtureCerts.filter((c) => c.domain === 'expired.example.com'),
+		);
+		render(Page);
+		const card = await screen.findByTestId('kpi-expirent-bientot');
+		expect(card.querySelector('.value')?.textContent?.trim()).toBe('0');
+		expect(card.textContent ?? '').not.toMatch(/auto-renewal scheduled/);
+		expect(card.textContent ?? '').toMatch(/1 already expired/);
 	});
 
 	it('Émetteur principal surfaces the dominant issuer', async () => {
@@ -573,9 +586,78 @@ describe('/certs — Domaines table (T.4)', () => {
 		expect(wrapper).not.toBeNull();
 		await fireEvent.focusIn(wrapper!);
 		await tick();
-		expect(
-			screen.getByText(/does not qualify for a public certificate/),
-		).toBeInTheDocument();
+		// Scoped to the bubble: the same reason is also printed
+		// inline under the badge (next test).
+		expect(wrapper!.querySelector('[role="tooltip"]')?.textContent ?? '').toMatch(
+			/does not qualify for a public certificate/,
+		);
+	});
+
+	it('OBTAIN_FAILED row shows why it failed inline, without hovering', async () => {
+		certsMock.certificatesApi.list.mockResolvedValue(fixtureCerts);
+		render(Page);
+		await screen.findByTestId('certs-table');
+		const broken = screen
+			.getAllByTestId('cert-row')
+			.find((r) => r.dataset.domain === '*.test.local')!;
+		// No hover / focus: the reason is in the row from the start.
+		expect(broken.querySelector('[role="tooltip"]')).toBeNull();
+		const reason = broken.querySelector('[data-testid="cert-fail-reason"]');
+		expect(reason).not.toBeNull();
+		expect(reason!.textContent ?? '').toContain(
+			"subject '*.test.local' does not qualify for a public certificate",
+		);
+		// Rows that did not fail carry no reason line.
+		const valid = screen
+			.getAllByTestId('cert-row')
+			.find((r) => r.dataset.domain === 'valid.example.com')!;
+		expect(valid.querySelector('[data-testid="cert-fail-reason"]')).toBeNull();
+	});
+
+	it('a long failure reason gets a Show more / Show less toggle', async () => {
+		certsMock.certificatesApi.list.mockResolvedValue(fixtureCerts);
+		render(Page);
+		await screen.findByTestId('certs-table');
+		const broken = screen
+			.getAllByTestId('cert-row')
+			.find((r) => r.dataset.domain === '*.test.local')!;
+		const toggle = broken.querySelector(
+			'[data-testid="cert-fail-reason-toggle"]',
+		) as HTMLButtonElement;
+		expect(toggle).not.toBeNull();
+		expect(toggle.getAttribute('aria-expanded')).toBe('false');
+		expect(toggle.textContent?.trim()).toBe('Show more');
+		expect(toggle.getAttribute('aria-label')).toBe(
+			'Show more: why issuance failed for *.test.local',
+		);
+		const text = broken.querySelector('.fail-reason-text')!;
+		expect(text.classList.contains('open')).toBe(false);
+
+		await userEvent.click(toggle);
+		await tick();
+		expect(toggle.getAttribute('aria-expanded')).toBe('true');
+		expect(toggle.textContent?.trim()).toBe('Show less');
+		expect(text.classList.contains('open')).toBe(true);
+	});
+
+	it('a short failure reason has no toggle', async () => {
+		certsMock.certificatesApi.list.mockResolvedValue([
+			{
+				domain: 'short.example.com',
+				sanList: null,
+				issuer: '',
+				notBefore: '0001-01-01T00:00:00Z',
+				notAfter: '0001-01-01T00:00:00Z',
+				status: 'OBTAIN_FAILED',
+				source: '' as unknown as Certificate['source'],
+				lastError: 'rate limited',
+				lastErrorAt: daysFromNow(-0.01),
+			},
+		]);
+		render(Page);
+		const reason = await screen.findByTestId('cert-fail-reason');
+		expect(reason.textContent ?? '').toContain('rate limited');
+		expect(screen.queryByTestId('cert-fail-reason-toggle')).not.toBeInTheDocument();
 	});
 
 	it('expired row labels the EXPIRE DANS cell as "expired"', async () => {
@@ -730,7 +812,61 @@ describe('/certs — cert delete action (Task 7)', () => {
 		]);
 		render(Page);
 		const btn = await screen.findByTestId('cert-delete-labeled.example.com');
-		expect(btn.getAttribute('aria-label')).toBe('Delete certificate');
+		// Every row used to share the same label; a screen-reader user
+		// tabbing through the table couldn't tell the buttons apart.
+		expect(btn.getAttribute('aria-label')).toBe(
+			'Delete certificate for labeled.example.com',
+		);
+	});
+});
+
+describe('/certs — absolute dates and SAN list', () => {
+	const fmt = (iso: string) =>
+		new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(new Date(iso));
+
+	it('shows the absolute issue and expiry dates under the relative ones', async () => {
+		certsMock.certificatesApi.list.mockResolvedValue(fixtureCerts);
+		render(Page);
+		await screen.findByTestId('certs-table');
+		const rows = screen.getAllByTestId('cert-row');
+		const valid = rows.find((r) => r.dataset.domain === 'valid.example.com')!;
+		const fixture = fixtureCerts.find((c) => c.domain === 'valid.example.com')!;
+
+		const expiry = valid.querySelector('[data-testid="cert-expiry-date"]');
+		expect(expiry?.textContent ?? '').toContain(fmt(fixture.notAfter));
+		expect(expiry?.querySelector('time')?.getAttribute('datetime')).toBe(fixture.notAfter);
+		const issued = valid.querySelector('[data-testid="cert-issued-date"]');
+		expect(issued?.textContent ?? '').toContain(fmt(fixture.notBefore));
+	});
+
+	it('renders no absolute date for a never-obtained (zero-time) cert', async () => {
+		certsMock.certificatesApi.list.mockResolvedValue(fixtureCerts);
+		render(Page);
+		await screen.findByTestId('certs-table');
+		const broken = screen
+			.getAllByTestId('cert-row')
+			.find((r) => r.dataset.domain === '*.test.local')!;
+		expect(broken.querySelector('[data-testid="cert-expiry-date"]')).toBeNull();
+		expect(broken.querySelector('[data-testid="cert-issued-date"]')).toBeNull();
+	});
+
+	it('lets the operator see which names a cert covers, not just the count', async () => {
+		certsMock.certificatesApi.list.mockResolvedValue(fixtureCerts);
+		render(Page);
+		await screen.findByTestId('certs-table');
+		const soon = screen
+			.getAllByTestId('cert-row')
+			.find((r) => r.dataset.domain === 'soon.example.com')!;
+		const list = soon.querySelector('[data-testid="cert-san-list"]') as HTMLDetailsElement;
+		expect(list).not.toBeNull();
+		expect(list.querySelector('summary')?.getAttribute('title')).toBe(
+			'soon.example.com, www.soon.example.com',
+		);
+		const items = Array.from(list.querySelectorAll('li')).map((li) => li.textContent);
+		expect(items).toEqual(['soon.example.com', 'www.soon.example.com']);
+		expect(list.querySelector('ul')?.getAttribute('aria-label')).toBe(
+			'Subject alternative names of soon.example.com',
+		);
 	});
 });
 
@@ -749,7 +885,7 @@ describe('/certs — Domaines tabs (T.4)', () => {
 		expect(rows[0].dataset.domain).toBe('*.wild.example.com');
 	});
 
-	it('Expirent bientôt tab filters to certs within the renewal window OR already expired', async () => {
+	it('Expirent bientôt tab filters to certs within the renewal window, not expired ones', async () => {
 		certsMock.certificatesApi.list.mockResolvedValue(fixtureCerts);
 		render(Page);
 		await screen.findByTestId('certs-table');
@@ -759,11 +895,72 @@ describe('/certs — Domaines tabs (T.4)', () => {
 		await tick();
 
 		const rows = screen.getAllByTestId('cert-row');
-		// soon (15d) + expired (-3d) qualify; valid/wild/broken
-		// have notAfter beyond the 30d window.
-		expect(rows.map((r) => r.dataset.domain).sort()).toEqual(
-			['expired.example.com', 'soon.example.com'].sort(),
+		// soon (15d) qualifies; expired (-3d) is not "expiring";
+		// valid/wild have notAfter beyond the 30d window and broken
+		// was never obtained.
+		expect(rows.map((r) => r.dataset.domain)).toEqual(['soon.example.com']);
+	});
+
+	it('Expired tab lists the expired certs on their own', async () => {
+		certsMock.certificatesApi.list.mockResolvedValue(fixtureCerts);
+		render(Page);
+		await screen.findByTestId('certs-table');
+
+		const tab = screen.getByTestId('tab-expired');
+		expect(tab.textContent?.trim()).toBe('Expired');
+		await userEvent.click(tab);
+		await tick();
+
+		expect(tab.getAttribute('aria-selected')).toBe('true');
+		const rows = screen.getAllByTestId('cert-row');
+		// The never-obtained *.test.local (zero-time notAfter) is
+		// not expired: there is no certificate yet.
+		expect(rows.map((r) => r.dataset.domain)).toEqual(['expired.example.com']);
+	});
+
+	it('the expiry cell marks expiring and expired certs with more than a colour', async () => {
+		certsMock.certificatesApi.list.mockResolvedValue(fixtureCerts);
+		render(Page);
+		await screen.findByTestId('certs-table');
+		const cell = (domain: string) =>
+			screen
+				.getAllByTestId('cert-row')
+				.find((r) => r.dataset.domain === domain)!
+				.querySelector('[data-testid="cert-expiry"]') as HTMLElement;
+
+		const soon = cell('soon.example.com');
+		expect(soon.classList.contains('expiry-warn')).toBe(true);
+		expect(soon.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe(
+			'expiring soon',
 		);
+		expect(soon.textContent ?? '').toMatch(/15 days/);
+
+		const expired = cell('expired.example.com');
+		expect(expired.classList.contains('expiry-down')).toBe(true);
+		expect(expired.textContent ?? '').toMatch(/✕\s*expired/);
+
+		const valid = cell('valid.example.com');
+		expect(valid.classList.contains('expiry-warn')).toBe(false);
+		expect(valid.querySelector('.expiry-mark')).toBeNull();
+	});
+
+	it('a cert expiring later today reads "today", not "expired"', async () => {
+		certsMock.certificatesApi.list.mockResolvedValue([
+			{
+				domain: 'today.example.com',
+				sanList: ['today.example.com'],
+				issuer: "Let's Encrypt",
+				notBefore: daysFromNow(-89),
+				notAfter: daysFromNow(0.25),
+				status: 'RENEWAL_PENDING',
+				source: 'specific',
+			},
+		]);
+		render(Page);
+		const expiry = await screen.findByTestId('cert-expiry');
+		expect(expiry.textContent ?? '').toMatch(/today/);
+		expect(expiry.textContent ?? '').not.toMatch(/expired/);
+		expect(expiry.classList.contains('expiry-warn')).toBe(true);
 	});
 
 	it('per-tab empty state surfaces when the active filter yields zero rows', async () => {

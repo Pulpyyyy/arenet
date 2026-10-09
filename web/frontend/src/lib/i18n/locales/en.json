@@ -2651,6 +2651,7 @@
 		"kpiActiveCertsFoot": "{wildcard} wildcard · {specific} specific{plural}",
 		"kpiExpiringLabel": "Expiring < {days} days",
 		"kpiExpiringFootAuto": "auto-renewal scheduled",
+		"kpiExpiringFootExpired": "{count} already expired",
 		"kpiIssuerLabel": "Primary issuer",
 		"kpiACMEMethodLabel": "ACME method",
 		"kpiACMEMethodAuto": "Auto",
@@ -2665,6 +2666,7 @@
 		"tabAll": "All",
 		"tabWildcard": "Wildcard",
 		"tabExpiring": "Expiring soon",
+		"tabExpired": "Expired",
 		"certsLoadError": "Could not fetch certificates (backend returned an error). The rest of this page remains usable.",
 		"certsEmptyTitle": "No active certificate.",
 		"certsEmptyHelper": "Certificates are auto-provisioned when a TLS route is created or when a managed apex is declared.",
@@ -2680,6 +2682,11 @@
 		"staleBadgeText": "⚠ Failed for {ago}",
 		"expiryExpired": "expired",
 		"expiryDays": "{days} day{plural}",
+		"expiryToday": "today",
+		"expiryExpiringMark": "expiring soon",
+		"failReasonMore": "Show more",
+		"failReasonLess": "Show less",
+		"failReasonAria": "{action}: why issuance failed for {domain}",
 		"statusValid": "VALID",
 		"statusRenewalPending": "RENEWING",
 		"statusExpired": "EXPIRED",
@@ -2734,11 +2741,28 @@
 				"emptyState": {
 					"message": "No DNS provider configured yet.",
 					"ctaLabel": "Configure a DNS provider in Settings"
-				}
+				},
+				"notConfigured": "not configured",
+				"loadError": "Could not load the DNS providers (backend returned an error).",
+				"retry": "Retry"
+			},
+			"apexInvalid": "\"{value}\" doesn't look like a domain name (e.g. example.com).",
+			"apexNormalized": "Will be declared as {apex}.",
+			"summaryWithApex": "Will request {wildcard} + {apex} via {provider} (DNS-01).",
+			"summaryWildcardOnly": "Will request {wildcard} via {provider} (DNS-01).",
+			"errors": {
+				"alreadyExists": "A wildcard policy for {apex} already exists.",
+				"wouldCover": "{apex} would cover the existing policy for {existing}. Delete that policy first, or declare a more specific apex.",
+				"alreadyCovered": "{apex} is already covered by the policy for {existing}.",
+				"providerGone": "The selected DNS provider no longer exists. Pick another one.",
+				"reloadFailed": "The policy could not be applied (Caddy reload failed): {detail}",
+				"invalidApex": "The backend rejected this apex: it must be a bare domain name such as example.com."
 			}
 		},
+		"sanListAria": "Subject alternative names of {domain}",
 		"delete": {
 			"action": "Delete certificate",
+			"actionAria": "Delete certificate for {domain}",
 			"confirm": {
 				"title": "Delete certificate",
 				"text": "Permanently delete the certificate for {domain}? The .crt/.key/.json files will be removed from disk. This is irreversible.",
@@ -2771,7 +2795,12 @@
 				"keyAlgorithmECDSA": "ECDSA P-256",
 				"keyAlgorithmECDSAHelp": "Faster handshakes, smaller key. Some legacy CAs reject ECDSA — verify support first.",
 				"submit": "Generate CSR",
-				"submitting": "Generating…"
+				"submitting": "Generating…",
+				"errors": {
+					"cnRequired": "Common Name is required.",
+					"invalidCountry": "Country must be a two-letter ISO code (e.g. FR, US).",
+					"invalidKeyAlgorithm": "Unknown key algorithm. Pick RSA 4096 or ECDSA P-256."
+				}
 			},
 			"pending": {
 				"tab": "Pending CSR",
@@ -2794,6 +2823,7 @@
 				"ageWaiting": "Waiting",
 				"ageOld": "Old",
 				"ageStale": "Stale",
+				"deleteAria": "Delete pending CSR \"{name}\"",
 				"deleteConfirmTitle": "Delete pending CSR",
 				"deleteConfirmText": "This permanently deletes the generated private key. If your CA signs the certificate later you will NOT be able to import it — you'll need to generate a new CSR."
 			}
@@ -2811,6 +2841,8 @@
 			"colExpiry": "Expiry",
 			"expiryExpired": "expired",
 			"expiryDays": "{days} day{plural}",
+			"manualRenewal": "manual renewal",
+			"manualRenewalTitle": "Arenet never renews uploaded certificates. Upload a replacement before this date.",
 			"upload": {
 				"nameLabel": "Name",
 				"descriptionLabel": "Description (optional)",
@@ -2832,10 +2864,25 @@
 					"invalidChainPem": "The Chain field is not a valid PEM certificate.",
 					"certRequired": "The Certificate (PEM) field is required.",
 					"keyRequired": "The Private key (PEM) field is required."
+				},
+				"file": {
+					"button": "Load from file…",
+					"buttonAria": "Load {field} from a file",
+					"tooLarge": "{name} is too large to be a PEM file (1 MiB max).",
+					"readFailed": "Could not read {name}.",
+					"notPem": "{name} is not PEM text (no -----BEGIN line). If it is a binary DER file, convert it first, e.g. openssl x509 -inform der -in {name} -out cert.pem."
+				},
+				"mismatch": {
+					"keyInCert": "This field contains a private key. Put the key in the Private key field — only certificates belong here.",
+					"csrInCert": "This is a certificate signing request (CSR), not a certificate. Paste the certificate your CA signed from it.",
+					"keyInChain": "This field contains a private key. It takes only the CA's intermediate certificates.",
+					"certInKey": "This field contains a certificate, not a private key. Paste the key generated with your CSR (BEGIN … PRIVATE KEY).",
+					"chainTwice": "This field holds a full chain and the Chain field is filled too. Put the intermediates in only one place: clear the Chain field, or keep only the leaf certificate here."
 				}
 			},
 			"delete": {
 				"action": "Delete certificate",
+				"actionAria": "Delete certificate \"{name}\"",
 				"success": "Certificate \"{name}\" deleted",
 				"confirm": {
 					"title": "Delete external certificate",
