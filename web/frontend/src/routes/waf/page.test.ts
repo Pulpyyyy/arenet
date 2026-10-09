@@ -234,6 +234,22 @@ describe('WAF page — Phase Y taxonomy + drill-down', () => {
 		expect(drill.textContent ?? '').toContain('942130');
 	});
 
+	it('each drilled-down rule links to the activity log searched on its id', async () => {
+		metricsMock.fetchSummary.mockResolvedValue(makeSummary());
+		securityMock.fetchEventsByRule.mockResolvedValue({
+			rows: [{ ruleId: '942100', category: 'SQLi', count: 12, lastSeen: '2026-06-18T10:00:00Z' }]
+		});
+		const user = userEvent.setup();
+		render(Page);
+		await tick();
+		await tick();
+		await user.click(screen.getByTestId('cat-toggle-SQLi'));
+
+		const link = await screen.findByTestId('rule-logs-942100');
+		expect(link).toHaveAttribute('href', '/logs?q=942100');
+		expect(link).toHaveTextContent(/View in logs/);
+	});
+
 	it('clicking the same category twice toggles closed without a second fetch', async () => {
 		metricsMock.fetchSummary.mockResolvedValue(makeSummary());
 		securityMock.fetchEventsByRule.mockResolvedValue({ rows: [] });

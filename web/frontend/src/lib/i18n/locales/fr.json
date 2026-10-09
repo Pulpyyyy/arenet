@@ -2512,6 +2512,7 @@
 		"emptyNoEventsBody": "Requêtes, décisions WAF, dépassements de débit et échecs d'authentification arrivent ici au fil de l'eau. Élargis la fenêtre, ou fais passer du trafic par une route.",
 		"emptyNoMatchTitle": "Aucun événement ne correspond",
 		"emptyClearFilters": "Effacer les filtres",
+		"viewInLogs": "Voir dans le journal →",
 		"emptyNoEvents": "Aucun événement dans la fenêtre actuelle.",
 		"emptyNoMatch": "Aucun événement ne correspond aux filtres.",
 		"histogramHeader": "Chronologie d'activité · 24h · buckets 5 min",

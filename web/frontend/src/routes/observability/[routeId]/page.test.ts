@@ -165,3 +165,11 @@ describe('observability route page: the quantile selector', () => {
 		}
 	});
 });
+
+describe('observability route page: the way to the log', () => {
+	it('links to the activity log filtered on this route', async () => {
+		render(Page);
+		const link = await screen.findByRole('link', { name: /View in logs/ });
+		expect(link).toHaveAttribute('href', `/logs?route=${ROUTE_ID}`);
+	});
+});

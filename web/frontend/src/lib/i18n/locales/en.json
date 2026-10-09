@@ -2512,6 +2512,7 @@
 		"emptyNoEventsBody": "Requests, WAF decisions, rate-limit hits and authentication failures land here as they happen. Widen the window, or send some traffic through a route.",
 		"emptyNoMatchTitle": "No event matches",
 		"emptyClearFilters": "Clear the filters",
+		"viewInLogs": "View in logs →",
 		"emptyNoEvents": "No events in the current window.",
 		"emptyNoMatch": "No events match the filters.",
 		"histogramHeader": "Activity timeline · 24h · 5m buckets",

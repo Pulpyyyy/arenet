@@ -15,7 +15,7 @@
 // coverage for the pre-U.5 sources.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import type {
 	AuthFailureRecentEvent,
@@ -116,6 +116,9 @@ afterEach(() => {
 	// onDestroy. No explicit timer-clear needed because the
 	// page calls clearInterval in onDestroy.
 	vi.clearAllMocks();
+	// The filters live in the URL: without this, one test's filter
+	// would greet the next one's render.
+	window.history.replaceState(null, '', '/');
 });
 
 const certFixture = (overrides: Partial<CertEvent> = {}): CertEvent => ({
@@ -1349,6 +1352,111 @@ describe('/logs — Phase Z.5.2 filters', () => {
 		);
 		expect(screen.getByText(/wait 100ms/)).toBeInTheDocument();
 		expect(screen.queryByText(/wait 200ms/)).not.toBeInTheDocument();
+	});
+});
+
+// --- Filters in the URL ------------------------------------------------------
+
+describe('/logs — filters live in the URL', () => {
+	const wafEvent = (overrides: Partial<WafEvent>): WafEvent =>
+		({
+			id: 1,
+			ts: isoOffset(0),
+			routeId: 'route-keep',
+			action: 'BLOCK',
+			statusCode: 403,
+			ruleId: '942100',
+			category: 'SQLi',
+			message: 'm',
+			requestMethod: 'GET',
+			requestPath: '/keep',
+			srcIp: '1.1.1.1',
+			...overrides
+		}) as WafEvent;
+
+	it('applies ?route= on arrival, before the dropdown has its options', async () => {
+		clientMock.listRoutes.mockResolvedValue([
+			{ id: 'route-keep', host: 'keep.test' },
+			{ id: 'route-drop', host: 'drop.test' }
+		]);
+		securityMock.fetchEvents.mockResolvedValue({
+			events: [
+				wafEvent({ id: 1, routeId: 'route-keep', requestPath: '/keep' }),
+				wafEvent({ id: 2, ts: isoOffset(-60), routeId: 'route-drop', requestPath: '/drop' })
+			]
+		});
+		window.history.replaceState(null, '', '/logs?route=route-keep');
+		render(Page);
+		await screen.findByText('/keep');
+		expect(screen.queryByText('/drop')).not.toBeInTheDocument();
+		// Once the routes arrive, the dropdown shows the same filter.
+		await waitFor(() =>
+			expect(screen.getByLabelText('Filter by route')).toHaveValue('route-keep')
+		);
+	});
+
+	it('applies ?q=, ?code= and ?level= on arrival', async () => {
+		window.history.replaceState(null, '', '/logs?q=942100&code=403&level=block');
+		render(Page);
+		expect(await screen.findByLabelText('Filter events')).toHaveValue('942100');
+		expect(screen.getByLabelText('Filter by HTTP code')).toHaveValue('403');
+		expect(screen.getByRole('button', { name: 'Block' })).toHaveClass('on');
+		expect(screen.getByRole('button', { name: 'All' })).not.toHaveClass('on');
+	});
+
+	it('falls back to the defaults for values it does not know', async () => {
+		window.history.replaceState(null, '', '/logs?code=999&level=bogus');
+		render(Page);
+		expect(await screen.findByLabelText('Filter by HTTP code')).toHaveValue('');
+		expect(screen.getByRole('button', { name: 'All' })).toHaveClass('on');
+	});
+
+	it('matches ?q=<ruleId> on a guided rule, whose row shows its name', async () => {
+		// /waf links here with the rule id; a guided rule's detail
+		// carries its name instead, so the id has to be searched too.
+		securityMock.fetchEvents.mockResolvedValue({
+			events: [
+				wafEvent({ id: 1, ruleId: '9100042', ruleName: 'admin-only', requestPath: '/guided' }),
+				wafEvent({ id: 2, ts: isoOffset(-60), requestPath: '/crs' })
+			]
+		});
+		window.history.replaceState(null, '', '/logs?q=9100042');
+		render(Page);
+		await screen.findByText('/guided');
+		expect(screen.queryByText('/crs')).not.toBeInTheDocument();
+	});
+
+	it('writes a changed filter to the URL, without adding history', async () => {
+		clientMock.listRoutes.mockResolvedValue([{ id: 'route-keep', host: 'keep.test' }]);
+		window.history.replaceState(null, '', '/logs');
+		const historyLength = window.history.length;
+		render(Page);
+		await screen.findByText('keep.test');
+		const user = userEvent.setup();
+
+		await user.selectOptions(screen.getByLabelText('Filter by route'), 'route-keep');
+		await user.selectOptions(screen.getByLabelText('Filter by HTTP code'), '429');
+		await user.click(screen.getByRole('button', { name: 'Warn' }));
+		await user.type(screen.getByLabelText('Filter events'), 'login');
+		await waitFor(() => {
+			const params = new URLSearchParams(window.location.search);
+			expect(params.get('route')).toBe('route-keep');
+			expect(params.get('code')).toBe('429');
+			expect(params.get('level')).toBe('warn');
+			expect(params.get('q')).toBe('login');
+		});
+		expect(window.location.pathname).toBe('/logs');
+		expect(window.history.length).toBe(historyLength);
+
+		// Back at a default, the param leaves the URL.
+		await user.selectOptions(screen.getByLabelText('Filter by route'), '');
+		await user.click(screen.getByRole('button', { name: 'All' }));
+		await waitFor(() => {
+			const params = new URLSearchParams(window.location.search);
+			expect(params.has('route')).toBe(false);
+			expect(params.has('level')).toBe(false);
+			expect(params.get('code')).toBe('429');
+		});
 	});
 });
 
