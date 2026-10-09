@@ -286,6 +286,29 @@ describe('/settings/error-pages — editor', () => {
 	});
 });
 
+// Cancel used to drop the name, the flags and all eight bodies unasked.
+describe('/settings/error-pages — unsaved edits', () => {
+	it('asks before Cancel drops an edit, and keeps it on "Keep editing"', async () => {
+		apiMock.list.mockResolvedValue([sampleTemplate()]);
+		render(Page);
+		await screen.findByText('WGW Branding');
+		await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+		const nameInput = (await screen.findByPlaceholderText(/WGW Branding/)) as HTMLInputElement;
+		await fireEvent.input(nameInput, { target: { value: 'Renamed' } });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		expect(await screen.findByText('Discard your changes?')).toBeInTheDocument();
+		await fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+		await waitFor(() => expect(screen.queryByText('Discard your changes?')).toBeNull());
+		expect(nameInput.value).toBe('Renamed');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+		await fireEvent.click(await screen.findByRole('button', { name: 'Discard changes' }));
+		await waitFor(() => expect(screen.queryByPlaceholderText(/WGW Branding/)).toBeNull());
+		expect(apiMock.update).not.toHaveBeenCalled();
+	});
+});
+
 describe('/settings/error-pages — delete confirmation', () => {
 	it('opens the modal and fires the delete API on confirm', async () => {
 		apiMock.list.mockResolvedValue([sampleTemplate({ id: 'doomed', name: 'Doomed' })]);

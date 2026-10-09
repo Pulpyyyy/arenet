@@ -1515,6 +1515,10 @@
 		"errUnexpected": "Unexpected error."
 	},
 	"errorPages": {
+		"discardTitle": "Discard your changes?",
+		"discardMessage": "This template has unsaved changes. Leaving the editor drops them.",
+		"discardConfirm": "Discard changes",
+		"discardCancel": "Keep editing",
 		"headTitle": "Error pages · Arenet",
 		"eyebrow": "Settings · Error pages",
 		"titleList": "Custom error pages",

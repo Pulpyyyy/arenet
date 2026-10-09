@@ -30,6 +30,7 @@
 	import Spinner from '$lib/components/Spinner.svelte';
 	import HtmlEditor from '$lib/components/HtmlEditor.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import {
 		errorTemplatesApi,
 		BUILTIN_TEMPLATE_ID,
@@ -147,6 +148,27 @@
 		editPages[activeCode] = activeBuffer;
 	});
 
+	// Unsaved edits: Cancel used to drop the name, the flags and all
+	// eight status-code bodies without asking. The editor is
+	// snapshotted when it opens; Cancel asks when anything differs.
+	// Empty bodies are dropped on both sides, as save does, so moving
+	// between code tabs alone is not an edit.
+	function editState(): string {
+		const pages = Object.entries(editPages)
+			.filter(([, body]) => body.trim() !== '')
+			.sort(([a], [b]) => Number(a) - Number(b));
+		return JSON.stringify([
+			editName,
+			editDescription,
+			editIsCatchallDefault,
+			editIsRouteDefault,
+			pages
+		]);
+	}
+	let editSnapshot = $state('');
+	const editDirty = $derived(view === 'edit' && !editingBuiltin && editState() !== editSnapshot);
+	let confirmDiscardOpen = $state(false);
+
 	function startCreate(): void {
 		editingId = null;
 		editingBuiltin = false;
@@ -159,6 +181,7 @@
 		activeBuffer = '';
 		previewHtml = '';
 		view = 'edit';
+		editSnapshot = editState();
 	}
 
 	function startEdit(t: ErrorTemplate): void {
@@ -179,6 +202,7 @@
 		activeBuffer = pages[403] ?? '';
 		previewHtml = '';
 		view = 'edit';
+		editSnapshot = editState();
 	}
 
 	// Step R Phase 2.1 — duplicate flow.
@@ -237,6 +261,15 @@
 	}
 
 	function cancelEdit(): void {
+		if (editDirty) {
+			confirmDiscardOpen = true;
+			return;
+		}
+		leaveEdit();
+	}
+
+	function leaveEdit(): void {
+		confirmDiscardOpen = false;
 		view = 'list';
 		previewHtml = '';
 	}
@@ -1086,6 +1119,17 @@
 		</div>
 	</div>
 {/if}
+
+<!-- Cancel with unsaved edits asks first. -->
+<ConfirmDialog
+	bind:open={confirmDiscardOpen}
+	title={language.current && t('errorPages.discardTitle')}
+	message={language.current && t('errorPages.discardMessage')}
+	confirmLabel={language.current && t('errorPages.discardConfirm')}
+	cancelLabel={language.current && t('errorPages.discardCancel')}
+	confirmVariant="danger"
+	onConfirm={leaveEdit}
+/>
 
 <style>
 	.card {
