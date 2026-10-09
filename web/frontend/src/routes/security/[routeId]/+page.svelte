@@ -184,11 +184,16 @@ Viewer-accessible per AC #12 (same gate as M.2 endpoints).
 
 	const fmtCount = (v: number) => Math.round(v).toString();
 
+	// The rule table's "last seen" column: "5 min ago" in the app language,
+	// then a clock time past the hour (lib/utils/relative-time).
+	const relativeTs = (iso: string): string => recentTime(iso);
+
 	// Phase Y — single source of truth via lib/utils/waf-category.
 	// Category colour mapping mirrors the dashboard widgets so a
 	// category visually identified on /security stays the same
 	// colour here.
 	import { categoryMeta } from '$lib/utils/waf-category';
+	import { recentTime } from '$lib/utils/relative-time';
 
 	// v2.41 — this page mixed French empty states with English chart
 	// headings; every operator-visible string now goes through t().
