@@ -975,7 +975,12 @@
 			"save": "Enregistrer",
 			"acceptProtocol": "Protocole accepté",
 			"acceptProtocolAny": "N'importe lequel",
-			"acceptProtocolHint": "Ferme les connexions dont la poignée de main n'est pas ce protocole, avant qu'elles atteignent le backend. Un backend correct refuse déjà le charabia : c'est donc du durcissement — ce que ça apporte, c'est qu'un scanneur ne passe jamais, et que les erreurs répétées sont comptées. La liste dépend du transport ci-dessus."
+			"acceptProtocolHint": "Ferme les connexions dont la poignée de main n'est pas ce protocole, avant qu'elles atteignent le backend. Un backend correct refuse déjà le charabia : c'est donc du durcissement — ce que ça apporte, c'est qu'un scanneur ne passe jamais, et que les erreurs répétées sont comptées. La liste dépend du transport ci-dessus.",
+			"nameRequired": "Donne un nom au service.",
+			"nameTooLong": "64 caractères au maximum.",
+			"portRequired": "Indique un port.",
+			"portRange": "Un nombre entier entre 1 et 65535.",
+			"backendHostRequired": "Indique l'adresse ou le nom d'hôte du backend."
 		},
 		"deleteDialog": {
 			"title": "Supprimer ce service ?",

@@ -975,7 +975,12 @@
 			"save": "Save",
 			"acceptProtocol": "Accepted protocol",
 			"acceptProtocolAny": "Anything",
-			"acceptProtocolHint": "Closes connections whose handshake is not this protocol, before they reach the backend. A correct backend already refuses garbage, so this is hardening — what it adds is that a scanner never gets through, and that repeated mismatches are counted. The list depends on the transport above."
+			"acceptProtocolHint": "Closes connections whose handshake is not this protocol, before they reach the backend. A correct backend already refuses garbage, so this is hardening — what it adds is that a scanner never gets through, and that repeated mismatches are counted. The list depends on the transport above.",
+			"nameRequired": "Give the service a name.",
+			"nameTooLong": "64 characters at most.",
+			"portRequired": "Enter a port.",
+			"portRange": "A whole number from 1 to 65535.",
+			"backendHostRequired": "Enter the backend’s address or host name."
 		},
 		"deleteDialog": {
 			"title": "Delete this service?",
