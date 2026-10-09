@@ -88,6 +88,11 @@
 	let fCIDRs = $state('');
 	let fHealthCheck = $state(false);
 	let fDisabled = $state(false);
+	// The service as stored, while editing. The form shows one backend,
+	// an allow list and a health-check switch; the API replaces the whole
+	// service on update, so whatever the form cannot show must be carried
+	// over from here or it is erased by the first save.
+	let stored = $state.raw<TCPService | null>(null);
 
 	const protocolOptions = $derived([
 		{ value: 'tcp' as const, label: 'TCP', hint: tl('tcpServices.form.protocolTCPHint'), tone: 'neutral' as const },
@@ -216,6 +221,7 @@
 		fCIDRs = '';
 		fHealthCheck = false;
 		fDisabled = false;
+		stored = null;
 		formError = null;
 		testResult = null;
 	}
@@ -229,6 +235,7 @@
 	function openEdit(svc: TCPService) {
 		resetForm();
 		editingId = svc.id;
+		stored = $state.snapshot(svc) as TCPService;
 		fName = svc.name;
 		fProtocol = svc.protocol ?? 'tcp';
 		fAcceptProtocol = svc.acceptProtocol ?? '';
@@ -239,7 +246,10 @@
 		fProxyProtocol = svc.proxyProtocol ?? '';
 		fCrowdSec = svc.crowdSecEnabled ?? false;
 		fRestrict = svc.ipFilter?.mode === 'allow';
-		fCIDRs = (svc.ipFilter?.cidrs ?? []).join(', ');
+		// Only an allow list belongs in the "allowed ranges" box: a deny
+		// list loaded there would become an allow list the moment the
+		// operator switched Restrict on — the opposite gate.
+		fCIDRs = svc.ipFilter?.mode === 'allow' ? (svc.ipFilter.cidrs ?? []).join(', ') : '';
 		fHealthCheck = svc.healthCheck?.enabled ?? false;
 		fDisabled = svc.disabled ?? false;
 		formOpen = true;
@@ -250,24 +260,72 @@
 			.split(/[,\n]/)
 			.map((c) => c.trim())
 			.filter((c) => c !== '');
+		const storedFilter = stored?.ipFilter;
+		let ipFilter: TCPServiceRequest['ipFilter'] = undefined;
+		if (fRestrict) {
+			ipFilter = { ...(storedFilter?.mode === 'allow' ? storedFilter : {}), mode: 'allow', cidrs };
+		} else if (storedFilter?.mode !== 'allow') {
+			// Restrict off and the stored gate is not an allow list the
+			// operator just switched off: it is a deny list (or an inert
+			// "off" one) this form cannot show, so it stays.
+			ipFilter = storedFilter;
+		}
 		return {
 			name: fName.trim(),
 			protocol: fProtocol,
-			// Every field of this payload is rebuilt by hand, so a new
-			// one that is not listed here is silently dropped on save
-			// with a success toast — that is how the v2.46 path
-			// redirect was lost. See the buildPayload test.
+			// Every field of this payload is rebuilt by hand and the API
+			// replaces the whole service, so a field not listed here is
+			// silently erased on save with a success toast — that is how
+			// the v2.46 path redirect was lost, and how editing the name
+			// of a two-backend service used to delete its second backend.
+			// What the form does not show comes from `stored`.
 			acceptProtocol: fAcceptProtocol || undefined,
 			listenAddr: fListenAddr.trim(),
 			listenPort: fListenPort ?? 0,
-			upstreams: [{ host: fBackendHost.trim(), port: fBackendPort ?? 0 }],
+			// The form edits the first backend; the others, and the first
+			// one's connection cap, are carried over.
+			upstreams: [
+				{ ...stored?.upstreams[0], host: fBackendHost.trim(), port: fBackendPort ?? 0 },
+				...(stored?.upstreams.slice(1) ?? [])
+			],
+			lbPolicy: stored?.lbPolicy,
 			proxyProtocol: fProxyProtocol,
 			crowdSecEnabled: fCrowdSec,
-			ipFilter: fRestrict ? { mode: 'allow', cidrs } : undefined,
-			healthCheck: fHealthCheck ? { enabled: true } : undefined,
+			ipFilter,
+			// The switch owns `enabled`; interval and timeout are kept.
+			// Absent and disabled emit the same thing (no check), so a
+			// service that never had one is not given one.
+			healthCheck: stored?.healthCheck
+				? { ...stored.healthCheck, enabled: fHealthCheck }
+				: fHealthCheck
+					? { enabled: true }
+					: undefined,
 			disabled: fDisabled
 		};
 	}
+
+	// What the stored service carries that the form does not show, said
+	// before Save so "kept" is not something the operator has to trust.
+	const hiddenKept = $derived.by(() => {
+		if (!stored) return '';
+		const items: string[] = [];
+		const extra = stored.upstreams.length - 1;
+		if (extra > 0) items.push(tl('tcpServices.form.hiddenBackends', { count: extra }));
+		if (stored.lbPolicy) items.push(tl('tcpServices.form.hiddenLBPolicy', { policy: stored.lbPolicy }));
+		if (stored.upstreams.some((u) => u.maxConnections)) {
+			items.push(tl('tcpServices.form.hiddenMaxConnections'));
+		}
+		// Not once Restrict is on: the allow list then replaces it.
+		if (!fRestrict && stored.ipFilter?.mode === 'deny') {
+			items.push(
+				tl('tcpServices.form.hiddenDenyFilter', { count: stored.ipFilter.cidrs?.length ?? 0 })
+			);
+		}
+		if (stored.healthCheck?.interval || stored.healthCheck?.timeout) {
+			items.push(tl('tcpServices.form.hiddenHealthTiming'));
+		}
+		return items.length > 0 ? tl('tcpServices.form.hiddenKept', { items: items.join(', ') }) : '';
+	});
 
 	async function save() {
 		saving = true;
@@ -517,6 +575,14 @@
 						save();
 					}}
 				>
+					{#if hiddenKept}
+						<p
+							class="rounded-md border border-border-subtle bg-surface p-3 text-xs text-secondary leading-relaxed"
+							data-testid="tcp-hidden-kept"
+						>
+							{hiddenKept}
+						</p>
+					{/if}
 
 					<div class="grid gap-3 sm:grid-cols-2">
 						<div>
