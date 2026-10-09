@@ -111,6 +111,9 @@ describe('ChangePasswordModal', () => {
 		expect(toggle).not.toHaveAttribute('tabindex', '-1');
 		expect(toggle).toHaveAttribute('aria-pressed', 'false');
 
+		// The dialog moves focus to its first field once mounted; let it
+		// land first, or it would take focus back from the field below.
+		await waitFor(() => expect(field('current')).toHaveFocus());
 		// The toggle follows its own field in the tab order.
 		field('new').focus();
 		await user.tab();
