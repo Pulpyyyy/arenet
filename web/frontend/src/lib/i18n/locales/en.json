@@ -90,7 +90,8 @@
 			"path_rule_redirect_target_invalid": "The redirect target on {path} must be a path starting with / or a full http(s) URL (got {target}).",
 			"path_rule_redirect_loop": "The target {target} is matched by the rule on {path} itself, so every visitor would be redirected to it forever. Point it outside the rule's own path.",
 			"listen_needs_capability": "Cannot listen on {addr}: ports below 1024 need a capability. Add AmbientCapabilities=CAP_NET_BIND_SERVICE to the arenet systemd unit — or publish the port in docker-compose.yml when running in a container — then restart Arenet.",
-			"listen_port_taken": "Cannot listen on {addr}: something else on this host already holds it."
+			"listen_port_taken": "Cannot listen on {addr}: something else on this host already holds it.",
+			"crowdsec_self_ban": "{value} includes your own address ({clientIp}, as Arenet sees this session). Banning it would cut you off from every route the CrowdSec bouncer protects — possibly this admin interface too."
 		},
 		"unauthorized": "Unauthorized",
 		"forbidden": "Forbidden",
@@ -2191,6 +2192,16 @@
 		"scenariosBtnRetry": "Retry",
 		"scenariosEmptyWindow": "No scenario activity in {hours}h.",
 		"scenariosEmptyHelp": "Either no attack detected, or Arenet logs not yet",
+		"colActions": "Actions",
+		"btnUnban": "Unban",
+		"unbanAria": "Unban {value}",
+		"unbanConfirmTitle": "Unban {value}?",
+		"unbanConfirmMessage": "LAPI will expire this {type} decision (origin {origin}); the bouncer lets {value} through again at its next poll. The action is recorded in the audit log.",
+		"toastUnbanned": "Unbanned: {value}",
+		"toastUnbanFailed": "Unban failed: {error}",
+		"unbanNotConfigured": "Unbanning needs the Security Automation machine credentials — the bouncer key can only read decisions. Set them in Settings → Security Automation.",
+		"unbanNotFound": "LAPI no longer has this decision — it may have expired already.",
+		"scenarioModalClose": "Close",
 		"autoBadgeTitle": "Classified automatically by Arenet",
 		"liveSubtitleBefore": "Decisions active",
 		"liveSubtitleStrong": "right now",
@@ -2489,7 +2500,14 @@
 		"btnCancel": "Cancel",
 		"btnSubmitting": "In progress…",
 		"btnSubmit": "Ban",
-		"toastBanned": "IP banned: {value} ({scope})"
+		"toastBanned": "IP banned: {value} ({scope})",
+		"confirmWideRange": "{value} covers {count} addresses. A range this wide can block legitimate visitors — you included.",
+		"confirmSensitiveRange": "{value} overlaps {block}, a private, loopback or link-local range: your LAN, your VPN or Arenet's own host may be in it.",
+		"confirmRangeHint": "Check the value, then click “{btn}” to send the ban.",
+		"btnConfirmBan": "Confirm ban",
+		"selfBanTitle": "This would ban you.",
+		"selfBanAck": "I have another way in (local console, another network) and I really want to ban my own address.",
+		"btnBanAnyway": "Ban anyway"
 	},
 	"certs": {
 		"headTitle": "Certificates · Arenet",

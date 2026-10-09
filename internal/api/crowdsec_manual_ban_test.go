@@ -733,3 +733,164 @@ func TestManualBan_FakeLAPIRejectsMissingRequiredFields_AsRegressionGuard(t *tes
 		t.Errorf("fakeLAPI accepted incomplete Alert payload — mock weakened; got %d, want 500", resp.StatusCode)
 	}
 }
+
+// --- Self-ban guard -------------------------------------------
+
+func TestBanCoversClientIP(t *testing.T) {
+	for _, tt := range []struct {
+		name, scope, value, client string
+		want                       bool
+	}{
+		{"same IPv4", "Ip", "203.0.113.7", "203.0.113.7", true},
+		{"other IPv4", "Ip", "203.0.113.7", "203.0.113.8", false},
+		{"range contains", "Range", "203.0.113.0/24", "203.0.113.7", true},
+		{"range excludes", "Range", "10.0.0.0/8", "203.0.113.7", false},
+		{"everything", "Range", "0.0.0.0/0", "192.0.2.1", true},
+		{"v4-mapped client vs IP", "Ip", "203.0.113.7", "::ffff:203.0.113.7", true},
+		{"v4-mapped client vs range", "Range", "203.0.113.0/24", "::ffff:203.0.113.7", true},
+		{"IPv6 range contains", "Range", "2001:db8::/32", "2001:db8::1", true},
+		{"other IPv6", "Ip", "2001:db8::1", "2001:db8::2", false},
+		{"IPv6 range vs IPv4 client", "Range", "2001:db8::/32", "203.0.113.7", false},
+		{"unknown client IP", "Ip", "203.0.113.7", "", false},
+		{"garbage client IP", "Range", "0.0.0.0/0", "not-an-ip", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := banCoversClientIP(tt.scope, tt.value, tt.client); got != tt.want {
+				t.Errorf("banCoversClientIP(%q, %q, %q) = %v, want %v", tt.scope, tt.value, tt.client, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAddManualBan_SelfBan_Returns409_NoLAPICall(t *testing.T) {
+	fake := newFakeLAPIForBan()
+	srv := fake.server(t)
+	appender := &fakeAuditAppender{}
+	var logBuf bytes.Buffer
+	h := newTestHandler(t, appender, &logBuf)
+	seedWatcherCredsForBan(t, h, srv.URL)
+
+	// The range contains the requesting client's IP.
+	body := `{"value":"203.0.113.0/24","duration":"1h","type":"ban","reason":"oops"}`
+	req := reqWithAuth(http.MethodPost, "/api/v1/security/crowdsec/decisions", "u", "admin", "203.0.113.7", "test")
+	req.Body = httpBody(body)
+	rec := httptest.NewRecorder()
+	h.addManualBan(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409, body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Code   string            `json:"code"`
+		Params map[string]string `json:"params"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v body=%s", err, rec.Body.String())
+	}
+	if resp.Code != errCodeCrowdSecSelfBan {
+		t.Errorf("code = %q, want %q", resp.Code, errCodeCrowdSecSelfBan)
+	}
+	if resp.Params["clientIp"] != "203.0.113.7" || resp.Params["value"] != "203.0.113.0/24" {
+		t.Errorf("params = %v, want clientIp=203.0.113.7 value=203.0.113.0/24", resp.Params)
+	}
+	if got := fake.alertsCalls.Load(); got != 0 {
+		t.Errorf("LAPI alerts hit %d times despite the self-ban refusal", got)
+	}
+	if got := len(appender.Events()); got != 0 {
+		t.Errorf("audit count = %d, want 0 (nothing was banned)", got)
+	}
+}
+
+func TestAddManualBan_SelfBan_RefusedEvenWithoutCredentials(t *testing.T) {
+	// The guard runs before the credentials lookup: the
+	// operator learns about the self-ban before being sent to
+	// configure Security Automation.
+	var logBuf bytes.Buffer
+	h := newTestHandler(t, &fakeAuditAppender{}, &logBuf)
+
+	body := `{"value":"203.0.113.7","duration":"1h","type":"ban","reason":"r"}`
+	req := reqWithAuth(http.MethodPost, "/api/v1/security/crowdsec/decisions", "u", "admin", "203.0.113.7", "test")
+	req.Body = httpBody(body)
+	rec := httptest.NewRecorder()
+	h.addManualBan(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAddManualBan_SelfBan_ConfirmOverride_Bans_AndAuditSaysSo(t *testing.T) {
+	fake := newFakeLAPIForBan()
+	srv := fake.server(t)
+	appender := &fakeAuditAppender{}
+	var logBuf bytes.Buffer
+	h := newTestHandler(t, appender, &logBuf)
+	seedWatcherCredsForBan(t, h, srv.URL)
+
+	body := `{"value":"203.0.113.7","duration":"1h","type":"ban","reason":"testing the bouncer on myself","confirmSelfBan":true}`
+	req := reqWithAuth(http.MethodPost, "/api/v1/security/crowdsec/decisions", "u", "admin", "203.0.113.7", "test")
+	req.Body = httpBody(body)
+	rec := httptest.NewRecorder()
+	h.addManualBan(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201, body=%s", rec.Code, rec.Body.String())
+	}
+	if got := fake.alertsCalls.Load(); got != 1 {
+		t.Errorf("LAPI alerts calls = %d, want 1", got)
+	}
+	events := appender.Events()
+	if len(events) != 1 {
+		t.Fatalf("audit count = %d, want 1", len(events))
+	}
+	if !strings.Contains(events[0].Message, "self-ban override") {
+		t.Errorf("audit message = %q, want it to record the self-ban override", events[0].Message)
+	}
+}
+
+func TestAddManualBan_NotSelf_AuditHasNoOverrideMessage(t *testing.T) {
+	fake := newFakeLAPIForBan()
+	srv := fake.server(t)
+	appender := &fakeAuditAppender{}
+	var logBuf bytes.Buffer
+	h := newTestHandler(t, appender, &logBuf)
+	seedWatcherCredsForBan(t, h, srv.URL)
+
+	// confirmSelfBan on a value that does not cover the client:
+	// harmless, banned, and the audit row does not claim an
+	// override that did not happen.
+	body := `{"value":"198.51.100.9","duration":"1h","type":"ban","reason":"r","confirmSelfBan":true}`
+	req := reqWithAuth(http.MethodPost, "/api/v1/security/crowdsec/decisions", "u", "admin", "203.0.113.7", "test")
+	req.Body = httpBody(body)
+	rec := httptest.NewRecorder()
+	h.addManualBan(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201, body=%s", rec.Code, rec.Body.String())
+	}
+	events := appender.Events()
+	if len(events) != 1 || events[0].Message != "" {
+		t.Errorf("audit events = %+v, want one with an empty message", events)
+	}
+}
+
+func TestAddManualBan_SelfBan_ThroughRouter_UsesTheAuditClientIP(t *testing.T) {
+	// End to end through the production middleware stack: the
+	// client IP is the one IPExtractMiddleware resolves (and the
+	// audit log records), here httptest's RemoteAddr 192.0.2.1.
+	// No credentials are seeded, so a 412 would mean the guard
+	// did not see that IP.
+	env := newTestEnv(t, false)
+	body := `{"value":"192.0.2.0/24","duration":"1h","type":"ban","reason":"r"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/security/crowdsec/decisions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	env.router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"clientIp":"192.0.2.1"`) {
+		t.Errorf("body = %s, want clientIp 192.0.2.1", rec.Body.String())
+	}
+}

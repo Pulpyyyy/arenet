@@ -16,7 +16,7 @@ import type { CertEventsResponse } from './types';
 const requestMock = vi.fn();
 vi.mock('./client', () => ({ request: requestMock }));
 
-const { fetchCertEvents } = await import('./security');
+const { fetchCertEvents, deleteCrowdSecDecision } = await import('./security');
 
 beforeEach(() => {
 	requestMock.mockReset();
@@ -202,5 +202,13 @@ describe('fetchCertEvents: error propagation', () => {
 		requestMock.mockRejectedValueOnce(boom);
 
 		await expect(fetchCertEvents()).rejects.toThrow('simulated 503');
+	});
+});
+
+describe('deleteCrowdSecDecision', () => {
+	it('sends DELETE to the decision id, with no body', async () => {
+		requestMock.mockResolvedValueOnce({ id: 42, nbDeleted: 1 });
+		await expect(deleteCrowdSecDecision(42)).resolves.toEqual({ id: 42, nbDeleted: 1 });
+		expect(requestMock).toHaveBeenCalledWith('DELETE', '/security/crowdsec/decisions/42');
 	});
 });

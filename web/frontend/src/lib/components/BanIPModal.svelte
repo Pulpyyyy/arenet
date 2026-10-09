@@ -22,12 +22,23 @@
           to /settings, dialog stays open
     502 → inline error banner with Réessayer button, dialog
           stays open (preserves operator input)
+    409 crowdsec_self_ban → the value covers the operator's
+          own client IP: explained inline; the override
+          (confirmSelfBan) needs a ticked acknowledgement and
+          a second, separate button
     other → generic inline error
+
+  Range guard: a wide range (IPv4 /16 or wider, IPv6 /48 or
+  wider) or one touching a private / loopback / link-local block
+  takes a second click — the first submit only arms the
+  confirmation for the exact value typed (lib/utils/ban-range).
 -->
 <script lang="ts">
 	import { pushToast } from '$lib/stores/toast';
 	import { createManualBan } from '$lib/api/security';
 	import { ApiError, type ManualBanRequest } from '$lib/api/types';
+	import { serverErrorMessage } from '$lib/api/server-errors';
+	import { classifyBanTarget } from '$lib/utils/ban-range';
 	import Modal from '$lib/components/Modal.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import { t } from '$lib/i18n';
@@ -54,10 +65,24 @@
 	// Submit + error state. errorKind disambiguates the inline
 	// surface (validation vs 412 vs 502 vs generic) so each
 	// surfaces with the right wording / CTAs.
-	type SubmitErrorKind = 'validation' | 'not_configured' | 'unreachable' | 'other' | null;
+	type SubmitErrorKind =
+		| 'validation'
+		| 'not_configured'
+		| 'unreachable'
+		| 'self_ban'
+		| 'other'
+		| null;
 	let submitting = $state(false);
 	let errorKind = $state<SubmitErrorKind>(null);
 	let errorMsg = $state<string | null>(null);
+
+	// Self-ban (409 crowdsec_self_ban): the value the refusal was
+	// about, and the operator's explicit acknowledgement. The
+	// override button only shows for that exact value and stays
+	// disabled until the box is ticked.
+	const SELF_BAN_CODE = 'crowdsec_self_ban';
+	let selfBanFor = $state<string | null>(null);
+	let selfBanAck = $state(false);
 
 	// Form-reset on modal open. The parent toggles `open`; an
 	// $effect catches the false → true transition and zeroes
@@ -81,6 +106,9 @@
 		errorKind = null;
 		errorMsg = null;
 		submitting = false;
+		rangeConfirmedFor = null;
+		selfBanFor = null;
+		selfBanAck = false;
 	}
 
 	// Effective duration sent to the backend. When the preset
@@ -91,47 +119,15 @@
 		durationPreset === 'custom' ? customDuration.trim() : durationPreset
 	);
 
-	// Mask-warning state. Per the brief: inline INFO (not
-	// blocking) when the operator is about to ban a wide
-	// range (≥ /16 v4 or ≥ /48 v6). Computed live as the
-	// operator types so the warning appears as soon as the
-	// CIDR is syntactically valid.
-	type MaskWarn = { wide: boolean; approxIPs: string };
-	function classifyMask(raw: string): MaskWarn {
-		const trimmed = raw.trim();
-		const slash = trimmed.lastIndexOf('/');
-		if (slash <= 0) return { wide: false, approxIPs: '' };
-		const maskStr = trimmed.slice(slash + 1);
-		const mask = Number(maskStr);
-		if (!Number.isFinite(mask) || mask < 0) return { wide: false, approxIPs: '' };
-		// v4 vs v6 inferred by colon presence in the IP part.
-		const ipPart = trimmed.slice(0, slash);
-		const isV6 = ipPart.includes(':');
-		const totalBits = isV6 ? 128 : 32;
-		if (mask > totalBits) return { wide: false, approxIPs: '' };
-		const hostBits = totalBits - mask;
-		// Wide threshold per the brief: v4 ≥ /16 = hostBits ≥ 16; v6 ≥ /48 = hostBits ≥ 80.
-		const wide = (isV6 && mask <= 48) || (!isV6 && mask <= 16);
-		if (!wide) return { wide: false, approxIPs: '' };
-		// Format the rough magnitude. 2^hostBits fits easily in
-		// Number for v4 (up to 2^32); for v6 we use the
-		// exponent form (~10^N) which is friendlier than the
-		// raw integer.
-		const count = Math.pow(2, hostBits);
-		let approxIPs: string;
-		if (count >= 1e9) {
-			const exp = Math.round(Math.log10(count));
-			approxIPs = `≈ 10^${exp}`;
-		} else if (count >= 1e6) {
-			approxIPs = `≈ ${(count / 1e6).toFixed(1)} M`;
-		} else if (count >= 1e3) {
-			approxIPs = `≈ ${(count / 1e3).toFixed(1)} k`;
-		} else {
-			approxIPs = String(count);
-		}
-		return { wide: true, approxIPs };
-	}
-	const maskWarn = $derived(classifyMask(value));
+	// Range risk, computed live as the operator types: the wide-
+	// range INFO line shows as soon as the CIDR parses; on submit,
+	// a wide or private / loopback / link-local target arms a
+	// confirmation instead of sending. The confirmation is tied to
+	// the exact value — editing it disarms the guard again.
+	const maskWarn = $derived(classifyBanTarget(value));
+	const needsRangeConfirm = $derived(maskWarn.wide || maskWarn.sensitiveBlock !== null);
+	let rangeConfirmedFor = $state<string | null>(null);
+	const rangeConfirmArmed = $derived(needsRangeConfirm && rangeConfirmedFor === value.trim());
 
 	// Client-side validation. Mirrors the backend so the
 	// operator gets feedback without paying a round-trip.
@@ -150,13 +146,19 @@
 		return null;
 	}
 
-	async function submit(): Promise<void> {
+	async function submit(opts: { confirmSelfBan?: boolean } = {}): Promise<void> {
 		errorKind = null;
 		errorMsg = null;
 		const clientErr = validateClientSide();
 		if (clientErr !== null) {
 			errorKind = 'validation';
 			errorMsg = clientErr;
+			return;
+		}
+		if (needsRangeConfirm && rangeConfirmedFor !== value.trim()) {
+			// First click on a risky range: show what it covers
+			// and wait for a second, deliberate click.
+			rangeConfirmedFor = value.trim();
 			return;
 		}
 		submitting = true;
@@ -167,6 +169,7 @@
 				type: banType,
 				reason: reason.trim()
 			};
+			if (opts.confirmSelfBan === true) req.confirmSelfBan = true;
 			const resp = await createManualBan(req);
 			pushToast(t('banIp.toastBanned', { value: resp.value, scope: resp.scope }), 'success');
 			onSuccess?.();
@@ -174,7 +177,12 @@
 			// loadLive() fires before the visual transition.
 			onClose();
 		} catch (err) {
-			if (err instanceof ApiError) {
+			if (err instanceof ApiError && err.status === 409 && err.code === SELF_BAN_CODE) {
+				errorKind = 'self_ban';
+				errorMsg = serverErrorMessage(err);
+				selfBanFor = value.trim();
+				selfBanAck = false;
+			} else if (err instanceof ApiError) {
 				if (err.status === 400) {
 					errorKind = 'validation';
 				} else if (err.status === 412) {
@@ -284,6 +292,18 @@
 				</p>
 			</div>
 
+			{#if rangeConfirmArmed}
+				<div class="error-block warn-block" role="alert" data-testid="ban-confirm-range">
+					{#if maskWarn.wide}
+						<p>{language.current && t('banIp.confirmWideRange', { value: value.trim(), count: maskWarn.approxIPs })}</p>
+					{/if}
+					{#if maskWarn.sensitiveBlock !== null}
+						<p>{language.current && t('banIp.confirmSensitiveRange', { value: value.trim(), block: maskWarn.sensitiveBlock ?? '' })}</p>
+					{/if}
+					<p>{language.current && t('banIp.confirmRangeHint', { btn: t('banIp.btnConfirmBan') })}</p>
+				</div>
+			{/if}
+
 			{#if errorKind === 'not_configured'}
 				<div class="error-block cta" role="alert" data-testid="ban-not-configured">
 					<strong>{language.current && t('banIp.notConfiguredTitle')}</strong>
@@ -295,6 +315,29 @@
 					<strong>{language.current && t('banIp.errLapiUnreachablePrefix')}</strong> {errorMsg ?? (language.current && t('banIp.errUnknownError'))}
 					<button type="button" class="retry-btn" onclick={onRetry}>{language.current && t('banIp.btnRetry')}</button>
 				</div>
+			{:else if errorKind === 'self_ban'}
+				<!-- Shown only while the value is the one refused:
+				     the override must never carry over to an edit. -->
+				{#if selfBanFor === value.trim()}
+					<div class="error-block error" role="alert" data-testid="ban-self-ban">
+						<strong>{language.current && t('banIp.selfBanTitle')}</strong>
+						{errorMsg}
+						<label class="ack">
+							<input type="checkbox" bind:checked={selfBanAck} data-testid="ban-self-ban-ack" />
+							{language.current && t('banIp.selfBanAck')}
+						</label>
+						<Button
+							variant="danger"
+							size="sm"
+							type="button"
+							onclick={() => void submit({ confirmSelfBan: true })}
+							disabled={!selfBanAck || submitting}
+							data-testid="ban-self-ban-confirm"
+						>
+							{language.current && t('banIp.btnBanAnyway')}
+						</Button>
+					</div>
+				{/if}
 			{:else if errorKind !== null && errorMsg !== null}
 				<div class="error-block error" role="alert" data-testid="ban-error">
 					{errorMsg}
@@ -314,7 +357,12 @@
 			disabled={submitting}
 			data-testid="ban-submit"
 		>
-			{language.current && (submitting ? t('banIp.btnSubmitting') : t('banIp.btnSubmit'))}
+			{language.current &&
+				(submitting
+					? t('banIp.btnSubmitting')
+					: rangeConfirmArmed
+						? t('banIp.btnConfirmBan')
+						: t('banIp.btnSubmit'))}
 		</Button>
 	{/snippet}
 </Modal>
@@ -380,6 +428,25 @@
 		background: rgba(255, 0, 0, 0.05);
 		border: 1px solid color-mix(in oklch, var(--status-down) 30%, transparent);
 		color: var(--status-down);
+	}
+	.error-block.warn-block {
+		background: color-mix(in oklch, var(--status-warn) 8%, transparent);
+		border: 1px solid color-mix(in oklch, var(--status-warn) 40%, transparent);
+		color: var(--text-primary);
+	}
+	.error-block p {
+		margin: 0 0 0.35rem 0;
+	}
+	.error-block p:last-child {
+		margin-bottom: 0;
+	}
+	.ack {
+		display: flex;
+		gap: 0.4rem;
+		align-items: flex-start;
+		margin: 0.5rem 0;
+		color: var(--text-primary);
+		font-size: var(--text-xs, 11px);
 	}
 	.error-block.cta {
 		background: color-mix(in oklch, var(--accent-cyan) 8%, transparent);

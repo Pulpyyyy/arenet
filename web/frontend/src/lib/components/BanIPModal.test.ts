@@ -328,6 +328,153 @@ describe('BanIPModal — error UX', () => {
 	});
 });
 
+describe('BanIPModal — range confirmation', () => {
+	async function fill(value: string): Promise<void> {
+		await fireEvent.input(screen.getByTestId('ban-input-value'), { target: { value } });
+		await fireEvent.input(screen.getByTestId('ban-input-reason'), { target: { value: 'r' } });
+	}
+
+	it('a /16 needs a second, deliberate click', async () => {
+		securityMock.createManualBan.mockResolvedValue(happyResponse('203.0.0.0/16'));
+		const onSuccess = vi.fn();
+		render(BanIPModal, { props: { open: true, onClose: vi.fn(), onSuccess } });
+		await fill('203.0.0.0/16');
+
+		await fireEvent.click(screen.getByTestId('ban-submit'));
+		const block = await screen.findByTestId('ban-confirm-range');
+		expect(block.textContent ?? '').toMatch(/203\.0\.0\.0\/16 covers/);
+		expect(screen.getByTestId('ban-submit').textContent ?? '').toMatch(/Confirm ban/);
+		expect(securityMock.createManualBan).not.toHaveBeenCalled();
+
+		await fireEvent.click(screen.getByTestId('ban-submit'));
+		await waitFor(() => {
+			expect(securityMock.createManualBan).toHaveBeenCalledWith(
+				expect.objectContaining({ value: '203.0.0.0/16' })
+			);
+		});
+		await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+	});
+
+	it('a private /24 needs confirmation and names the block it touches', async () => {
+		render(BanIPModal, { props: { open: true, onClose: vi.fn(), onSuccess: vi.fn() } });
+		await fill('192.168.1.0/24');
+
+		await fireEvent.click(screen.getByTestId('ban-submit'));
+		const block = await screen.findByTestId('ban-confirm-range');
+		expect(block.textContent ?? '').toMatch(/192\.168\.0\.0\/16/);
+		expect(securityMock.createManualBan).not.toHaveBeenCalled();
+	});
+
+	it('a loopback address needs confirmation', async () => {
+		render(BanIPModal, { props: { open: true, onClose: vi.fn(), onSuccess: vi.fn() } });
+		await fill('127.0.0.1');
+
+		await fireEvent.click(screen.getByTestId('ban-submit'));
+		await screen.findByTestId('ban-confirm-range');
+		expect(securityMock.createManualBan).not.toHaveBeenCalled();
+	});
+
+	it('a public /24 goes straight through', async () => {
+		securityMock.createManualBan.mockResolvedValue(happyResponse('203.0.113.0/24'));
+		render(BanIPModal, { props: { open: true, onClose: vi.fn(), onSuccess: vi.fn() } });
+		await fill('203.0.113.0/24');
+
+		await fireEvent.click(screen.getByTestId('ban-submit'));
+		await waitFor(() => expect(securityMock.createManualBan).toHaveBeenCalledTimes(1));
+		expect(screen.queryByTestId('ban-confirm-range')).toBeNull();
+	});
+
+	it('editing the value disarms the confirmation', async () => {
+		render(BanIPModal, { props: { open: true, onClose: vi.fn(), onSuccess: vi.fn() } });
+		await fill('10.0.0.0/16');
+		await fireEvent.click(screen.getByTestId('ban-submit'));
+		await screen.findByTestId('ban-confirm-range');
+
+		await fireEvent.input(screen.getByTestId('ban-input-value'), {
+			target: { value: '10.1.0.0/16' }
+		});
+		await waitFor(() => expect(screen.queryByTestId('ban-confirm-range')).toBeNull());
+
+		// The next click re-arms for the new value; still nothing sent.
+		await fireEvent.click(screen.getByTestId('ban-submit'));
+		await screen.findByTestId('ban-confirm-range');
+		expect(securityMock.createManualBan).not.toHaveBeenCalled();
+	});
+});
+
+describe('BanIPModal — self-ban (409 crowdsec_self_ban)', () => {
+	function selfBanError(): ApiError {
+		return new ApiError(
+			'203.0.113.7 covers your own client IP 203.0.113.7',
+			409,
+			undefined,
+			undefined,
+			'crowdsec_self_ban',
+			{ value: '203.0.113.7', clientIp: '203.0.113.7' }
+		);
+	}
+
+	async function submitOwnIP(): Promise<void> {
+		await fireEvent.input(screen.getByTestId('ban-input-value'), {
+			target: { value: '203.0.113.7' }
+		});
+		await fireEvent.input(screen.getByTestId('ban-input-reason'), { target: { value: 'r' } });
+		await fireEvent.click(screen.getByTestId('ban-submit'));
+	}
+
+	it('explains the refusal and keeps the dialog open', async () => {
+		securityMock.createManualBan.mockRejectedValue(selfBanError());
+		const onClose = vi.fn();
+		render(BanIPModal, { props: { open: true, onClose, onSuccess: vi.fn() } });
+		await submitOwnIP();
+
+		const block = await screen.findByTestId('ban-self-ban');
+		expect(block.textContent ?? '').toMatch(/This would ban you/);
+		expect(block.textContent ?? '').toMatch(/your own address \(203\.0\.113\.7/);
+		expect(onClose).not.toHaveBeenCalled();
+		expect(toastMock.pushToast).not.toHaveBeenCalled();
+	});
+
+	it('offers the override only after the acknowledgement is ticked', async () => {
+		securityMock.createManualBan
+			.mockRejectedValueOnce(selfBanError())
+			.mockResolvedValueOnce(happyResponse('203.0.113.7'));
+		const onSuccess = vi.fn();
+		render(BanIPModal, { props: { open: true, onClose: vi.fn(), onSuccess } });
+		await submitOwnIP();
+
+		const override = await screen.findByTestId('ban-self-ban-confirm');
+		expect(override).toBeDisabled();
+		// The first attempt did not carry the override.
+		expect(securityMock.createManualBan.mock.calls[0][0]).not.toHaveProperty('confirmSelfBan');
+
+		await fireEvent.click(screen.getByTestId('ban-self-ban-ack'));
+		await waitFor(() => expect(screen.getByTestId('ban-self-ban-confirm')).toBeEnabled());
+		await fireEvent.click(screen.getByTestId('ban-self-ban-confirm'));
+
+		await waitFor(() => {
+			expect(securityMock.createManualBan).toHaveBeenCalledTimes(2);
+		});
+		expect(securityMock.createManualBan.mock.calls[1][0]).toEqual(
+			expect.objectContaining({ value: '203.0.113.7', confirmSelfBan: true })
+		);
+		await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+	});
+
+	it('drops the override when the value is edited', async () => {
+		securityMock.createManualBan.mockRejectedValue(selfBanError());
+		render(BanIPModal, { props: { open: true, onClose: vi.fn(), onSuccess: vi.fn() } });
+		await submitOwnIP();
+		await screen.findByTestId('ban-self-ban');
+
+		await fireEvent.input(screen.getByTestId('ban-input-value'), {
+			target: { value: '203.0.113.8' }
+		});
+		await waitFor(() => expect(screen.queryByTestId('ban-self-ban')).toBeNull());
+		expect(screen.queryByTestId('ban-self-ban-confirm')).toBeNull();
+	});
+});
+
 describe('BanIPModal — form reset on re-open', () => {
 	it('clears the form when the parent reopens the modal after a close', async () => {
 		const onClose = vi.fn();

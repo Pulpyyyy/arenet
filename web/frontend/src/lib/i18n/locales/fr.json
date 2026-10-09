@@ -90,7 +90,8 @@
 			"path_rule_redirect_target_invalid": "La destination de la redirection sur {path} doit être un chemin commençant par / ou une URL http(s) complète (reçu {target}).",
 			"path_rule_redirect_loop": "La destination {target} est attrapée par la règle sur {path} elle-même : chaque visiteur y serait redirigé indéfiniment. Vise un chemin en dehors de celui de la règle.",
 			"listen_needs_capability": "Impossible d'écouter sur {addr} : les ports sous 1024 exigent une capacité. Ajoute AmbientCapabilities=CAP_NET_BIND_SERVICE à l'unité systemd d'Arenet — ou publie le port dans docker-compose.yml si tu es en conteneur — puis redémarre Arenet.",
-			"listen_port_taken": "Impossible d'écouter sur {addr} : quelque chose d'autre sur cet hôte l'occupe déjà."
+			"listen_port_taken": "Impossible d'écouter sur {addr} : quelque chose d'autre sur cet hôte l'occupe déjà.",
+			"crowdsec_self_ban": "{value} inclut ta propre adresse ({clientIp}, telle qu'Arenet voit cette session). La bannir te couperait de toutes les routes protégées par le bouncer CrowdSec — peut-être aussi de cette interface d'administration."
 		},
 		"unauthorized": "Non autorisé",
 		"forbidden": "Interdit",
@@ -2191,6 +2192,16 @@
 		"scenariosBtnRetry": "Réessayer",
 		"scenariosEmptyWindow": "Aucune activité scenario sur {hours}h.",
 		"scenariosEmptyHelp": "Soit aucune attaque détectée, soit Arenet logs pas encore",
+		"colActions": "Actions",
+		"btnUnban": "Débannir",
+		"unbanAria": "Débannir {value}",
+		"unbanConfirmTitle": "Débannir {value} ?",
+		"unbanConfirmMessage": "LAPI va expirer cette décision {type} (origine {origin}) ; le bouncer laissera de nouveau passer {value} à son prochain poll. L'action est inscrite dans le journal d'audit.",
+		"toastUnbanned": "Débanni : {value}",
+		"toastUnbanFailed": "Échec du débannissement : {error}",
+		"unbanNotConfigured": "Pour débannir, il faut les identifiants machine de Security Automation — la clé du bouncer ne peut que lire les décisions. Renseigne-les dans Settings → Security Automation.",
+		"unbanNotFound": "LAPI n'a plus cette décision — elle a peut-être déjà expiré.",
+		"scenarioModalClose": "Fermer",
 		"autoBadgeTitle": "Classé automatiquement par Arenet",
 		"liveSubtitleBefore": "Decisions actives",
 		"liveSubtitleStrong": "maintenant",
@@ -2489,7 +2500,14 @@
 		"btnCancel": "Annuler",
 		"btnSubmitting": "En cours…",
 		"btnSubmit": "Bannir",
-		"toastBanned": "IP bannie : {value} ({scope})"
+		"toastBanned": "IP bannie : {value} ({scope})",
+		"confirmWideRange": "{value} couvre {count} adresses. Une plage aussi large peut bloquer des visiteurs légitimes — toi compris.",
+		"confirmSensitiveRange": "{value} chevauche {block}, une plage privée, loopback ou link-local : ton réseau local, ton VPN ou l'hôte d'Arenet lui-même peuvent s'y trouver.",
+		"confirmRangeHint": "Vérifie la valeur, puis clique sur « {btn} » pour envoyer le ban.",
+		"btnConfirmBan": "Confirmer le ban",
+		"selfBanTitle": "Ce ban te bloquerait.",
+		"selfBanAck": "J'ai un autre accès (console locale, autre réseau) et je veux vraiment bannir ma propre adresse.",
+		"btnBanAnyway": "Bannir quand même"
 	},
 	"certs": {
 		"headTitle": "Certificats · Arenet",

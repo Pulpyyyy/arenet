@@ -20,7 +20,15 @@
 	import Spinner from '$lib/components/Spinner.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import BanIPModal from '$lib/components/BanIPModal.svelte';
-	import { fetchDecisions, fetchLAPIDecisions, fetchScenarios } from '$lib/api/security';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import Modal from '$lib/components/Modal.svelte';
+	import Button from '$lib/components/Button.svelte';
+	import {
+		deleteCrowdSecDecision,
+		fetchDecisions,
+		fetchLAPIDecisions,
+		fetchScenarios
+	} from '$lib/api/security';
 	import type {
 		Decision,
 		LAPIDecision,
@@ -54,6 +62,48 @@
 		// IMMEDIATELY after a successful ban so the operator
 		// sees their new row without waiting for the 30s poll.
 		void loadLive();
+	}
+
+	// Unban (DELETE /security/crowdsec/decisions/{id}), admin-only
+	// like the ban. Offered on decisions authored on this install:
+	// Arenet's manual bans ("manual"), its auto-classify bans
+	// ("arenet"), local scenarios ("crowdsec") and cscli ("cscli")
+	// — where a typo or a false positive here lands. Not on CAPI
+	// or lists:* rows: those come from community / subscribed
+	// feeds, where the lasting fix for a false positive is a
+	// CrowdSec allowlist rather than expiring one entry by hand
+	// (cscli still can).
+	function canUnban(d: LAPIDecision): boolean {
+		return d.origin === 'manual' || d.origin === 'arenet' || isLocalOrigin(d.origin);
+	}
+	let unbanTarget = $state<LAPIDecision | null>(null);
+	let unbanDialogOpen = $state(false);
+	function askUnban(d: LAPIDecision): void {
+		unbanTarget = d;
+		unbanDialogOpen = true;
+	}
+	function unbanErrorMessage(err: unknown): string {
+		if (err instanceof ApiError) {
+			if (err.status === 412) return t('crowdsecDecisions.unbanNotConfigured');
+			if (err.status === 404) return t('crowdsecDecisions.unbanNotFound');
+		}
+		const detail = err instanceof Error ? err.message : String(err);
+		return t('crowdsecDecisions.toastUnbanFailed', { error: detail });
+	}
+	async function confirmUnban(): Promise<void> {
+		const target = unbanTarget;
+		if (target === null) return;
+		try {
+			await deleteCrowdSecDecision(target.id);
+			pushToast(t('crowdsecDecisions.toastUnbanned', { value: target.value }), 'success');
+		} catch (err) {
+			pushToast(unbanErrorMessage(err), 'danger');
+		}
+		unbanDialogOpen = false;
+		unbanTarget = null;
+		// Refresh either way: on success the row is gone; on a
+		// failure the decision may have expired meanwhile.
+		await loadLive();
 	}
 
 	type Tab = 'snapshot' | 'live' | 'scenarios';
@@ -267,27 +317,11 @@
 	function openScenarioModal(s: ScenarioAggregate): void {
 		modalScenario = s;
 	}
+	// Escape, backdrop click, the focus trap and returning focus
+	// to the row that opened the dialog all come from Modal.
 	function closeScenarioModal(): void {
 		modalScenario = null;
 	}
-
-	// #R-CS2C-modal-esc-key polish: the inline onkeydown on
-	// the modal-backdrop div never fires because a non-
-	// focusable presentation div doesn't receive keyboard
-	// events. Install a window-level keydown listener for
-	// the duration the modal is open — same shape Svelte's
-	// own dialog primitives use. Effect cleanup uninstalls on
-	// close OR component teardown, both via the returned fn.
-	$effect(() => {
-		if (modalScenario === null) return;
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') {
-				closeScenarioModal();
-			}
-		};
-		window.addEventListener('keydown', onKey);
-		return () => window.removeEventListener('keydown', onKey);
-	});
 
 	// Hub URL builder. CrowdSec scenarios are named
 	// "<author>/<scenario>" (e.g. "crowdsecurity/http-cve");
@@ -754,6 +788,9 @@
 								<th>Origin</th>
 								<th>Scenario</th>
 								<th>Expires</th>
+								{#if isAdmin}
+									<th>{language.current && t('crowdsecDecisions.colActions')}</th>
+								{/if}
 							</tr>
 						</thead>
 						<tbody>
@@ -801,6 +838,21 @@
 									<td class="ts" title={d.expiresAt ?? ''}>
 										{d.expiresAt ? formatExpiry(d.expiresAt) : d.duration || '—'}
 									</td>
+									{#if isAdmin}
+										<td>
+											{#if canUnban(d)}
+												<button
+													type="button"
+													class="unban-btn"
+													onclick={() => askUnban(d)}
+													aria-label={language.current && t('crowdsecDecisions.unbanAria', { value: d.value })}
+													data-testid="unban-btn"
+												>
+													{language.current && t('crowdsecDecisions.btnUnban')}
+												</button>
+											{/if}
+										</td>
+									{/if}
 								</tr>
 							{/each}
 						</tbody>
@@ -931,24 +983,12 @@
 
 	{#if modalScenario !== null}
 		{@const ms = modalScenario}
-		<!-- Esc keypress is handled at window level (see the
-		     $effect in the script block) — a non-focusable
-		     presentation div doesn't receive keyboard events,
-		     so an inline onkeydown here would be dead code. -->
-		<div class="modal-backdrop" role="presentation" onclick={closeScenarioModal}></div>
-		<div
-			class="modal"
-			role="dialog"
-			aria-modal="true"
-			aria-labelledby="scenario-modal-title"
-			data-testid="scenario-modal"
-		>
-			<header class="modal-h">
-				<h3 id="scenario-modal-title">{ms.name}</h3>
-				<button type="button" class="modal-close" onclick={closeScenarioModal} aria-label="Close">
-					×
-				</button>
-			</header>
+		<!-- Built on Modal so the dialog is named by its title and
+		     gets Escape, the focus trap and focus restore for free.
+		     Mounted under the {#if}, as ConfirmDialog does, so
+		     closing removes it at once. -->
+		<Modal open title={ms.name} onClose={closeScenarioModal} width="lg">
+		<div class="scenario-modal-body" data-testid="scenario-modal">
 			<dl class="modal-dl">
 				<dt>Alerts {scenariosMeta.windowHours}h</dt>
 				<dd><strong>{ms.alerts24h}</strong></dd>
@@ -1013,6 +1053,12 @@
 				<div class="copy-toast" role="status">{copyToast}</div>
 			{/if}
 		</div>
+		{#snippet footer()}
+			<Button variant="ghost" onclick={closeScenarioModal}>
+				{language.current && t('crowdsecDecisions.scenarioModalClose')}
+			</Button>
+		{/snippet}
+		</Modal>
 	{/if}
 {/if}
 
@@ -1028,6 +1074,20 @@
 		bind:open={banModalOpen}
 		onClose={closeBanModal}
 		onSuccess={onBanSuccess}
+	/>
+	<ConfirmDialog
+		bind:open={unbanDialogOpen}
+		title={language.current &&
+			t('crowdsecDecisions.unbanConfirmTitle', { value: unbanTarget?.value ?? '' })}
+		message={language.current &&
+			t('crowdsecDecisions.unbanConfirmMessage', {
+				value: unbanTarget?.value ?? '',
+				type: unbanTarget?.type || 'ban',
+				origin: unbanTarget?.origin || '—'
+			})}
+		confirmLabel={language.current && t('crowdsecDecisions.btnUnban')}
+		cancelLabel={language.current && t('common.cancel')}
+		onConfirm={confirmUnban}
 	/>
 {/if}
 
@@ -1174,6 +1234,26 @@
 		outline: 2px solid var(--text-primary);
 		outline-offset: 1px;
 	}
+	/* Unban row action — quiet until hovered: the table is read
+	   far more often than it is edited. */
+	.unban-btn {
+		background: transparent;
+		color: var(--text-secondary);
+		border: 1px solid var(--border-subtle, var(--bg-hover));
+		padding: 0.1rem 0.5rem;
+		border-radius: 4px;
+		font-size: var(--text-xs, 11px);
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.unban-btn:hover {
+		color: var(--status-down);
+		border-color: var(--status-down);
+	}
+	.unban-btn:focus-visible {
+		outline: 2px solid var(--accent-cyan);
+		outline-offset: 1px;
+	}
 	/* CS.3 Commit B — origin tabs row.
 	   .breakdown / .breakdown-chip / .chip-count / .chip-label
 	   styles deleted (chips replaced by Tabs.svelte). */
@@ -1266,53 +1346,9 @@
 		margin-left: 0.4rem;
 		font-family: var(--font-mono, monospace);
 	}
-	.modal-backdrop {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.5);
-		z-index: 50;
-	}
-	.modal {
-		position: fixed;
-		top: 50%;
-		left: 50%;
-		transform: translate(-50%, -50%);
-		background: var(--bg-surface);
-		border: 1px solid var(--border-subtle, var(--bg-hover));
-		border-radius: 6px;
-		padding: 1.25rem 1.5rem;
-		min-width: 28rem;
-		max-width: 36rem;
-		z-index: 51;
-		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-	}
-	.modal-h {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-		margin: 0 0 0.75rem 0;
-		padding-bottom: 0.5rem;
-		border-bottom: 1px solid var(--border-subtle, var(--bg-hover));
-	}
-	.modal-h h3 {
-		margin: 0;
-		font-size: var(--text-lg, 16px);
-		font-family: var(--font-mono, monospace);
-		color: var(--text-primary);
-		word-break: break-all;
-	}
-	.modal-close {
-		background: transparent;
-		border: none;
-		color: var(--text-secondary);
-		font-size: 1.5rem;
-		line-height: 1;
-		cursor: pointer;
-		padding: 0 0.25rem;
-	}
-	.modal-close:hover {
-		color: var(--text-primary);
+	/* Anchors the copy toast now that Modal owns the dialog box. */
+	.scenario-modal-body {
+		position: relative;
 	}
 	.modal-dl {
 		display: grid;
@@ -1369,8 +1405,8 @@
 	}
 	.copy-toast {
 		position: absolute;
-		bottom: 0.75rem;
-		right: 1.5rem;
+		bottom: 0;
+		right: 0;
 		background: var(--accent-cyan);
 		color: var(--text-inverse);
 		padding: 0.3rem 0.7rem;

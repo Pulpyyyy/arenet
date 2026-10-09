@@ -118,7 +118,19 @@ type manualBanRequest struct {
 	// rejected (defensive: a reason like "X\x00Y\n" could
 	// confuse downstream consumers — sanitise upfront).
 	Reason string `json:"reason"`
+	// ConfirmSelfBan is the explicit override for the self-ban
+	// guard: without it, a value that is or contains the
+	// requesting client's own IP is refused with 409
+	// crowdsec_self_ban. Optional; false when absent.
+	ConfirmSelfBan bool `json:"confirmSelfBan,omitempty"`
 }
+
+// errCodeCrowdSecSelfBan is the stable machine code of the 409
+// returned when a manual ban would cover the requesting client's
+// own IP. The frontend translates it (errors.server.<code>) and
+// offers the confirmSelfBan override behind a second
+// confirmation.
+const errCodeCrowdSecSelfBan = "crowdsec_self_ban"
 
 // manualBanResponse is the wire shape returned on 201 success.
 // Echoes the canonical scenario string so the frontend can
@@ -151,6 +163,10 @@ const crowdSecManualBanReasonMaxLen = 256
 //   400 Bad Request — validation failed (bad IP, bad
 //                     duration, bad type, reason too long /
 //                     empty / non-printable).
+//   409 Conflict — code crowdsec_self_ban: the value is, or
+//                  contains, the requesting client's own IP
+//                  (as resolved for the audit log) and
+//                  confirmSelfBan was not set.
 //   412 Precondition Failed — Security Automation creds
 //                              not configured (reuses CS.2.C
 //                              412 contract).
@@ -184,6 +200,21 @@ func (h *Handler) addManualBan(w http.ResponseWriter, r *http.Request) {
 	reason, rErr := validateManualBanReason(req.Reason)
 	if rErr != nil {
 		writeError(w, http.StatusBadRequest, rErr.Error())
+		return
+	}
+
+	// Self-ban guard. The client IP is the one the audit log
+	// records (auth.ClientIPFromContext, X-Forwarded-For aware
+	// behind ARENET_TRUSTED_PROXIES). Banning it would cut the
+	// operator off from every route the bouncer protects —
+	// possibly this admin UI — so it takes an explicit
+	// override. Checked before the credentials lookup: the
+	// refusal does not depend on LAPI being configured.
+	clientIP := auth.ClientIPFromContext(r.Context())
+	if !req.ConfirmSelfBan && banCoversClientIP(scope, value, clientIP) {
+		writeErrorCode(w, http.StatusConflict, errCodeCrowdSecSelfBan,
+			fmt.Sprintf("%s covers your own client IP %s — resend with confirmSelfBan=true to ban it anyway", value, clientIP),
+			map[string]any{"value": value, "clientIp": clientIP})
 		return
 	}
 
@@ -261,11 +292,18 @@ func (h *Handler) addManualBan(w http.ResponseWriter, r *http.Request) {
 		Origin:   "manual",
 		ExpiresAt: expiresAt,
 	}
+	// An overridden self-ban is worth spelling out in the trail:
+	// it is the one manual ban that can lock the operator out.
+	var auditMsg string
+	if req.ConfirmSelfBan && banCoversClientIP(scope, value, clientIP) {
+		auditMsg = "self-ban override confirmed: covers the requesting client IP " + clientIP
+	}
 	h.appendAudit(r, audit.Event{
 		Action:     audit.ActionCrowdSecDecisionCreate,
 		TargetType: "crowdsec_decision",
 		TargetID:   value,
 		AfterJSON:  mustMarshalForAudit(auditPayload),
+		Message:    auditMsg,
 	})
 
 	writeJSON(w, http.StatusCreated, auditPayload)
@@ -301,6 +339,30 @@ func validateManualBanValue(raw string) (scope string, value string, err error) 
 		return "", "", fmt.Errorf("invalid IP %q (expected IPv4, IPv6, or CIDR)", trimmed)
 	}
 	return "Ip", ip.String(), nil
+}
+
+// banCoversClientIP reports whether a validated ban target
+// (scope + canonical value from validateManualBanValue) is, or
+// contains, clientIP. An empty or unparseable clientIP never
+// matches: the guard cannot protect an address it does not
+// know, and refusing every ban in that case would make manual
+// bans unusable behind a misconfigured proxy.
+//
+// net.IP.Equal and net.IPNet.Contains both normalise
+// IPv4-mapped IPv6 (::ffff:a.b.c.d) to IPv4, so a client seen
+// as ::ffff:203.0.113.7 still matches a ban on 203.0.113.7 or
+// 203.0.113.0/24.
+func banCoversClientIP(scope, value, clientIP string) bool {
+	client := net.ParseIP(strings.TrimSpace(clientIP))
+	if client == nil {
+		return false
+	}
+	if scope == "Range" {
+		_, ipnet, err := net.ParseCIDR(value)
+		return err == nil && ipnet.Contains(client)
+	}
+	ip := net.ParseIP(value)
+	return ip != nil && ip.Equal(client)
 }
 
 // validateManualBanDuration confirms the duration parses
