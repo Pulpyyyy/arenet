@@ -7,7 +7,8 @@
   (GET /api/v1/openapi.json): operations by tag with a search on the
   left, the selected operation on the right (OperationView), a link to
   download the JSON. Written in Svelte on purpose: the usual viewers
-  (Swagger UI, Redoc, Scalar) bundle React or Vue.
+  (Swagger UI, Redoc, Scalar) bundle React or Vue. The selected
+  operation is kept in the URL hash (#post/routes) so it can be linked.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -73,12 +74,53 @@
 		return 'api-tag-' + tag.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 	}
 
-	onMount(async () => {
+	// The selected operation lives in the URL hash ("#post/routes") so an
+	// operation can be linked to and survives a reload. replaceState, not
+	// a hash assignment: assigning location.hash would make the browser
+	// scroll to a fragment that is not an element id.
+
+	/** Hash fragment (without "#") naming an operation. */
+	function hashFor(o: Operation): string {
+		return o.method + o.path;
+	}
+
+	/** The key of the operation the current hash names, or null. */
+	function keyFromHash(): string | null {
+		const raw = window.location.hash.slice(1);
+		if (!raw) return null;
+		let wanted = raw;
+		try {
+			wanted = decodeURIComponent(raw);
+		} catch {
+			// Malformed escape: compare the raw text.
+		}
+		return ops.find((o) => hashFor(o) === wanted)?.key ?? null;
+	}
+
+	function selectOp(o: Operation): void {
+		selectedKey = o.key;
+		const url = new URL(window.location.href);
+		url.hash = hashFor(o);
+		window.history.replaceState(window.history.state, '', url.toString());
+	}
+
+	async function load(): Promise<void> {
 		try {
 			doc = await getOpenAPI();
+			selectedKey = keyFromHash();
 		} catch (err) {
 			loadError = err instanceof Error ? err.message : String(err);
 		}
+	}
+
+	onMount(() => {
+		void load();
+		// A hash typed in the address bar, or a link to another operation.
+		const onHash = (): void => {
+			if (doc) selectedKey = keyFromHash();
+		};
+		window.addEventListener('hashchange', onHash);
+		return () => window.removeEventListener('hashchange', onHash);
 	});
 
 	function download(): void {
@@ -135,7 +177,8 @@
 								type="button"
 								class="op-link"
 								class:active={o.key === selectedKey}
-								onclick={() => (selectedKey = o.key)}
+								aria-current={o.key === selectedKey ? 'true' : undefined}
+								onclick={() => selectOp(o)}
 								data-testid="api-op-link"
 							>
 								<span class="m m-{o.method}">{o.method.toUpperCase()}</span>
@@ -148,7 +191,9 @@
 				<p class="muted">{language.current && t('apiDocs.noMatch')}</p>
 			{/each}
 		</nav>
-		<main class="detail">
+		<!-- A section, not a <main>: the layout already provides the page's
+		     single main landmark. -->
+		<section class="detail">
 			{#if selected}
 				<OperationView {doc} op={selected} />
 			{:else}
@@ -157,7 +202,7 @@
 					<p>{intro}</p>
 				</div>
 			{/if}
-		</main>
+		</section>
 	</div>
 {/if}
 

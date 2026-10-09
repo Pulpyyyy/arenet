@@ -9,8 +9,17 @@
   session and shows the raw status + body. A changing method
   (POST/PUT/PATCH/DELETE) asks for confirmation first — it acts on
   the real configuration.
+
+  The confirmation must not be reachable by a double-click: "Send"
+  used to turn into "Yes, send it" in the same spot, so the second
+  click of a double-click fired a real write. Now "Send" stays put and
+  is disabled, the confirm button appears in a separate panel below,
+  after Cancel, and stays disabled for CONFIRM_GUARD_MS with a visible
+  countdown. Focus lands on Cancel, so a repeated Enter cancels too.
+  Escape or Cancel returns to the initial state.
 -->
 <script lang="ts">
+	import { onDestroy, tick } from 'svelte';
 	import SchemaView from './SchemaView.svelte';
 	import { rawRequest, type RawResponse } from '$lib/api/client';
 	import { t } from '$lib/i18n';
@@ -42,13 +51,47 @@
 	const queryParams = $derived(op.parameters.filter((p) => p.in === 'query'));
 
 	// --- Try it -----------------------------------------------------------
+
+	/** How long the confirm button stays disabled after it appears —
+	 *  longer than any double-click interval. */
+	const CONFIRM_GUARD_MS = 1000;
+	/** Countdown refresh step. */
+	const GUARD_TICK_MS = 100;
+	const MS_PER_SECOND = 1000;
+
 	let open = $state(false);
 	let values = $state<Record<string, string>>({});
 	let body = $state('');
 	let sending = $state(false);
 	let confirming = $state(false);
+	/** Milliseconds before the confirm button accepts a click. */
+	let guardLeft = $state(0);
 	let response = $state<RawResponse | null>(null);
 	let sendError = $state<string | null>(null);
+	let sendBtn = $state<HTMLButtonElement | null>(null);
+	let cancelBtn = $state<HTMLButtonElement | null>(null);
+	let guardTimer: ReturnType<typeof setInterval> | null = null;
+
+	const isDelete = $derived(op.method === 'delete');
+	const guardSeconds = $derived(Math.ceil(guardLeft / MS_PER_SECOND));
+
+	function stopGuard(): void {
+		if (guardTimer !== null) {
+			clearInterval(guardTimer);
+			guardTimer = null;
+		}
+	}
+
+	function startGuard(): void {
+		stopGuard();
+		guardLeft = CONFIRM_GUARD_MS;
+		guardTimer = setInterval(() => {
+			guardLeft = Math.max(0, guardLeft - GUARD_TICK_MS);
+			if (guardLeft === 0) stopGuard();
+		}, GUARD_TICK_MS);
+	}
+
+	onDestroy(stopGuard);
 
 	// Reset the form when another operation is shown.
 	let lastKey = '';
@@ -61,6 +104,8 @@
 		response = null;
 		sendError = null;
 		confirming = false;
+		stopGuard();
+		guardLeft = 0;
 	});
 
 	const url = $derived.by(() => {
@@ -73,13 +118,46 @@
 	});
 	const missingPath = $derived(pathParams.some((p) => (values[p.name] ?? '').trim() === ''));
 
-	async function send(): Promise<void> {
-		if (missingPath) return;
-		if (isMutating(op.method) && !confirming) {
+	/** "Send": a GET goes out at once; a changing method opens the
+	 *  confirmation instead. */
+	function requestSend(): void {
+		if (missingPath || sending || confirming) return;
+		if (isMutating(op.method)) {
 			confirming = true;
+			startGuard();
+			void tick().then(() => cancelBtn?.focus());
 			return;
 		}
+		void send();
+	}
+
+	/** The confirm button: refused while the guard is still running. */
+	function confirmSend(): void {
+		if (!confirming || guardLeft > 0) return;
+		void send();
+	}
+
+	/** Cancel / Escape: back to the initial state. */
+	function cancelConfirm(): void {
+		if (!confirming) return;
 		confirming = false;
+		stopGuard();
+		guardLeft = 0;
+		void tick().then(() => sendBtn?.focus());
+	}
+
+	function onWindowKeydown(e: KeyboardEvent): void {
+		if (confirming && e.key === 'Escape') {
+			e.preventDefault();
+			cancelConfirm();
+		}
+	}
+
+	async function send(): Promise<void> {
+		if (missingPath) return;
+		confirming = false;
+		stopGuard();
+		guardLeft = 0;
 		sending = true;
 		sendError = null;
 		try {
@@ -105,6 +183,8 @@
 		return jsonSchema(doc, op.responses[code]);
 	}
 </script>
+
+<svelte:window onkeydown={onWindowKeydown} />
 
 <article class="op" data-testid="api-op">
 	<header>
@@ -187,23 +267,62 @@
 				</label>
 			{/if}
 			<p class="url"><code>{op.method.toUpperCase()} {url}</code></p>
-			{#if confirming}
-				<p class="warn" role="alert" data-testid="api-confirm">{language.current && t('apiDocs.confirmMutating')}</p>
-			{/if}
 			<div class="actions">
 				<button
 					type="button"
 					class="btn primary"
-					onclick={() => void send()}
-					disabled={sending || missingPath}
+					bind:this={sendBtn}
+					onclick={requestSend}
+					disabled={sending || missingPath || confirming}
 					data-testid="api-send"
 				>
-					{language.current && (confirming ? t('apiDocs.confirmSend') : t('apiDocs.send'))}
+					{language.current && t('apiDocs.send')}
 				</button>
-				{#if confirming}
-					<button type="button" class="btn" onclick={() => (confirming = false)}>{language.current && t('apiDocs.cancel')}</button>
-				{/if}
 			</div>
+			{#if confirming}
+				<!-- Below "Send", confirm after Cancel: never under the cursor
+				     that just clicked "Send". -->
+				<div
+					class="confirm"
+					class:danger={isDelete}
+					role="group"
+					aria-labelledby="api-confirm-msg"
+					data-testid="api-confirm-panel"
+				>
+					<p class="confirm-msg" id="api-confirm-msg" role="alert" data-testid="api-confirm">
+						{language.current &&
+							t(isDelete ? 'apiDocs.confirmDelete' : 'apiDocs.confirmMutating', {
+								request: `${op.method.toUpperCase()} ${url}`
+							})}
+					</p>
+					<div class="actions">
+						<button
+							type="button"
+							class="btn"
+							bind:this={cancelBtn}
+							onclick={cancelConfirm}
+							data-testid="api-confirm-cancel"
+						>
+							{language.current && t('apiDocs.cancel')}
+						</button>
+						<button
+							type="button"
+							class="btn confirm-btn"
+							class:danger={isDelete}
+							onclick={confirmSend}
+							disabled={guardLeft > 0}
+							data-testid="api-confirm-send"
+						>
+							{language.current && t(isDelete ? 'apiDocs.confirmDeleteSend' : 'apiDocs.confirmSend')}
+							{#if guardLeft > 0}
+								<span class="countdown" data-testid="api-confirm-countdown">
+									{language.current && t('apiDocs.countdown', { seconds: guardSeconds })}
+								</span>
+							{/if}
+						</button>
+					</div>
+				</div>
+			{/if}
 			{#if sendError}<p class="error" role="alert">{sendError}</p>{/if}
 			{#if response}
 				<div class="result" data-testid="api-result">
@@ -378,10 +497,44 @@
 		outline: 2px solid var(--accent-cyan);
 		outline-offset: 1px;
 	}
-	.warn {
+	.confirm {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		margin-top: 4px;
+		padding: 10px 12px;
+		border: 1px solid var(--status-warn);
+		border-left-width: 4px;
+		border-radius: 4px;
+		background: var(--bg-base);
+	}
+	.confirm.danger {
+		border-color: var(--status-down);
+	}
+	.confirm-msg {
 		margin: 0;
-		font-size: 12px;
+		font-size: 13px;
 		color: var(--status-warn);
+		overflow-wrap: anywhere;
+	}
+	.confirm.danger .confirm-msg {
+		color: var(--status-down);
+		font-weight: 600;
+	}
+	.btn.confirm-btn,
+	.btn.confirm-btn:hover {
+		color: var(--status-warn);
+		border-color: var(--status-warn);
+	}
+	.btn.confirm-btn.danger,
+	.btn.confirm-btn.danger:hover {
+		color: var(--bg-base);
+		background: var(--status-down);
+		border-color: var(--status-down);
+		font-weight: 600;
+	}
+	.countdown {
+		font-variant-numeric: tabular-nums;
 	}
 	.error {
 		margin: 0;
