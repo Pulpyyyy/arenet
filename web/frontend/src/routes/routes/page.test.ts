@@ -4120,6 +4120,26 @@ describe('Routes page — post-apply route check', () => {
 				12000
 			)
 		);
+		// The check message already says the route is saved.
+		expect(toastMock.pushToast).not.toHaveBeenCalledWith('Route created', 'success');
+	});
+
+	it('stays on the route, in edit mode, when it is saved but does not answer', async () => {
+		const stored = makeRoute({ id: 'r1', host: 'app.test' });
+		apiMock.createRoute.mockResolvedValueOnce({
+			...stored,
+			check: { status: 'failed', host: 'app.test', httpStatus: 502, detail: 'the route answered 502 Bad Gateway' }
+		});
+		apiMock.listRoutes.mockResolvedValue([stored]);
+		await fillAndSubmit();
+
+		const notice = await screen.findByTestId('save-check-failure');
+		expect(notice).toHaveTextContent('app.test is saved but does not answer');
+		// One message, not "Route created" beside "does not answer".
+		expect(toastMock.pushToast).not.toHaveBeenCalledWith('Route created', 'success');
+		// Reopened on the stored route: the edit-only pivots are there.
+		expect(screen.getByTestId('panel-pivot-metrics')).toBeInTheDocument();
+		expect(apiMock.createRoute).toHaveBeenCalledTimes(1);
 	});
 
 	it('keeps the panel open with the explanation when the change was undone (409)', async () => {
@@ -4368,6 +4388,7 @@ describe('Routes page — v2.41 route form sections', () => {
 		await tick();
 
 		const row = (id: string) => screen.getByTestId(id).querySelector('summary')!.textContent ?? '';
+		expect(row('section-essentials')).toContain('HTTPS');
 		expect(row('section-essentials')).toContain('2 backend');
 		expect(row('section-essentials')).toContain('1 alias');
 		expect(row('section-tls')).toContain("Let's Encrypt");
