@@ -80,13 +80,13 @@ describe('MultiSeriesTimelineChart', () => {
 		await fireEvent.click(screen.getByTestId('legend-toggle-renewed'));
 		await fireEvent.click(screen.getByTestId('legend-toggle-failed'));
 
-		expect(screen.getByText('Aucun événement sur cette période')).toBeTruthy();
+		expect(screen.getByText('No events in this period')).toBeTruthy();
 	});
 
 	it('renders empty-state text when data is all zeros', () => {
 		const zeros = sampleData.map((d) => ({ ...d, issued: 0, renewed: 0, failed: 0 }));
 		render(Chart, { props: { data: zeros, series: certSeries, label: 'Cert events' } });
-		expect(screen.getByText('Aucun événement sur cette période')).toBeTruthy();
+		expect(screen.getByText('No events in this period')).toBeTruthy();
 	});
 
 	it('does NOT render tooltip when hover is outside chart bounds', () => {

@@ -29,6 +29,8 @@
 // existing 7 Go tests pinning the string shape (see
 // internal/api/managed_domain_test.go).
 
+import { t } from '$lib/i18n';
+
 /** Discriminated union — every variant of effectiveCertSource. */
 export type ParsedCertSource =
 	| { kind: 'managed-domain'; coveringApex: string }
@@ -88,9 +90,10 @@ export function parseEffectiveCertSource(raw: string | undefined | null): Parsed
 }
 
 /**
- * Operator-facing French label for a parsed cert source. Used
- * by the CertSourceBadge component and any other surface that
- * needs the same wording (e.g. a future details panel rewrite).
+ * Operator-facing label for a parsed cert source, in the active
+ * language. Used by the CertSourceBadge component and any other
+ * surface that needs the same wording (e.g. a future details
+ * panel rewrite).
  *
  * Single source of truth for the copy so the routes list and
  * other surfaces stay aligned.
@@ -98,16 +101,20 @@ export function parseEffectiveCertSource(raw: string | undefined | null): Parsed
 export function certSourceLabel(parsed: ParsedCertSource): string {
 	switch (parsed.kind) {
 		case 'managed-domain':
-			return `Couvert par *.${parsed.coveringApex}`;
+			return t('certSource.labelManagedDomain', { apex: parsed.coveringApex });
 		case 'per-route-acme':
-			return parsed.challenge === 'dns-01' ? 'Cert dédié (DNS-01)' : 'Cert dédié (HTTP-01)';
+			return parsed.challenge === 'dns-01'
+				? t('certSource.labelDedicatedDns')
+				: t('certSource.labelDedicatedHttp');
 		case 'per-route-internal':
-			return 'Cert interne';
+			return t('certSource.labelInternal');
 		case 'manual':
 			// certName is the cert display name, or "*.<apex>" for a
 			// wildcard cert (resolved by the caller). Fall back to a
 			// bare label when the cert_id could not be resolved.
-			return parsed.certName ? `Cert manuel : ${parsed.certName}` : 'Cert manuel';
+			return parsed.certName
+				? t('certSource.labelManualNamed', { name: parsed.certName })
+				: t('certSource.labelManual');
 		case 'none':
 			return '';
 	}
@@ -122,24 +129,17 @@ export function certSourceLabel(parsed: ParsedCertSource): string {
 export function certSourceTooltip(parsed: ParsedCertSource): string {
 	switch (parsed.kind) {
 		case 'managed-domain':
-			return (
-				`Cette route est servie par le certificat wildcard *.${parsed.coveringApex} ` +
-				`géré dans SSL / Certificates. ` +
-				`Règle RFC 6125 : un seul label DNS entre le hostname et l'apex (un sous-domaine direct).`
-			);
+			return t('certSource.tooltipManagedDomain', { apex: parsed.coveringApex });
 		case 'per-route-acme':
 			return parsed.challenge === 'dns-01'
-				? 'Certificat dédié à cette route, émis via le challenge ACME DNS-01.'
-				: 'Certificat dédié à cette route, émis via le challenge ACME HTTP-01.';
+				? t('certSource.tooltipDedicatedDns')
+				: t('certSource.tooltipDedicatedHttp');
 		case 'per-route-internal':
-			return (
-				"Certificat émis par l'autorité interne de Caddy (auto-signé). " +
-				'Typique des hostnames privés (LAN, *.local) qui ne qualifient pas pour un cert public.'
-			);
+			return t('certSource.tooltipInternal');
 		case 'manual':
 			return parsed.certName
-				? `Cette route sert le certificat manuel « ${parsed.certName} » importé dans SSL / Certificates (pas d'ACME).`
-				: "Cette route sert un certificat manuel importé dans SSL / Certificates (pas d'ACME).";
+				? t('certSource.tooltipManualNamed', { name: parsed.certName })
+				: t('certSource.tooltipManual');
 		case 'none':
 			return '';
 	}

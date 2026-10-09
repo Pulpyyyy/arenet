@@ -14,6 +14,7 @@
 // added by c6013f2 (polish HF2).
 
 import type { Certificate, CertificateStatus, CertificateSource } from '$lib/api/types';
+import { t } from '$lib/i18n';
 
 /**
  * Days before notAfter at which the frontend treats a cert as
@@ -68,21 +69,23 @@ export function certificateStatusToBadgeVariant(
 }
 
 /**
- * Operator-facing French label for the status badge. Locked
- * copy: changes here must be paired with a spec amendment, since
- * the labels are part of the AC #10 contract (the spec's "VALIDE
- * / RENOUV. AUTO / EXPIRÉ / ÉCHEC / —" vocabulary).
+ * Operator-facing label for the status badge, in the active
+ * language. The French copy keeps the spec's "VALIDE / RENOUV.
+ * AUTO / EXPIRÉ / ÉCHEC / —" vocabulary (AC #10).
+ *
+ * t() reads language.current, so a template calling this re-renders
+ * on a language switch without any extra dependency trigger.
  */
 export function certificateStatusLabel(status: CertificateStatus): string {
 	switch (status) {
 		case 'VALID':
-			return 'VALIDE';
+			return t('certs.statusValid');
 		case 'RENEWAL_PENDING':
-			return 'RENOUV. AUTO';
+			return t('certs.statusRenewalPending');
 		case 'EXPIRED':
-			return 'EXPIRÉ';
+			return t('certs.statusExpired');
 		case 'OBTAIN_FAILED':
-			return 'ÉCHEC';
+			return t('certs.statusFailed');
 		case 'UNKNOWN':
 		default:
 			return '—';
@@ -90,8 +93,9 @@ export function certificateStatusLabel(status: CertificateStatus): string {
 }
 
 /**
- * Operator-facing French label for the source classifier
- * (rendered under the DOMAINE column).
+ * Operator-facing label for the source classifier (rendered under
+ * the domain column). "wildcard" and "apex" read the same in both
+ * languages; only "specific" is translated.
  */
 export function certificateSourceLabel(source: CertificateSource): string {
 	switch (source) {
@@ -101,7 +105,7 @@ export function certificateSourceLabel(source: CertificateSource): string {
 			return 'apex';
 		case 'specific':
 		default:
-			return 'spécifique';
+			return t('certs.sourceSpecific');
 	}
 }
 

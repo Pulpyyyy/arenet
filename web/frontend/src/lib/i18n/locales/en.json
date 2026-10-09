@@ -27,6 +27,16 @@
 		"hidePassword": "Hide password",
 		"firstTimePrompt": "First time here?",
 		"createAdminLink": "Create the admin account",
+		"lock": {
+			"title": "Session locked.",
+			"signedInAs": "Signed in as",
+			"viaSso": "via SSO.",
+			"ssoPrompt": "Sign in again to pick up where you left off.",
+			"ssoButton": "Sign in again with SSO",
+			"passwordPrompt": "Enter your password to continue.",
+			"wrongPassword": "Wrong password.",
+			"unlock": "Unlock"
+		},
 		"errors": {
 			"identifierRequired": "Identifier is required.",
 			"passwordRequired": "Password is required.",
@@ -459,6 +469,9 @@
 			"healthCheckHeaderHostError": "Set the Host in the field above, not as a header.",
 			"healthCheckHelper": "Leave a field blank to use the server default (GET / 30s / 5s / passes=1 / fails=1). URI is required.",
 			"upstreamPrivateIPHint": "Private IP + https detected — the upstream certificate is probably self-signed. Use \"Advanced upstream TLS\" if the connection fails.",
+			"upstreamPathWarningBefore": "The path",
+			"upstreamPathWarningAfter": "will be ignored — Caddy only proxies to",
+			"savingOverlay": "Applying changes to Caddy…",
 			"upstreamTestButton": "Test",
 			"upstreamTestRunning": "Test in progress…",
 			"upstreamTestConnectionFailed": "connection failed",
@@ -478,6 +491,9 @@
 			"wafExcludeRulesWAFHistory": "the WAF history",
 			"wafExcludeRulesSecurityPage": "Security",
 			"wafExcludeRulesCRSDisabledWarning": "⚠️ The CRS is disabled via the toggle above — exclusions are silent until re-enabled.",
+			"wafExcludeRulesErrNotInteger": "\"{token}\" is not a valid integer",
+			"wafExcludeRulesErrNotCrsId": "{n} is not a valid CRS ID (must be a 6-digit integer, 100000..999999)",
+			"wafExcludeRulesErrReserved": "{n} is in the Arenet-reserved range (100000..199999); choose an ID >= 200000",
 			"sectionEssentials": "Essentiel",
 			"sectionTLS": "TLS",
 			"sectionAuth": "Authentication",
@@ -551,6 +567,9 @@
 			"wafExcludeTagsLabelFull": "OWASP tags to exclude",
 			"wafExcludeTagsLabelHint": "(CRS tags separated by commas)",
 			"wafExcludeTagsHelper": "Disables every CRS rule carrying the listed tag on this route. More resilient than an ID list: a CRS update that adds rules to a tag automatically inherits the exclusion. Tag = a string with no spaces or commas inside (e.g. paranoia-level/3). Autocomplete suggests 24 common tags; any valid CRS tag is accepted.",
+			"wafExcludeTagsErrTooMany": "Too many tags ({count}) — max {max}",
+			"wafExcludeTagsErrTooLong": "\"{token}…\" is longer than {max} characters",
+			"wafExcludeTagsErrInvalidChar": "\"{token}\" contains a character SecAction cannot take (space, comma or double quote)",
 			"rateLimitSection": "Rate limiting",
 			"rateLimitToggleLabelFull": "Enable rate limiting (brute-force / API abuse protection)",
 			"rateLimitMaxRequestsLabel": "Maximum requests",
@@ -685,6 +704,7 @@
 			"countryBlockListLabel": "Country list",
 			"countryBlockStatusCodeLabel": "Status code on block",
 			"countryBlockStatusDefault": "Default (ARENET_COUNTRY_BLOCK_STATUS)",
+			"countryBlockOffHint": "No country gate. Choose Allow-list or Deny-list to turn it on.",
 			"healthCheckLiveLabel": "Current state:",
 			"healthCheckLiveFailingHint": "The probe is failing. Check the URI, the expected status and the expected body below — a probe that does not match what the backend answers takes the route out of service, even though the backend is up.",
 			"healthCheckLive": {
@@ -1004,7 +1024,22 @@
 		"wsLive": "Live",
 		"wsConnecting": "Connecting…",
 		"wsReconnecting": "Reconnecting…",
-		"wsOffline": "Offline"
+		"wsOffline": "Offline",
+		"legendTitle": "Category legend",
+		"legendAria": "Legend of the event categories",
+		"legendNormal": "Legitimate traffic — successful request",
+		"legendThrottle": "Throttle — rate-limit (HTTP 429)",
+		"legendWaf": "WAF — blocked by Coraza (HTTP 403)",
+		"legendCrowdsec": "CrowdSec — IP with a bad reputation (HTTP 403)",
+		"legendAuth": "Auth — authentication failure (HTTP 401/403)",
+		"legendCountryBlock": "Country blocked — operator rule (HTTP 403/451/444)",
+		"legendComingSoon": "coming soon",
+		"legendNote": "Each arc animates the path from the source to Arenet over ~2 s, then fades out over ~1.5 s. The colour shows the event category; internal traffic (LAN/RFC1918) is not drawn on the world map (counter in the top right).",
+		"licenseGeoip": "GeoIP data:",
+		"licenseMap": "Map:",
+		"worldMapUnavailable": "Map unavailable: {error}",
+		"worldMapAria": "World map",
+		"worldMapAriaCentred": "World map centred on {place}"
 	},
 	"pageTitles": {
 		"apiDocs": "API documentation",
@@ -1201,6 +1236,9 @@
 		"actionRetry": "Retry",
 		"networkError": "Network error",
 		"loadFailed": "Failed to load",
+		"loadEventsFailed": "Failed to load the events",
+		"loadChannelsFailed": "Failed to load the channels",
+		"loadRulesFailed": "Failed to load the rules",
 		"channels": {
 			"addBtn": "Add channel",
 			"loadErr": "⚠ Failed to load channels: {err}",
@@ -1642,6 +1680,7 @@
 		"labelEnable": "Enable OIDC SSO login",
 		"labelProvider": "Provider",
 		"providerGeneric": "— Generic (default) —",
+		"providerGenericLabel": "Generic OIDC",
 		"providerHelper": "Choose your OIDC provider to display its logo on the sign-in button. Leave empty to use the generic logo. The choice does NOT influence the authentication logic — it is purely visual.",
 		"labelIssuer": "Issuer URL",
 		"issuerHelper": "OIDC issuer URL (the issuer field of the discovery document). DO NOT include the /.well-known/openid-configuration suffix — Arenet appends it automatically (if you paste the full URL, the suffix is silently stripped server-side). Authentik: /application/o/<slug>/ ; Keycloak: /realms/<realm> ; Authelia: the deployment root.",
@@ -1919,6 +1958,8 @@
 		"emptyLiveAll": "No active decision according to LAPI. The bouncer is watching but no source is currently blocked. (CAPI sync runs every ~2-15 min; a freshly-started bouncer may take a few minutes to receive the community blocklist.)",
 		"emptyLiveFiltered": "No decision in this category ({total} total — see the {tabAll} tab).",
 		"tabAll": "All",
+		"tabLocal": "Local",
+		"tabManual": "Manual",
 		"tabActiveOnly": "Active only",
 		"btnBanIp": "+ Ban an IP",
 		"scenariosSubtitle": "CrowdSec scenarios that fired over the last",
@@ -1927,7 +1968,19 @@
 		"automationNotConfiguredFooter": "independently — this coupling only concerns the tab",
 		"scenariosBtnRetry": "Retry",
 		"scenariosEmptyWindow": "No scenario activity in {hours}h.",
-		"scenariosEmptyHelp": "Either no attack detected, or Arenet logs not yet"
+		"scenariosEmptyHelp": "Either no attack detected, or Arenet logs not yet",
+		"autoBadgeTitle": "Classified automatically by Arenet",
+		"liveSubtitleBefore": "Decisions active",
+		"liveSubtitleStrong": "right now",
+		"liveSubtitleAfter": "according to LAPI (live pass-through, polled every 30s).",
+		"scopeAll": "all",
+		"loading": "loading…",
+		"scenariosCount": "{alerts} alert{alertsPlural} across {scenarios} scenario{scenariosPlural}",
+		"hubLink": "View on the CrowdSec hub ↗",
+		"hubNone": "Non-namespaced scenario (manual or local) — no hub page.",
+		"copyButton": "Copy",
+		"cscliHintBefore": "To install, modify or disable this scenario, use",
+		"cscliHintAfter": "on the CrowdSec host — it cannot be changed from the Arenet UI."
 	},
 	"createServiceAccount": {
 		"titleReveal": "API token generated",
@@ -2245,6 +2298,11 @@
 		"staleBadgeText": "⚠ Failed for {ago}",
 		"expiryExpired": "expired",
 		"expiryDays": "{days} day{plural}",
+		"statusValid": "VALID",
+		"statusRenewalPending": "RENEWING",
+		"statusExpired": "EXPIRED",
+		"statusFailed": "FAILED",
+		"sourceSpecific": "specific",
 		"policiesCardTitle": "Wildcard policies per apex",
 		"policiesDeclaredCounter": "{count} declared",
 		"policiesEmpty": "None",
@@ -2407,6 +2465,141 @@
 			}
 		}
 	},
+	"certSource": {
+		"labelManagedDomain": "Covered by *.{apex}",
+		"labelDedicatedDns": "Dedicated cert (DNS-01)",
+		"labelDedicatedHttp": "Dedicated cert (HTTP-01)",
+		"labelInternal": "Internal cert",
+		"labelManualNamed": "Manual cert: {name}",
+		"labelManual": "Manual cert",
+		"tooltipManagedDomain": "This route is served by the wildcard certificate *.{apex} managed in SSL / Certificates. RFC 6125 rule: a single DNS label between the hostname and the apex (a direct subdomain).",
+		"tooltipDedicatedDns": "Certificate dedicated to this route, issued through the ACME DNS-01 challenge.",
+		"tooltipDedicatedHttp": "Certificate dedicated to this route, issued through the ACME HTTP-01 challenge.",
+		"tooltipInternal": "Certificate issued by Caddy's internal authority (self-signed). Typical of private hostnames (LAN, *.local) that do not qualify for a public cert.",
+		"tooltipManualNamed": "This route serves the manual certificate “{name}” imported in SSL / Certificates (no ACME).",
+		"tooltipManual": "This route serves a manual certificate imported in SSL / Certificates (no ACME)."
+	},
+	"wafCategory": {
+		"family": {
+			"requestAttack": "Request attacks",
+			"protocolBehaviour": "Protocol / behaviour",
+			"aggregator": "Score aggregators",
+			"dataLeak": "Data leak (response)",
+			"infrastructure": "CRS infrastructure"
+		},
+		"unknown": {
+			"label": "Unknown",
+			"description": "Category not recognised by the frontend."
+		},
+		"SQLi": {
+			"label": "SQL Injection",
+			"description": "CRS 942xxx — UNION SELECT, blind SQLi, malicious comments."
+		},
+		"XSS": {
+			"label": "Cross-site scripting",
+			"description": "CRS 941xxx — JS payloads, HTML vectors, encoding evasion."
+		},
+		"RCE": {
+			"label": "Remote Code Execution (shell)",
+			"description": "CRS 932xxx — shell command injection, eval."
+		},
+		"PHP": {
+			"label": "PHP injection",
+			"description": "CRS 933xxx — PHP code, dangerous functions, superglobal variables."
+		},
+		"JAVA": {
+			"label": "Java exploit",
+			"description": "CRS 944xxx — Java deserialization, JNDI (Log4Shell), dangerous classes."
+		},
+		"GENERIC": {
+			"label": "Generic app attack (Node / SSRF / template)",
+			"description": "CRS 934xxx — SSRF, template injection, Node.js patterns."
+		},
+		"LFI": {
+			"label": "Local File Inclusion",
+			"description": "CRS 930xxx — path traversal, /etc/passwd, config exfiltration."
+		},
+		"RFI": {
+			"label": "Remote File Inclusion",
+			"description": "CRS 931xxx — remote file inclusion via http://, ftp://, etc."
+		},
+		"METHOD": {
+			"label": "Method enforcement",
+			"description": "CRS 911xxx — disallowed HTTP verbs (TRACE, CONNECT, etc.)."
+		},
+		"PROTOCOL": {
+			"label": "Protocol enforcement",
+			"description": "CRS 920xxx — malformed requests, missing headers, invalid charset."
+		},
+		"PROTOCOL_ATK": {
+			"label": "Protocol attack",
+			"description": "CRS 921xxx — HTTP smuggling, request splitting."
+		},
+		"MULTIPART": {
+			"label": "Multipart attack",
+			"description": "CRS 922xxx — multipart parser exploitation."
+		},
+		"SCANNER": {
+			"label": "Scanner detection",
+			"description": "CRS 913xxx — scanning tools spotted through the User-Agent (sqlmap, nikto, nmap, etc.)."
+		},
+		"SESSION": {
+			"label": "Session fixation",
+			"description": "CRS 943xxx — attack patterns against sessions and cookies."
+		},
+		"ANOMALY_REQ": {
+			"label": "Anomaly score (request)",
+			"description": "CRS 949xxx — the inbound anomaly score aggregator; triggers the block once the global threshold is reached."
+		},
+		"ANOMALY_RESP": {
+			"label": "Anomaly score (response)",
+			"description": "CRS 959xxx — score aggregator on the upstream response."
+		},
+		"CORRELATION": {
+			"label": "Correlation",
+			"description": "CRS 980xxx — inbound / outbound correlation, meta-rules."
+		},
+		"DATA_LEAK": {
+			"label": "Data leak (generic)",
+			"description": "CRS 950xxx — generic information leak in the response (debug output, server headers, etc.)."
+		},
+		"DATA_LEAK_SQL": {
+			"label": "Data leak (SQL errors)",
+			"description": "CRS 951xxx — leaked SQL error messages (MySQL, PostgreSQL, MSSQL)."
+		},
+		"DATA_LEAK_JAVA": {
+			"label": "Data leak (Java stack)",
+			"description": "CRS 952xxx — Java stack traces leaked in the response."
+		},
+		"DATA_LEAK_PHP": {
+			"label": "Data leak (PHP errors)",
+			"description": "CRS 953xxx — leaked PHP warnings / fatal errors."
+		},
+		"DATA_LEAK_IIS": {
+			"label": "Data leak (IIS info)",
+			"description": "CRS 954xxx — IIS information leak (.NET, version, internal paths)."
+		},
+		"WEBSHELL": {
+			"label": "Web shell signature",
+			"description": "CRS 955xxx — web shell signatures in the response (c99, r57, b374k, etc.)."
+		},
+		"INIT": {
+			"label": "CRS init",
+			"description": "CRS 901xxx — initialises the tx.* variables and the paranoia level."
+		},
+		"COMMON_EXCEPT": {
+			"label": "False-positive bypass",
+			"description": "CRS 905xxx — common exceptions to avoid false positives."
+		},
+		"CUSTOM": {
+			"label": "Custom rules",
+			"description": "Arenet 120000–129999 — guided rules defined on the route."
+		},
+		"OTHER": {
+			"label": "Other Coraza rules",
+			"description": "Rules outside the standard CRS taxonomy (operator extensions, custom plugins)."
+		}
+	},
 	"waf": {
 		"headTitle": "WAF · Arenet",
 		"pageEyebrow": "Security · Web Application Firewall",
@@ -2474,10 +2667,26 @@
 			"legendBad": "upstream errors above 1%",
 			"legendNote": "Thickness is computed on the 60-second rolling average. The animation points in the dominant traffic direction — incoming requests towards the services.",
 			"actionSnapshotJSON": "Download topology snapshot (JSON)",
-			"snapshotFailed": "Snapshot download failed"
+			"snapshotFailed": "Snapshot download failed",
+			"noUpstream": "(no upstream)",
+			"moreUpstreams": "{head}, +{extra} more"
 		},
 		"disabled": {
 			"tooltip": "Disabled — not serving traffic"
+		},
+		"nodes": {
+			"expandAliases": "Expand the {count} aliases",
+			"collapseAliases": "Collapse the {count} aliases",
+			"wafDetect": "WAF · Detection mode",
+			"wafBlock": "WAF · Blocking mode",
+			"healthCheckWatched": "Health check configured · monitored",
+			"relativeLoad": "Relative load {pct}%",
+			"aliasIdle": "alias idle for 60 s"
+		},
+		"cluster": {
+			"noUpstream": "No upstream configured",
+			"allDown": "All upstreams are down",
+			"someDown": "{count} upstream(s) down"
 		}
 	},
 	"logs": {
@@ -2515,7 +2724,12 @@
 		"emptyNoEvents": "No events in the current window.",
 		"emptyNoMatch": "No events match the filters.",
 		"histogramHeader": "Activity timeline · 24h · 5m buckets",
-		"histogramAriaLabel": "Activity timeline histogram (24h, 5-minute buckets)"
+		"histogramAriaLabel": "Activity timeline histogram (24h, 5-minute buckets)",
+		"detailThrottle": "Rate-limit tier {tier} · blocked {seconds}s · user \"{user}\"",
+		"detailRenewal": "renewal",
+		"detailOcspRevoked": "OCSP revocation",
+		"countryNotAllowed": "country not allowed",
+		"countryDenied": "country denied"
 	},
 	"system": {
 		"title": "Host",
@@ -2570,12 +2784,30 @@
 		"body": "This account was created by an administrator, who knows its first password. Choose your own before going any further.",
 		"action": "Change my password"
 	},
+	"readOnlyBanner": {
+		"before": "",
+		"strong": "Read-only",
+		"middle": "mode — your account has the",
+		"after": " role. Ask an administrator for write access."
+	},
 	"observability": {
 		"latencyTitle": "Latency (ms)",
 		"latencySeriesTtfb": "server",
 		"latencySeriesTotal": "with transfer",
 		"latencyAria": "Server time and total time, in milliseconds",
 		"latencyHint": "The gap between the two lines is the response transfer: the server had finished, the visitor was still downloading. A gap in a line means that bucket held too few requests for the chosen quantile.",
-		"quantileAria": "Which quantile the latency lines report"
+		"quantileAria": "Which quantile the latency lines report",
+		"window30d": "30d",
+		"notFoundTitle": "Route not found",
+		"notFoundBefore": "The route",
+		"notFoundMiddle": "does not exist (any more). Go back to the",
+		"notFoundDashboardLink": "dashboard",
+		"notFoundOr": "or to the list of",
+		"notFoundRoutesLink": "routes",
+		"disabledTitle": "Metrics unavailable",
+		"disabledBody": "The observability subsystem could not start. The proxy keeps running; only the metrics history is missing."
+	},
+	"charts": {
+		"emptyPeriod": "No events in this period"
 	}
 }

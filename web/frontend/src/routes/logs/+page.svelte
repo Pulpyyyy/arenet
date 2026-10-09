@@ -321,7 +321,11 @@
 			source: 'throttle',
 			method: 'POST',
 			path: '/auth/login',
-			detail: `Rate-limit tier ${e.tier} · bloqué ${e.blockDurationSeconds}s · user "${e.attemptedUsername || '?'}"`,
+			detail: t('logs.detailThrottle', {
+				tier: e.tier,
+				seconds: e.blockDurationSeconds,
+				user: e.attemptedUsername || '?'
+			}),
 			srcIp: e.srcIp
 		};
 	}
@@ -373,7 +377,7 @@
 				const tail: string[] = [];
 				if (e.issuer) tail.push(e.issuer);
 				if (e.challenge) tail.push(e.challenge);
-				if (e.renewal) tail.push('renouvellement');
+				if (e.renewal) tail.push(t('logs.detailRenewal'));
 				return tail.length > 0
 					? `cert.obtained · ${tail.join(' · ')}`
 					: 'cert.obtained';
@@ -383,7 +387,7 @@
 					? `cert.failed · ${truncateError(e.error)}`
 					: 'cert.failed';
 			case 'cert_ocsp_revoked':
-				return 'cert.revoked · révocation OCSP';
+				return `cert.revoked · ${t('logs.detailOcspRevoked')}`;
 			default:
 				return 'cert.event';
 		}
@@ -451,9 +455,9 @@
 	function humanizeCountryBlockReason(reason: string): string {
 		switch (reason) {
 			case 'allow-miss':
-				return 'pays non autorisé';
+				return t('logs.countryNotAllowed');
 			case 'deny-match':
-				return 'pays interdit';
+				return t('logs.countryDenied');
 			default:
 				return reason;
 		}

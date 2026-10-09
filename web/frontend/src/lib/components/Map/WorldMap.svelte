@@ -54,6 +54,8 @@
 	import type { Feature, FeatureCollection, Geometry } from 'geojson';
 	import type { GeoEvent } from '$lib/api/types';
 	import { CATEGORY_COLORS } from './categoryColors';
+	import { t } from '$lib/i18n';
+	import { language } from '$lib/stores/language.svelte';
 	import {
 		ARC_TOTAL_MS,
 		ARC_TRAVEL_MS,
@@ -429,7 +431,7 @@
 <div class="worldmap" data-testid="worldmap-container">
 	{#if loadError}
 		<div class="worldmap__error" role="alert">
-			Carte indisponible: {loadError}
+			{language.current && t('map.worldMapUnavailable', { error: loadError ?? '' })}
 		</div>
 	{/if}
 	<svg
@@ -438,9 +440,10 @@
 		preserveAspectRatio="xMidYMid meet"
 		class="worldmap__svg"
 		role="img"
-		aria-label={city || country
-			? `Carte du monde centrée sur ${city || country}`
-			: 'Carte du monde'}
+		aria-label={language.current &&
+			(city || country
+				? t('map.worldMapAriaCentred', { place: city || country || '' })
+				: t('map.worldMapAria'))}
 	>
 		<!-- Ocean background — a single rect under the land. -->
 		<rect

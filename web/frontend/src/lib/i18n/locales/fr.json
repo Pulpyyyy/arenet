@@ -27,6 +27,16 @@
 		"hidePassword": "Masquer le mot de passe",
 		"firstTimePrompt": "Première connexion ?",
 		"createAdminLink": "Créer le compte administrateur",
+		"lock": {
+			"title": "Session verrouillée.",
+			"signedInAs": "Connecté en tant que",
+			"viaSso": "via SSO.",
+			"ssoPrompt": "Re-authentifie-toi pour reprendre.",
+			"ssoButton": "Se reconnecter avec SSO",
+			"passwordPrompt": "Entre ton mot de passe pour continuer.",
+			"wrongPassword": "Mot de passe incorrect.",
+			"unlock": "Déverrouiller"
+		},
 		"errors": {
 			"identifierRequired": "L'identifiant est requis.",
 			"passwordRequired": "Le mot de passe est requis.",
@@ -459,6 +469,9 @@
 			"healthCheckHeaderHostError": "Renseignez le Host dans le champ ci-dessus, pas comme en-tête.",
 			"healthCheckHelper": "Laisser un champ vide pour utiliser la valeur par défaut (GET / 30s / 5s / passes=1 / fails=1). URI requis.",
 			"upstreamPrivateIPHint": "IP privée + https détectés — le certificat upstream est probablement auto-signé. Pensez à « Options avancées TLS » si la connexion échoue.",
+			"upstreamPathWarningBefore": "Le chemin",
+			"upstreamPathWarningAfter": "sera ignoré — Caddy proxyfie uniquement vers",
+			"savingOverlay": "Application des modifications Caddy…",
 			"upstreamTestButton": "Tester",
 			"upstreamTestRunning": "Test en cours…",
 			"upstreamTestConnectionFailed": "connexion échouée",
@@ -478,6 +491,9 @@
 			"wafExcludeRulesWAFHistory": "l'historique WAF",
 			"wafExcludeRulesSecurityPage": "Sécurité",
 			"wafExcludeRulesCRSDisabledWarning": "⚠️ Le CRS est désactivé via le toggle ci-dessus — les exclusions sont silencieuses jusqu'à réactivation.",
+			"wafExcludeRulesErrNotInteger": "\"{token}\" n'est pas un entier valide",
+			"wafExcludeRulesErrNotCrsId": "{n} n'est pas un ID CRS valide (doit être un entier 6 chiffres 100000..999999)",
+			"wafExcludeRulesErrReserved": "{n} est dans la plage réservée Arenet (100000..199999), choisissez un ID >= 200000",
 			"sectionEssentials": "Essentiel",
 			"sectionTLS": "TLS",
 			"sectionAuth": "Authentification",
@@ -551,6 +567,9 @@
 			"wafExcludeTagsLabelFull": "Tags OWASP à exclure",
 			"wafExcludeTagsLabelHint": "(tags CRS séparés par virgule)",
 			"wafExcludeTagsHelper": "Désactive toutes les règles CRS portant le tag listé sur cette route. Plus résilient qu'une liste d'IDs : une mise à jour CRS qui ajoute des règles à ce tag hérite automatiquement de l'exclusion. Tag = chaîne sans espace ni virgule à l'intérieur (e.g. paranoia-level/3). L'autocomplétion propose 24 tags courants ; n'importe quel tag CRS valide est accepté.",
+			"wafExcludeTagsErrTooMany": "Trop de tags ({count}) — max {max}",
+			"wafExcludeTagsErrTooLong": "\"{token}…\" dépasse {max} caractères",
+			"wafExcludeTagsErrInvalidChar": "\"{token}\" contient un caractère invalide pour SecAction (espace, virgule ou guillemet)",
 			"rateLimitSection": "Limitation de débit",
 			"rateLimitToggleLabelFull": "Activer la limitation de débit (protection brute-force, abus API)",
 			"rateLimitMaxRequestsLabel": "Nombre maximum de requêtes",
@@ -685,6 +704,7 @@
 			"countryBlockListLabel": "Liste de pays",
 			"countryBlockStatusCodeLabel": "Code de statut au blocage",
 			"countryBlockStatusDefault": "Défaut (ARENET_COUNTRY_BLOCK_STATUS)",
+			"countryBlockOffHint": "Aucun gate par pays. Choisissez Allow-list ou Deny-list pour activer.",
 			"healthCheckLiveLabel": "État actuel :",
 			"healthCheckLiveFailingHint": "La sonde échoue. Vérifie l'URI, le code HTTP attendu et le corps attendu ci-dessous — une sonde qui ne correspond pas à ce que répond le backend met la route hors service, alors même que le backend fonctionne.",
 			"healthCheckLive": {
@@ -1004,7 +1024,22 @@
 		"wsLive": "Live",
 		"wsConnecting": "Connexion…",
 		"wsReconnecting": "Reconnexion…",
-		"wsOffline": "Hors ligne"
+		"wsOffline": "Hors ligne",
+		"legendTitle": "Légende des catégories",
+		"legendAria": "Légende des catégories d'événements",
+		"legendNormal": "Trafic légitime — requête réussie",
+		"legendThrottle": "Throttle — rate-limit (HTTP 429)",
+		"legendWaf": "WAF — bloqué par Coraza (HTTP 403)",
+		"legendCrowdsec": "CrowdSec — IP en réputation négative (HTTP 403)",
+		"legendAuth": "Auth — échec d’authentification (HTTP 401/403)",
+		"legendCountryBlock": "Pays bloqué — règle opérateur (HTTP 403/451/444)",
+		"legendComingSoon": "à venir",
+		"legendNote": "Chaque arc anime le trajet de la source vers Arenet sur ~2 s, puis s'efface en ~1,5 s. La couleur indique la catégorie de l'événement ; le trafic interne (LAN/RFC1918) n'est pas tracé sur la carte mondiale (compteur disponible en haut à droite).",
+		"licenseGeoip": "Données GeoIP :",
+		"licenseMap": "Carte :",
+		"worldMapUnavailable": "Carte indisponible : {error}",
+		"worldMapAria": "Carte du monde",
+		"worldMapAriaCentred": "Carte du monde centrée sur {place}"
 	},
 	"pageTitles": {
 		"apiDocs": "Documentation de l'API",
@@ -1201,6 +1236,9 @@
 		"actionRetry": "Réessayer",
 		"networkError": "Erreur réseau",
 		"loadFailed": "Échec du chargement",
+		"loadEventsFailed": "Échec du chargement des événements",
+		"loadChannelsFailed": "Échec du chargement des canaux",
+		"loadRulesFailed": "Échec du chargement des règles",
 		"channels": {
 			"addBtn": "Ajouter un canal",
 			"loadErr": "⚠ Échec du chargement des canaux : {err}",
@@ -1642,6 +1680,7 @@
 		"labelEnable": "Activer le login OIDC SSO",
 		"labelProvider": "Fournisseur",
 		"providerGeneric": "— Générique (défaut) —",
+		"providerGenericLabel": "OIDC générique",
 		"providerHelper": "Choisis ton fournisseur OIDC pour afficher son logo sur le bouton de connexion. Laisse vide pour utiliser le logo générique. Le choix n'influence PAS la logique d'authentification — c'est purement visuel.",
 		"labelIssuer": "Issuer URL",
 		"issuerHelper": "URL d'émetteur OIDC (champ issuer du discovery document). NE PAS inclure le suffixe /.well-known/openid-configuration — Arenet l'ajoute automatiquement (si tu colles l'URL complète, le suffixe est strippé silencieusement côté serveur). Authentik : /application/o/<slug>/ ; Keycloak : /realms/<realm> ; Authelia : la racine du déploiement.",
@@ -1919,6 +1958,8 @@
 		"emptyLiveAll": "Aucune décision active selon LAPI. Le bouncer surveille mais aucune source n'est actuellement bloquée. (CAPI sync tourne toutes les ~2–15 min ; un bouncer fraîchement démarré peut prendre quelques minutes à recevoir la blocklist communauté.)",
 		"emptyLiveFiltered": "Aucune décision dans cette catégorie ({total} au total — voir l'onglet {tabAll}).",
 		"tabAll": "Toutes",
+		"tabLocal": "Locales",
+		"tabManual": "Manuelles",
 		"tabActiveOnly": "Actives uniquement",
 		"btnBanIp": "+ Bannir une IP",
 		"scenariosSubtitle": "Scenarios CrowdSec ayant fired sur les dernières",
@@ -1927,7 +1968,19 @@
 		"automationNotConfiguredFooter": "indépendamment — ce coupling concerne uniquement le tab",
 		"scenariosBtnRetry": "Réessayer",
 		"scenariosEmptyWindow": "Aucune activité scenario sur {hours}h.",
-		"scenariosEmptyHelp": "Soit aucune attaque détectée, soit Arenet logs pas encore"
+		"scenariosEmptyHelp": "Soit aucune attaque détectée, soit Arenet logs pas encore",
+		"autoBadgeTitle": "Classé automatiquement par Arenet",
+		"liveSubtitleBefore": "Decisions actives",
+		"liveSubtitleStrong": "maintenant",
+		"liveSubtitleAfter": "selon LAPI (live pass-through, polling 30s).",
+		"scopeAll": "tous",
+		"loading": "chargement…",
+		"scenariosCount": "{alerts} alert{alertsPlural} sur {scenarios} scenario{scenariosPlural}",
+		"hubLink": "Voir sur le CrowdSec hub ↗",
+		"hubNone": "Scenario non-namespaced (manual ou local) — pas de page hub.",
+		"copyButton": "Copier",
+		"cscliHintBefore": "Pour install / modify / disable ce scenario, utilise",
+		"cscliHintAfter": "sur le host CrowdSec — pas modifiable depuis l'UI Arenet."
 	},
 	"createServiceAccount": {
 		"titleReveal": "Token API généré",
@@ -2245,6 +2298,11 @@
 		"staleBadgeText": "⚠ Échec depuis {ago}",
 		"expiryExpired": "expiré",
 		"expiryDays": "{days} jour{plural}",
+		"statusValid": "VALIDE",
+		"statusRenewalPending": "RENOUV. AUTO",
+		"statusExpired": "EXPIRÉ",
+		"statusFailed": "ÉCHEC",
+		"sourceSpecific": "spécifique",
 		"policiesCardTitle": "Politiques wildcard par apex",
 		"policiesDeclaredCounter": "{count} déclarée{plural}",
 		"policiesEmpty": "Aucune",
@@ -2407,6 +2465,141 @@
 			}
 		}
 	},
+	"certSource": {
+		"labelManagedDomain": "Couvert par *.{apex}",
+		"labelDedicatedDns": "Cert dédié (DNS-01)",
+		"labelDedicatedHttp": "Cert dédié (HTTP-01)",
+		"labelInternal": "Cert interne",
+		"labelManualNamed": "Cert manuel : {name}",
+		"labelManual": "Cert manuel",
+		"tooltipManagedDomain": "Cette route est servie par le certificat wildcard *.{apex} géré dans SSL / Certificates. Règle RFC 6125 : un seul label DNS entre le hostname et l'apex (un sous-domaine direct).",
+		"tooltipDedicatedDns": "Certificat dédié à cette route, émis via le challenge ACME DNS-01.",
+		"tooltipDedicatedHttp": "Certificat dédié à cette route, émis via le challenge ACME HTTP-01.",
+		"tooltipInternal": "Certificat émis par l'autorité interne de Caddy (auto-signé). Typique des hostnames privés (LAN, *.local) qui ne qualifient pas pour un cert public.",
+		"tooltipManualNamed": "Cette route sert le certificat manuel « {name} » importé dans SSL / Certificates (pas d'ACME).",
+		"tooltipManual": "Cette route sert un certificat manuel importé dans SSL / Certificates (pas d'ACME)."
+	},
+	"wafCategory": {
+		"family": {
+			"requestAttack": "Attaques sur la requête",
+			"protocolBehaviour": "Protocole / comportement",
+			"aggregator": "Agrégateurs de score",
+			"dataLeak": "Fuite de données (réponse)",
+			"infrastructure": "Infrastructure CRS"
+		},
+		"unknown": {
+			"label": "Inconnu",
+			"description": "Catégorie non reconnue par le frontend."
+		},
+		"SQLi": {
+			"label": "SQL Injection",
+			"description": "CRS 942xxx — UNION SELECT, blind SQLi, malicious comments."
+		},
+		"XSS": {
+			"label": "Cross-site scripting",
+			"description": "CRS 941xxx — payloads JS, vecteurs HTML, évasion par encodage."
+		},
+		"RCE": {
+			"label": "Remote Code Execution (shell)",
+			"description": "CRS 932xxx — injection de commandes shell, eval."
+		},
+		"PHP": {
+			"label": "PHP injection",
+			"description": "CRS 933xxx — code PHP, fonctions dangereuses, variables superglobales."
+		},
+		"JAVA": {
+			"label": "Java exploit",
+			"description": "CRS 944xxx — désérialisation Java, JNDI (Log4Shell), classes dangereuses."
+		},
+		"GENERIC": {
+			"label": "Generic app attack (Node / SSRF / template)",
+			"description": "CRS 934xxx — SSRF, injection de template, Node.js patterns."
+		},
+		"LFI": {
+			"label": "Local File Inclusion",
+			"description": "CRS 930xxx — path traversal, /etc/passwd, exfil de config."
+		},
+		"RFI": {
+			"label": "Remote File Inclusion",
+			"description": "CRS 931xxx — inclusion de fichier distant via http://, ftp://, etc."
+		},
+		"METHOD": {
+			"label": "Method enforcement",
+			"description": "CRS 911xxx — verbes HTTP non autorisés (TRACE, CONNECT, etc.)."
+		},
+		"PROTOCOL": {
+			"label": "Protocol enforcement",
+			"description": "CRS 920xxx — requêtes mal formées, headers absents, charset invalide."
+		},
+		"PROTOCOL_ATK": {
+			"label": "Protocol attack",
+			"description": "CRS 921xxx — HTTP smuggling, request splitting."
+		},
+		"MULTIPART": {
+			"label": "Multipart attack",
+			"description": "CRS 922xxx — exploitation du parseur multipart."
+		},
+		"SCANNER": {
+			"label": "Scanner detection",
+			"description": "CRS 913xxx — détection d'outils de scan (sqlmap, nikto, nmap, etc.) via User-Agent."
+		},
+		"SESSION": {
+			"label": "Session fixation",
+			"description": "CRS 943xxx — patterns d'attaque sur les sessions et cookies."
+		},
+		"ANOMALY_REQ": {
+			"label": "Anomaly score (request)",
+			"description": "CRS 949xxx — l'agrégateur de score d'anomalie inbound, déclenche le block quand le seuil global est atteint."
+		},
+		"ANOMALY_RESP": {
+			"label": "Anomaly score (response)",
+			"description": "CRS 959xxx — agrégateur de score sur la réponse upstream."
+		},
+		"CORRELATION": {
+			"label": "Correlation",
+			"description": "CRS 980xxx — corrélation inbound / outbound, méta-règles."
+		},
+		"DATA_LEAK": {
+			"label": "Data leak (generic)",
+			"description": "CRS 950xxx — fuite d'information générique dans la réponse (debug, headers serveur, etc.)."
+		},
+		"DATA_LEAK_SQL": {
+			"label": "Data leak (SQL errors)",
+			"description": "CRS 951xxx — messages d'erreur SQL fuités (MySQL, PostgreSQL, MSSQL)."
+		},
+		"DATA_LEAK_JAVA": {
+			"label": "Data leak (Java stack)",
+			"description": "CRS 952xxx — stack traces Java fuitées dans la réponse."
+		},
+		"DATA_LEAK_PHP": {
+			"label": "Data leak (PHP errors)",
+			"description": "CRS 953xxx — warnings / fatal errors PHP fuités."
+		},
+		"DATA_LEAK_IIS": {
+			"label": "Data leak (IIS info)",
+			"description": "CRS 954xxx — fuite d'info IIS (.NET, version, paths internes)."
+		},
+		"WEBSHELL": {
+			"label": "Web shell signature",
+			"description": "CRS 955xxx — signatures de webshells dans la réponse (c99, r57, b374k, etc.)."
+		},
+		"INIT": {
+			"label": "CRS init",
+			"description": "CRS 901xxx — initialisation des variables tx.*, paranoia level."
+		},
+		"COMMON_EXCEPT": {
+			"label": "False-positive bypass",
+			"description": "CRS 905xxx — exceptions communes pour éviter les false-positives."
+		},
+		"CUSTOM": {
+			"label": "Règles personnalisées",
+			"description": "Arenet 120000–129999 — règles guidées définies sur la route."
+		},
+		"OTHER": {
+			"label": "Autres règles Coraza",
+			"description": "Règles hors taxonomie CRS standard (extensions opérateur, plugins custom)."
+		}
+	},
 	"waf": {
 		"headTitle": "WAF · Arenet",
 		"pageEyebrow": "Sécurité · Web Application Firewall",
@@ -2474,10 +2667,26 @@
 			"legendBad": "erreurs upstream au-dessus de 1 %",
 			"legendNote": "L'épaisseur est calculée sur la moyenne glissante des 60 dernières secondes. L'animation pointe dans le sens du trafic dominant — requêtes entrantes vers les services.",
 			"actionSnapshotJSON": "Télécharger le snapshot topology (JSON)",
-			"snapshotFailed": "Échec du téléchargement du snapshot"
+			"snapshotFailed": "Échec du téléchargement du snapshot",
+			"noUpstream": "(aucun upstream)",
+			"moreUpstreams": "{head}, +{extra} autres"
 		},
 		"disabled": {
 			"tooltip": "Désactivée — ne sert aucun trafic"
+		},
+		"nodes": {
+			"expandAliases": "Déplier les {count} alias",
+			"collapseAliases": "Replier les {count} alias",
+			"wafDetect": "WAF · Mode détection",
+			"wafBlock": "WAF · Mode blocage",
+			"healthCheckWatched": "Health check configuré · surveillé",
+			"relativeLoad": "Charge relative {pct}%",
+			"aliasIdle": "alias inactive depuis 60 s"
+		},
+		"cluster": {
+			"noUpstream": "Aucun upstream configuré",
+			"allDown": "Tous les upstreams sont indisponibles",
+			"someDown": "{count} upstream(s) hors-service"
 		}
 	},
 	"logs": {
@@ -2515,7 +2724,12 @@
 		"emptyNoEvents": "Aucun événement dans la fenêtre actuelle.",
 		"emptyNoMatch": "Aucun événement ne correspond aux filtres.",
 		"histogramHeader": "Chronologie d'activité · 24h · buckets 5 min",
-		"histogramAriaLabel": "Histogramme chronologique d'activité (24h, buckets 5 minutes)"
+		"histogramAriaLabel": "Histogramme chronologique d'activité (24h, buckets 5 minutes)",
+		"detailThrottle": "Rate-limit tier {tier} · bloqué {seconds}s · user \"{user}\"",
+		"detailRenewal": "renouvellement",
+		"detailOcspRevoked": "révocation OCSP",
+		"countryNotAllowed": "pays non autorisé",
+		"countryDenied": "pays interdit"
 	},
 	"system": {
 		"title": "Hôte",
@@ -2570,12 +2784,30 @@
 		"body": "Ce compte a été créé par un administrateur, qui connaît son premier mot de passe. Choisis le tien avant d'aller plus loin.",
 		"action": "Changer mon mot de passe"
 	},
+	"readOnlyBanner": {
+		"before": "Mode",
+		"strong": "lecture seule",
+		"middle": "— votre compte a le rôle",
+		"after": ". Contactez un administrateur pour obtenir les droits d'écriture."
+	},
 	"observability": {
 		"latencyTitle": "Latence (ms)",
 		"latencySeriesTtfb": "serveur",
 		"latencySeriesTotal": "avec transfert",
 		"latencyAria": "Temps serveur et temps total, en millisecondes",
 		"latencyHint": "L’écart entre les deux courbes est le transfert de la réponse : le serveur avait fini, le visiteur téléchargeait encore. Une coupure dans une courbe signifie que ce point portait trop peu de requêtes pour le quantile choisi.",
-		"quantileAria": "Quantile rapporté par les courbes de latence"
+		"quantileAria": "Quantile rapporté par les courbes de latence",
+		"window30d": "30j",
+		"notFoundTitle": "Route introuvable",
+		"notFoundBefore": "La route",
+		"notFoundMiddle": "n'existe pas (ou plus). Retournez au",
+		"notFoundDashboardLink": "dashboard",
+		"notFoundOr": "ou à la liste des",
+		"notFoundRoutesLink": "routes",
+		"disabledTitle": "Métriques indisponibles",
+		"disabledBody": "Le sous-système d'observabilité n'a pas pu démarrer. Le proxy continue de fonctionner ; seul l'historique des métriques est manquant."
+	},
+	"charts": {
+		"emptyPeriod": "Aucun événement sur cette période"
 	}
 }

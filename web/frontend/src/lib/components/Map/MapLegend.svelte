@@ -27,7 +27,8 @@
   Each row's color sources from CATEGORY_COLORS in
   categoryColors.ts (single source of truth) — adding a
   new category in the future is a one-file change there
-  + a one-line addition to LEGEND_ROWS below.
+  + a one-line addition to LEGEND_ROWS below + its label
+  under `map.legend*` in both locale files.
 
   Step V.1 (commits f657a11 / 09ea2c1 / b778424) ships
   the backend pipeline for the "normal" category: when an
@@ -47,10 +48,21 @@
 <script lang="ts">
 	import { CATEGORY_COLORS } from './categoryColors';
 	import type { GeoEventCategory } from '$lib/api/types';
+	import { t } from '$lib/i18n';
+	import { language } from '$lib/stores/language.svelte';
+
+	// Reading language.current makes every label re-render on a
+	// language switch.
+	function tl(key: string): string {
+		void language.current;
+		return t(key);
+	}
 
 	interface LegendRow {
 		category: GeoEventCategory;
-		label: string;
+		// i18n key, resolved at render time so the row follows the
+		// active language.
+		labelKey: string;
 		// Reserved for future categories that ship the legend
 		// row before the backend emit path lands. V.1.4
 		// cleared this flag from the "normal" row since
@@ -63,20 +75,17 @@
 	// substitute category + label since the map's color
 	// taxonomy is per-category, not per-traffic-tier.
 	const LEGEND_ROWS: readonly LegendRow[] = [
-		{ category: 'normal', label: 'Trafic légitime — requête réussie' },
-		{ category: 'throttle', label: 'Throttle — rate-limit (HTTP 429)' },
-		{ category: 'waf', label: 'WAF — bloqué par Coraza (HTTP 403)' },
-		{ category: 'crowdsec', label: 'CrowdSec — IP en réputation négative (HTTP 403)' },
-		{ category: 'auth', label: 'Auth — échec d’authentification (HTTP 401/403)' },
+		{ category: 'normal', labelKey: 'map.legendNormal' },
+		{ category: 'throttle', labelKey: 'map.legendThrottle' },
+		{ category: 'waf', labelKey: 'map.legendWaf' },
+		{ category: 'crowdsec', labelKey: 'map.legendCrowdsec' },
+		{ category: 'auth', labelKey: 'map.legendAuth' },
 		// Step W.5 — 6th category. Gray slate to signal
 		// "policy enforcement, not threat" per spec §D6.
 		// Status code is operator-configurable (403 default,
 		// 451 / 444 supported) — the label lists the
 		// canonical set rather than picking one.
-		{
-			category: 'country_block',
-			label: 'Pays bloqué — règle opérateur (HTTP 403/451/444)'
-		}
+		{ category: 'country_block', labelKey: 'map.legendCountryBlock' }
 	];
 
 	// Default expanded so a first-time visitor sees the
@@ -94,7 +103,7 @@
 	class="map-legend panel"
 	class:map-legend--collapsed={!expanded}
 	data-testid="map-legend"
-	aria-label="Légende des catégories d'événements"
+	aria-label={tl('map.legendAria')}
 >
 	<header class="map-legend__header">
 		<button
@@ -105,7 +114,7 @@
 			aria-controls="map-legend-body"
 			data-testid="map-legend-toggle"
 		>
-			<h3 class="map-legend__title">Légende des catégories</h3>
+			<h3 class="map-legend__title">{tl('map.legendTitle')}</h3>
 			<span class="map-legend__chevron" aria-hidden="true">{expanded ? '▾' : '▴'}</span>
 		</button>
 	</header>
@@ -130,19 +139,14 @@
 						<circle cx="46" cy="4" r="2" fill="currentColor" />
 					</svg>
 					<span class="legend-label">
-						{row.label}{#if row.comingSoon}
-							<em class="legend-coming-soon"> · à venir</em>
+						{tl(row.labelKey)}{#if row.comingSoon}
+							<em class="legend-coming-soon"> · {tl('map.legendComingSoon')}</em>
 						{/if}
 					</span>
 				</li>
 			{/each}
 		</ul>
-		<p class="legend-note">
-			Chaque arc anime le trajet de la source vers Arenet sur ~2 s, puis
-			s'efface en ~1,5 s. La couleur indique la catégorie de l'événement ;
-			le trafic interne (LAN/RFC1918) n'est pas tracé sur la carte mondiale
-			(compteur disponible en haut à droite).
-		</p>
+		<p class="legend-note">{tl('map.legendNote')}</p>
 	{/if}
 </aside>
 

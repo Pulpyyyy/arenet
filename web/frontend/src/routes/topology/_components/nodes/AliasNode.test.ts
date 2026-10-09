@@ -140,15 +140,15 @@ describe('AliasNode', () => {
 		expect(title).toContain('1.235 req/s windowed');
 		expect(title).toContain('p99 42 ms');
 		expect(title).toContain('0.50% 5xx');
-		expect(title).not.toContain('inactive');
+		expect(title).not.toContain('idle');
 	});
 
-	it('appends "alias inactive depuis 60 s" to the tooltip on idle', () => {
+	it('appends "alias idle for 60 s" to the tooltip on idle', () => {
 		const { container } = render(AliasNode, {
 			props: nodeProps(makeData({ host: 'idle.example.com', reqPerSec: 0, isIdle: true }))
 		});
 		const meta = container.querySelector('.meta');
-		expect(meta?.getAttribute('title') ?? '').toContain('alias inactive depuis 60 s');
+		expect(meta?.getAttribute('title') ?? '').toContain('alias idle for 60 s');
 	});
 
 	it('host element carries a title attribute equal to the host (for ellipsis tooltip)', () => {

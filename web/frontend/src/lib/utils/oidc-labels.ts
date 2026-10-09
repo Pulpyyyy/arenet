@@ -13,18 +13,21 @@
 // still sees their input rather than a generic placeholder.
 
 import type { OIDCProviderKind } from '$lib/api/types';
+import { t } from '$lib/i18n';
 
+// Brand names stay as-is in every language; only the generic
+// label is translated (resolved per call so it follows the
+// active language).
 const KIND_LABELS: Record<string, string> = {
 	authentik: 'GoAuthentik',
 	keycloak: 'Keycloak',
-	authelia: 'Authelia',
-	generic: 'OIDC générique'
+	authelia: 'Authelia'
 };
 
 export function oidcProviderLabel(kind: OIDCProviderKind | string | undefined): string {
 	const k = (kind || '').toLowerCase();
 	if (k in KIND_LABELS) return KIND_LABELS[k];
-	if (!k) return 'OIDC générique';
+	if (!k || k === 'generic') return t('oidcSettings.providerGenericLabel');
 	// Title-case echo for unknown kinds.
 	return k.charAt(0).toUpperCase() + k.slice(1);
 }

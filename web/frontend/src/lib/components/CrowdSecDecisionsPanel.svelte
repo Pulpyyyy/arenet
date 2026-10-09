@@ -424,14 +424,15 @@
 	// $derived. Each label embeds the count; when a tab's
 	// count is zero, the tab still renders (operator can
 	// click to confirm "yes, 0 matches" without thinking
-	// the UI is broken).
+	// the UI is broken). t() reads language.current, so the
+	// labels also follow a language switch.
 	const liveOriginTabDescriptors = $derived<
 		ReadonlyArray<{ id: LiveOriginTab; label: string; testId: string }>
 	>([
-		{ id: 'all', label: `Toutes (${liveCountAll})`, testId: 'live-tab-all' },
-		{ id: 'local', label: `Locales (${liveCountLocal})`, testId: 'live-tab-local' },
+		{ id: 'all', label: `${t('crowdsecDecisions.tabAll')} (${liveCountAll})`, testId: 'live-tab-all' },
+		{ id: 'local', label: `${t('crowdsecDecisions.tabLocal')} (${liveCountLocal})`, testId: 'live-tab-local' },
 		{ id: 'capi', label: `CAPI (${liveCountCAPI})`, testId: 'live-tab-capi' },
-		{ id: 'manual', label: `Manuelles (${liveCountManual})`, testId: 'live-tab-manual' }
+		{ id: 'manual', label: `${t('crowdsecDecisions.tabManual')} (${liveCountManual})`, testId: 'live-tab-manual' }
 	]);
 
 	// Filtered view derived from liveDecisions + active tab.
@@ -609,7 +610,7 @@
 									<td class="mono">
 										{shortScenario(d.scenario)}
 										{#if isArenetAutoScenario(d.scenario)}
-											<span class="badge auto-badge" title="Auto-classified by Arenet (Step P)">
+											<span class="badge auto-badge" title={language.current && t('crowdsecDecisions.autoBadgeTitle')}>
 												auto
 											</span>
 										{/if}
@@ -630,8 +631,9 @@
 	{/if}
 {:else if activeTab === 'live'}
 	<p class="tab-subtitle">
-		Decisions actives <strong>maintenant</strong> selon LAPI
-		(live pass-through, polling 30s).
+		{language.current && t('crowdsecDecisions.liveSubtitleBefore')}
+		<strong>{language.current && t('crowdsecDecisions.liveSubtitleStrong')}</strong>
+		{language.current && t('crowdsecDecisions.liveSubtitleAfter')}
 	</p>
 
 	{#if liveErrorKind === 'not_configured'}
@@ -665,7 +667,7 @@
 				<label class="filter-label">
 					Scope
 					<select bind:value={liveScope} onchange={onLiveFilterChange} data-testid="live-scope-filter">
-						<option value="">tous</option>
+						<option value="">{language.current && t('crowdsecDecisions.scopeAll')}</option>
 						<option value="ip">ip</option>
 						<option value="range">range</option>
 						<option value="country">country</option>
@@ -675,7 +677,7 @@
 			</div>
 			<div class="meta">
 				{#if liveLoading && liveDecisions.length === 0}
-					<Spinner size="sm" /> chargement…
+					<Spinner size="sm" /> {language.current && t('crowdsecDecisions.loading')}
 				{:else}
 					{liveDecisionsFiltered.length}
 					{#if liveDecisionsFiltered.length !== liveMeta.total}
@@ -790,7 +792,7 @@
 										{:else}
 											{shortScenario(d.scenario)}
 											{#if isArenetAutoScenario(d.scenario)}
-												<span class="badge auto-badge" title="Auto-classified by Arenet (Step P)">
+												<span class="badge auto-badge" title={language.current && t('crowdsecDecisions.autoBadgeTitle')}>
 													auto
 												</span>
 											{/if}
@@ -834,10 +836,15 @@
 		<div class="filter-row">
 			<div class="meta">
 				{#if scenariosLoading}
-					<Spinner size="sm" /> chargement…
+					<Spinner size="sm" /> {language.current && t('crowdsecDecisions.loading')}
 				{:else}
-					{scenariosMeta.totalAlerts} alert{scenariosMeta.totalAlerts > 1 ? 's' : ''}
-					sur {scenarios.length} scenario{scenarios.length > 1 ? 's' : ''}
+					{language.current &&
+						t('crowdsecDecisions.scenariosCount', {
+							alerts: scenariosMeta.totalAlerts,
+							alertsPlural: scenariosMeta.totalAlerts > 1 ? 's' : '',
+							scenarios: scenarios.length,
+							scenariosPlural: scenarios.length > 1 ? 's' : ''
+						})}
 					{#if scenariosLastFetched !== null}
 						<span class="muted">· fetched {lastFetchedLabel(scenariosLastFetched)}</span>
 					{/if}
@@ -974,11 +981,11 @@
 						class="link"
 						data-testid="modal-hub-link"
 					>
-						Voir sur le CrowdSec hub ↗
+						{language.current && t('crowdsecDecisions.hubLink')}
 					</a>
 				{:else}
 					<p class="muted">
-						Scenario non-namespaced (manual ou local) — pas de page hub.
+						{language.current && t('crowdsecDecisions.hubNone')}
 					</p>
 				{/if}
 			</div>
@@ -992,13 +999,13 @@
 						class="copy-btn"
 						onclick={() => copyToClipboard(cscliCommand(ms.name))}
 					>
-						Copier
+						{language.current && t('crowdsecDecisions.copyButton')}
 					</button>
 				</div>
 				<p class="muted">
-					Pour install / modify / disable ce scenario, utilise
-					<code>cscli</code> sur le host CrowdSec — pas modifiable
-					depuis l'UI Arenet.
+					{language.current && t('crowdsecDecisions.cscliHintBefore')}
+					<code>cscli</code>
+					{language.current && t('crowdsecDecisions.cscliHintAfter')}
 				</p>
 			</div>
 

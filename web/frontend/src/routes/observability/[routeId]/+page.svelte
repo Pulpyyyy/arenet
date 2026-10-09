@@ -221,23 +221,22 @@ Viewer-accessible — relies on the API gate (AC #17).
 {:else if routeNotFound}
 	<Card>
 		<div class="empty-wrap">
-			<h3>Route introuvable</h3>
+			<h3>{tl('observability.notFoundTitle')}</h3>
 			<p>
-				La route <code>{routeId}</code> n'existe pas (ou plus). Retournez au
-				<a href="/dashboard">dashboard</a> ou à la liste des
-				<a href="/routes">routes</a>.
+				{tl('observability.notFoundBefore')}
+				<code>{routeId}</code>
+				{tl('observability.notFoundMiddle')}
+				<a href="/dashboard">{tl('observability.notFoundDashboardLink')}</a>
+				{tl('observability.notFoundOr')}
+				<a href="/routes">{tl('observability.notFoundRoutesLink')}</a>.
 			</p>
 		</div>
 	</Card>
 {:else if disabled}
 	<Card>
 		<div class="empty-wrap">
-			<h3>Métriques indisponibles</h3>
-			<p>
-				Le sous-système d'observabilité n'a pas pu démarrer. Le proxy
-				continue de fonctionner ; seule l'historique des métriques est
-				manquant.
-			</p>
+			<h3>{tl('observability.disabledTitle')}</h3>
+			<p>{tl('observability.disabledBody')}</p>
 		</div>
 	</Card>
 {:else}
@@ -251,7 +250,7 @@ Viewer-accessible — relies on the API gate (AC #17).
 		<button
 			type="button"
 			class:active={window === '30d'}
-			onclick={() => switchWindow('30d')}>30j</button
+			onclick={() => switchWindow('30d')}>{tl('observability.window30d')}</button
 		>
 	</div>
 

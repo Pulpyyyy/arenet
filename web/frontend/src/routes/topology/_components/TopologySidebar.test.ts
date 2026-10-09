@@ -104,7 +104,7 @@ describe('TopologySidebar — Top flows badge', () => {
 
 	it('says so plainly when a route has no upstream', () => {
 		render(TopologySidebar, { routes: [route({ upstreams: [] })] });
-		expect(screen.getByText(/aucun upstream/i)).toBeInTheDocument();
+		expect(screen.getByText(/no upstream/i)).toBeInTheDocument();
 	});
 });
 
