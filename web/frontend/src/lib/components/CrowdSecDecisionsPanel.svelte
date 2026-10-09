@@ -21,6 +21,8 @@
 	import Tabs from '$lib/components/Tabs.svelte';
 	import BanIPModal from '$lib/components/BanIPModal.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import Modal from '$lib/components/Modal.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import {
 		deleteCrowdSecDecision,
 		fetchDecisions,
@@ -314,27 +316,11 @@
 	function openScenarioModal(s: ScenarioAggregate): void {
 		modalScenario = s;
 	}
+	// Escape, backdrop click, the focus trap and returning focus
+	// to the row that opened the dialog all come from Modal.
 	function closeScenarioModal(): void {
 		modalScenario = null;
 	}
-
-	// #R-CS2C-modal-esc-key polish: the inline onkeydown on
-	// the modal-backdrop div never fires because a non-
-	// focusable presentation div doesn't receive keyboard
-	// events. Install a window-level keydown listener for
-	// the duration the modal is open — same shape Svelte's
-	// own dialog primitives use. Effect cleanup uninstalls on
-	// close OR component teardown, both via the returned fn.
-	$effect(() => {
-		if (modalScenario === null) return;
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') {
-				closeScenarioModal();
-			}
-		};
-		window.addEventListener('keydown', onKey);
-		return () => window.removeEventListener('keydown', onKey);
-	});
 
 	// Hub URL builder. CrowdSec scenarios are named
 	// "<author>/<scenario>" (e.g. "crowdsecurity/http-cve");
@@ -992,24 +978,12 @@
 
 	{#if modalScenario !== null}
 		{@const ms = modalScenario}
-		<!-- Esc keypress is handled at window level (see the
-		     $effect in the script block) — a non-focusable
-		     presentation div doesn't receive keyboard events,
-		     so an inline onkeydown here would be dead code. -->
-		<div class="modal-backdrop" role="presentation" onclick={closeScenarioModal}></div>
-		<div
-			class="modal"
-			role="dialog"
-			aria-modal="true"
-			aria-labelledby="scenario-modal-title"
-			data-testid="scenario-modal"
-		>
-			<header class="modal-h">
-				<h3 id="scenario-modal-title">{ms.name}</h3>
-				<button type="button" class="modal-close" onclick={closeScenarioModal} aria-label="Close">
-					×
-				</button>
-			</header>
+		<!-- Built on Modal so the dialog is named by its title and
+		     gets Escape, the focus trap and focus restore for free.
+		     Mounted under the {#if}, as ConfirmDialog does, so
+		     closing removes it at once. -->
+		<Modal open title={ms.name} onClose={closeScenarioModal} width="lg">
+		<div class="scenario-modal-body" data-testid="scenario-modal">
 			<dl class="modal-dl">
 				<dt>Alerts {scenariosMeta.windowHours}h</dt>
 				<dd><strong>{ms.alerts24h}</strong></dd>
@@ -1074,6 +1048,12 @@
 				<div class="copy-toast" role="status">{copyToast}</div>
 			{/if}
 		</div>
+		{#snippet footer()}
+			<Button variant="ghost" onclick={closeScenarioModal}>
+				{language.current && t('crowdsecDecisions.scenarioModalClose')}
+			</Button>
+		{/snippet}
+		</Modal>
 	{/if}
 {/if}
 
@@ -1361,53 +1341,9 @@
 		margin-left: 0.4rem;
 		font-family: var(--font-mono, monospace);
 	}
-	.modal-backdrop {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.5);
-		z-index: 50;
-	}
-	.modal {
-		position: fixed;
-		top: 50%;
-		left: 50%;
-		transform: translate(-50%, -50%);
-		background: var(--bg-surface);
-		border: 1px solid var(--border-subtle, var(--bg-hover));
-		border-radius: 6px;
-		padding: 1.25rem 1.5rem;
-		min-width: 28rem;
-		max-width: 36rem;
-		z-index: 51;
-		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-	}
-	.modal-h {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-		margin: 0 0 0.75rem 0;
-		padding-bottom: 0.5rem;
-		border-bottom: 1px solid var(--border-subtle, var(--bg-hover));
-	}
-	.modal-h h3 {
-		margin: 0;
-		font-size: var(--text-lg, 16px);
-		font-family: var(--font-mono, monospace);
-		color: var(--text-primary);
-		word-break: break-all;
-	}
-	.modal-close {
-		background: transparent;
-		border: none;
-		color: var(--text-secondary);
-		font-size: 1.5rem;
-		line-height: 1;
-		cursor: pointer;
-		padding: 0 0.25rem;
-	}
-	.modal-close:hover {
-		color: var(--text-primary);
+	/* Anchors the copy toast now that Modal owns the dialog box. */
+	.scenario-modal-body {
+		position: relative;
 	}
 	.modal-dl {
 		display: grid;
@@ -1464,8 +1400,8 @@
 	}
 	.copy-toast {
 		position: absolute;
-		bottom: 0.75rem;
-		right: 1.5rem;
+		bottom: 0;
+		right: 0;
 		background: var(--accent-cyan);
 		color: var(--text-inverse);
 		padding: 0.3rem 0.7rem;

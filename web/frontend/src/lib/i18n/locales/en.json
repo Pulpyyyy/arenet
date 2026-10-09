@@ -1937,7 +1937,8 @@
 		"toastUnbanned": "Unbanned: {value}",
 		"toastUnbanFailed": "Unban failed: {error}",
 		"unbanNotConfigured": "Unbanning needs the Security Automation machine credentials — the bouncer key can only read decisions. Set them in Settings → Security Automation.",
-		"unbanNotFound": "LAPI no longer has this decision — it may have expired already."
+		"unbanNotFound": "LAPI no longer has this decision — it may have expired already.",
+		"scenarioModalClose": "Close"
 	},
 	"createServiceAccount": {
 		"titleReveal": "API token generated",

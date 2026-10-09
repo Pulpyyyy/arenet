@@ -1937,7 +1937,8 @@
 		"toastUnbanned": "Débanni : {value}",
 		"toastUnbanFailed": "Échec du débannissement : {error}",
 		"unbanNotConfigured": "Pour débannir, il faut les identifiants machine de Security Automation — la clé du bouncer ne peut que lire les décisions. Renseigne-les dans Settings → Security Automation.",
-		"unbanNotFound": "LAPI n'a plus cette décision — elle a peut-être déjà expiré."
+		"unbanNotFound": "LAPI n'a plus cette décision — elle a peut-être déjà expiré.",
+		"scenarioModalClose": "Fermer"
 	},
 	"createServiceAccount": {
 		"titleReveal": "Token API généré",

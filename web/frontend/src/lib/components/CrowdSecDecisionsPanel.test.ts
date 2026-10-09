@@ -858,11 +858,51 @@ describe('CrowdSec decisions panel — Scenarios tab', () => {
 			expect(screen.getByTestId('scenario-modal')).toBeInTheDocument();
 		});
 
-		// Esc on the window → modal closes.
-		await fireEvent.keyDown(window, { key: 'Escape' });
+		// Esc → modal closes. Modal listens on document, where a
+		// real keypress from inside the dialog bubbles to.
+		await fireEvent.keyDown(document, { key: 'Escape' });
 		await waitFor(() => {
 			expect(screen.queryByTestId('scenario-modal')).toBeNull();
 		});
+	});
+
+	it('is a dialog named after the scenario', async () => {
+		securityMock.fetchScenarios.mockResolvedValue(sampleScenariosOK);
+		await openScenariosTab();
+		await waitFor(() => {
+			expect(screen.getByText('http-cve')).toBeInTheDocument();
+		});
+
+		await fireEvent.click(screen.getAllByTestId('scenario-row')[0]);
+
+		const dialog = await screen.findByRole('dialog', { name: 'crowdsecurity/http-cve' });
+		expect(dialog).toHaveAttribute('aria-modal', 'true');
+		expect(dialog).toContainElement(screen.getByTestId('scenario-modal'));
+		// The close action lives in the dialog footer.
+		await fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+	});
+
+	it('returns focus to the row that opened it when Escape closes it', async () => {
+		securityMock.fetchScenarios.mockResolvedValue(sampleScenariosOK);
+		await openScenariosTab();
+		await waitFor(() => {
+			expect(screen.getByText('http-cve')).toBeInTheDocument();
+		});
+
+		// Open from the keyboard, the way a keyboard user would.
+		const row = screen.getAllByTestId('scenario-row')[0];
+		row.focus();
+		await fireEvent.keyDown(row, { key: 'Enter' });
+		const dialog = await screen.findByRole('dialog', { name: 'crowdsecurity/http-cve' });
+
+		// Focus moves into the dialog...
+		await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+
+		// ...and Escape from there closes it and hands focus back.
+		await fireEvent.keyDown(document.activeElement ?? document, { key: 'Escape' });
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		expect(document.activeElement).toBe(row);
 	});
 
 	it('hides the hub link for non-namespaced scenarios (e.g. manual)', async () => {
