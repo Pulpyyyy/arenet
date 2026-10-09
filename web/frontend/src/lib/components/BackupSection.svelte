@@ -18,7 +18,8 @@
                                    reject body verbatim (it carries
                                    the "Two paths forward" wording).
                                    An encrypted file asks for its
-                                   passphrase.
+                                   passphrase. Nothing is sent before
+                                   the operator confirms in a dialog.
 -->
 <script lang="ts">
 	import { pushToast } from '$lib/stores/toast';
@@ -33,6 +34,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Input from '$lib/components/Input.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
 
@@ -49,6 +51,24 @@
 	let restoreError = $state('');
 	let restoreReport = $state<RestoreReport | null>(null);
 	let restoreSubmitting = $state(false);
+	let restoreConfirmOpen = $state(false);
+
+	// A restore replaces the whole configuration, so it is confirmed
+	// first, restating the file and every safety check being bypassed.
+	// The word to type is translated: the operator types what the
+	// dialog shows in their own language, and both sides of the
+	// comparison come from the same key, so they cannot disagree.
+	const restoreConfirmWord = $derived(language.current && t('backupSection.confirmRestoreWord'));
+	const restoreConfirmMessage = $derived(
+		language.current &&
+			[
+				t('backupSection.confirmRestoreMessage', { file: restoreFile?.name ?? '' }),
+				allowIncompleteRestore ? t('backupSection.confirmRestoreIncomplete') : '',
+				allowEmptyUsers ? t('backupSection.confirmRestoreEmptyUsers', { word: restoreConfirmWord }) : ''
+			]
+				.filter((s) => s !== '')
+				.join(' ')
+	);
 
 	const passphraseCodes = ['passphrase_required', 'passphrase_invalid', 'passphrase_too_short'];
 
@@ -131,6 +151,18 @@
 				// Invalid JSON is reported on submit.
 			}
 		}
+	}
+
+	function askRestore(): void {
+		if (!restoreFile || restoreSubmitting) return;
+		restoreConfirmOpen = true;
+	}
+
+	// submitRestore reports every outcome in the section itself (report
+	// or role=alert error), so the dialog closes either way.
+	async function confirmRestore(): Promise<void> {
+		await submitRestore();
+		restoreConfirmOpen = false;
 	}
 
 	async function submitRestore(): Promise<void> {
@@ -260,7 +292,7 @@
 					variant="danger"
 					size="md"
 					disabled={!restoreFile || restoreSubmitting || (restoreEncrypted && !restorePassphrase)}
-					onclick={submitRestore}
+					onclick={askRestore}
 				>
 					{language.current && (restoreSubmitting ? t('backupSection.btnRestoring') : t('backupSection.btnRestore'))}
 				</Button>
@@ -349,3 +381,17 @@
 		</Button>
 	{/snippet}
 </Modal>
+
+<!-- "Allow empty users" can leave nobody able to sign in, so that
+     case also asks for a typed word, not just a click. -->
+<ConfirmDialog
+	bind:open={restoreConfirmOpen}
+	title={language.current && t('backupSection.confirmRestoreTitle')}
+	message={restoreConfirmMessage}
+	confirmLabel={language.current && t('backupSection.confirmRestoreConfirm')}
+	cancelLabel={language.current && t('backupSection.cancel')}
+	confirmVariant="danger"
+	requireText={allowEmptyUsers ? restoreConfirmWord : undefined}
+	requireTextLabel={language.current && t('backupSection.confirmRestoreTypeLabel', { word: restoreConfirmWord })}
+	onConfirm={confirmRestore}
+/>

@@ -33,6 +33,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import Badge from '$lib/components/Badge.svelte';
 	import Spinner from '$lib/components/Spinner.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
 
@@ -164,6 +165,20 @@
 				'danger'
 			);
 		}
+	}
+
+	// Removing an entry shuts that person out of SSO at once, so it is
+	// confirmed first. deleteAllowlistEntry toasts a failure, so the
+	// dialog closes either way.
+	let removeTarget = $state<string | null>(null);
+	let removeOpen = $state(false);
+	function askRemoveEntry(email: string): void {
+		removeTarget = email;
+		removeOpen = true;
+	}
+	async function confirmRemoveEntry(): Promise<void> {
+		if (removeTarget !== null) await deleteAllowlistEntry(removeTarget);
+		removeOpen = false;
 	}
 </script>
 
@@ -401,7 +416,7 @@
 						<Button
 							variant="ghost"
 							size="sm"
-							onclick={() => void deleteAllowlistEntry(entry.email)}
+							onclick={() => askRemoveEntry(entry.email)}
 						>
 							{language.current && t('oidcSettings.allowlistBtnRemove')}
 						</Button>
@@ -412,3 +427,13 @@
 	</div>
 </Card>
 </div>
+
+<ConfirmDialog
+	bind:open={removeOpen}
+	title={language.current && t('oidcSettings.allowlistRemoveTitle')}
+	message={language.current && t('oidcSettings.allowlistRemoveMessage', { email: removeTarget ?? '' })}
+	confirmLabel={language.current && t('oidcSettings.allowlistRemoveConfirm')}
+	cancelLabel={language.current && t('oidcSettings.allowlistRemoveCancel')}
+	confirmVariant="danger"
+	onConfirm={confirmRemoveEntry}
+/>

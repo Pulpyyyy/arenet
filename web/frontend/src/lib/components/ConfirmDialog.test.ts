@@ -100,4 +100,44 @@ describe('ConfirmDialog', () => {
 			expect(cancelBtn).not.toBeDisabled();
 		});
 	});
+
+	it('shows no text field when no word is required', () => {
+		render(ConfirmDialog, {
+			open: true,
+			title: 'Delete?',
+			message: 'Gone for good.',
+			onConfirm: vi.fn()
+		});
+		expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Confirm' })).not.toBeDisabled();
+	});
+
+	it('requireText keeps Confirm disabled until the exact word is typed', async () => {
+		const onConfirm = vi.fn();
+		const user = userEvent.setup();
+		render(ConfirmDialog, {
+			open: true,
+			title: 'Restore?',
+			message: 'Nobody may be able to sign in afterwards.',
+			confirmLabel: 'Restore',
+			requireText: 'RESTORE',
+			requireTextLabel: 'Type RESTORE to confirm',
+			onConfirm
+		});
+
+		const field = screen.getByLabelText('Type RESTORE to confirm');
+		const confirmBtn = screen.getByRole('button', { name: 'Restore' });
+		expect(confirmBtn).toBeDisabled();
+
+		// Close is not enough: the check is exact, case included.
+		await user.type(field, 'restore');
+		expect(confirmBtn).toBeDisabled();
+
+		await user.clear(field);
+		await user.type(field, 'RESTORE');
+		expect(confirmBtn).not.toBeDisabled();
+
+		await user.click(confirmBtn);
+		expect(onConfirm).toHaveBeenCalledTimes(1);
+	});
 });

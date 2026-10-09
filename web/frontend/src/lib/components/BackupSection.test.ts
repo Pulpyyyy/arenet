@@ -9,8 +9,9 @@
 //   - Export (with secrets) gates the download behind a danger
 //     ConfirmDialog ; only the post-confirm action triggers the
 //     download URL
-//   - Restore parses the selected JSON file before POST + surfaces
-//     the typed RestoreReport in a verbose breakdown
+//   - Restore asks first (a typed word when "Allow empty users" is
+//     ticked), then parses the selected JSON file before POST +
+//     surfaces the typed RestoreReport in a verbose breakdown
 //   - Restore error from ApiError is surfaced verbatim — the
 //     backend's "two paths forward" wording must reach the operator
 //     without rewording
@@ -30,7 +31,7 @@
 // the URL-builder call.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { ApiError } from '$lib/api/types';
 import type { RestoreReport } from '$lib/api/settings';
@@ -189,6 +190,70 @@ describe('BackupSection — restore', () => {
 		});
 	}
 
+	// Restore only asks; the request leaves once the dialog is
+	// confirmed. `word` is typed first when the dialog requires one.
+	async function restoreAndConfirm(word?: string): Promise<void> {
+		await userEvent.click(screen.getByRole('button', { name: 'Restore' }));
+		const dialog = await screen.findByRole('dialog', { name: 'Restore this backup?' });
+		if (word !== undefined) {
+			await userEvent.type(within(dialog).getByLabelText(`Type ${word} to confirm`), word);
+		}
+		await userEvent.click(within(dialog).getByRole('button', { name: 'Replace configuration' }));
+	}
+
+	it('asks before restoring, naming the file, and sends nothing on cancel', async () => {
+		render(BackupSection);
+		const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+		await fireEvent.change(fileInput, {
+			target: { files: [pickFile('{"schema_version":"1.0.0"}')] }
+		});
+
+		await userEvent.click(screen.getByRole('button', { name: 'Restore' }));
+		const dialog = await screen.findByRole('dialog', { name: 'Restore this backup?' });
+		expect(dialog.textContent).toContain('arenet-backup.json');
+		// No bypass ticked: the dialog neither mentions one nor asks for a word.
+		expect(dialog.textContent).not.toContain('Allow incomplete restore');
+		expect(within(dialog).queryByRole('textbox')).not.toBeInTheDocument();
+		expect(postRestoreMock).not.toHaveBeenCalled();
+
+		await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+		await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+		expect(postRestoreMock).not.toHaveBeenCalled();
+	});
+
+	it('with "Allow empty users" ticked, confirming waits for the typed word', async () => {
+		postRestoreMock.mockResolvedValue(happyReport);
+		render(BackupSection);
+		await fireEvent.click(screen.getByRole('checkbox', { name: /Allow empty users/i }));
+		const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+		await fireEvent.change(fileInput, {
+			target: { files: [pickFile('{"schema_version":"1.0.0"}')] }
+		});
+
+		await userEvent.click(screen.getByRole('button', { name: 'Restore' }));
+		const dialog = await screen.findByRole('dialog', { name: 'Restore this backup?' });
+		// The bypass is restated, with what it can cost.
+		expect(dialog.textContent).toContain('Allow empty users');
+		expect(dialog.textContent).toContain('nobody can sign in');
+
+		const confirmBtn = within(dialog).getByRole('button', { name: 'Replace configuration' });
+		expect(confirmBtn).toBeDisabled();
+		const field = within(dialog).getByLabelText('Type RESTORE to confirm');
+		await userEvent.type(field, 'RESTOR');
+		expect(confirmBtn).toBeDisabled();
+		expect(postRestoreMock).not.toHaveBeenCalled();
+
+		await userEvent.type(field, 'E');
+		expect(confirmBtn).not.toBeDisabled();
+		await userEvent.click(confirmBtn);
+
+		await waitFor(() => expect(postRestoreMock).toHaveBeenCalledTimes(1));
+		expect(postRestoreMock.mock.calls[0][1]).toEqual({
+			allowIncompleteRestore: false,
+			allowEmptyUsers: true
+		});
+	});
+
 	it('parses the picked file JSON + POSTs with default opts (both flags off)', async () => {
 		postRestoreMock.mockResolvedValue(happyReport);
 		render(BackupSection);
@@ -203,7 +268,7 @@ describe('BackupSection — restore', () => {
 		) as HTMLInputElement;
 		await fireEvent.change(fileInput, { target: { files: [pickFile(snapshot)] } });
 
-		await userEvent.click(screen.getByRole('button', { name: 'Restore' }));
+		await restoreAndConfirm();
 		await waitFor(() => expect(postRestoreMock).toHaveBeenCalled());
 
 		expect(postRestoreMock).toHaveBeenCalledTimes(1);
@@ -237,7 +302,8 @@ describe('BackupSection — restore', () => {
 			target: { files: [pickFile('{"schema_version":"1.0.0"}')] }
 		});
 
-		await userEvent.click(screen.getByRole('button', { name: 'Restore' }));
+		// "Allow empty users" is ticked, so the dialog asks for the word.
+		await restoreAndConfirm('RESTORE');
 		await waitFor(() => expect(postRestoreMock).toHaveBeenCalled());
 
 		const [, opts] = postRestoreMock.mock.calls[0];
@@ -257,7 +323,7 @@ describe('BackupSection — restore', () => {
 		await fireEvent.change(fileInput, {
 			target: { files: [pickFile('{"schema_version":"1.0.0"}')] }
 		});
-		await userEvent.click(screen.getByRole('button', { name: 'Restore' }));
+		await restoreAndConfirm();
 		await waitFor(() => expect(postRestoreMock).toHaveBeenCalled());
 
 		// Counts from happyReport must surface in the <dl>.
@@ -286,7 +352,7 @@ describe('BackupSection — restore', () => {
 		await fireEvent.change(fileInput, {
 			target: { files: [pickFile('{"schema_version":"1.0.0"}')] }
 		});
-		await userEvent.click(screen.getByRole('button', { name: 'Restore' }));
+		await restoreAndConfirm();
 
 		await waitFor(() => {
 			expect(screen.getByText('Managed domains imported')).toBeInTheDocument();
@@ -306,7 +372,7 @@ describe('BackupSection — restore', () => {
 		await fireEvent.change(fileInput, {
 			target: { files: [pickFile('{"schema_version":"1.0.0"}')] }
 		});
-		await userEvent.click(screen.getByRole('button', { name: 'Restore' }));
+		await restoreAndConfirm();
 
 		await waitFor(() => expect(screen.getByText('Routes imported')).toBeInTheDocument());
 		expect(screen.queryByText('Managed domains imported')).not.toBeInTheDocument();
@@ -324,7 +390,7 @@ describe('BackupSection — restore', () => {
 		const restoreBtn = screen.getByRole('button', { name: 'Restore' });
 		expect(restoreBtn).toBeDisabled();
 		await userEvent.type(passField, 'the backup passphrase');
-		await userEvent.click(restoreBtn);
+		await restoreAndConfirm();
 
 		await waitFor(() => expect(postRestoreMock).toHaveBeenCalled());
 		expect(postRestoreMock.mock.calls[0][1].passphrase).toBe('the backup passphrase');
@@ -340,7 +406,7 @@ describe('BackupSection — restore', () => {
 			target: { files: [pickFile('{"schema_version":"2.0.0","encryption":{"kdf":"argon2id"}}')] }
 		});
 		await userEvent.type(await screen.findByLabelText('Backup passphrase'), 'not the right one');
-		await userEvent.click(screen.getByRole('button', { name: 'Restore' }));
+		await restoreAndConfirm();
 
 		expect(await screen.findByText('Wrong passphrase (or the file was altered).')).toBeInTheDocument();
 	});
@@ -359,7 +425,7 @@ describe('BackupSection — restore', () => {
 		await fireEvent.change(fileInput, {
 			target: { files: [pickFile('{"schema_version":"2.0.0"}')] }
 		});
-		await userEvent.click(screen.getByRole('button', { name: 'Restore' }));
+		await restoreAndConfirm();
 		await waitFor(() => expect(postRestoreMock).toHaveBeenCalled());
 
 		// The error <pre> carries role=alert ; assert the verbatim
@@ -381,7 +447,7 @@ describe('BackupSection — restore', () => {
 		await fireEvent.change(fileInput, {
 			target: { files: [pickFile('{not-json,')] }
 		});
-		await userEvent.click(screen.getByRole('button', { name: 'Restore' }));
+		await restoreAndConfirm();
 		await waitFor(() => {
 			expect(screen.getByRole('alert')).toBeInTheDocument();
 		});

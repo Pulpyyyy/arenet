@@ -507,6 +507,20 @@
 		}
 	}
 
+	// Deleting a provider loses its settings and client secret, so it
+	// is confirmed first. deleteFwdAuth reports a failure in the card
+	// (role=alert), so the dialog closes either way.
+	let fwdAuthDeleteTarget = $state<string | null>(null);
+	let fwdAuthDeleteOpen = $state(false);
+	function askDeleteFwdAuth(name: string): void {
+		fwdAuthDeleteTarget = name;
+		fwdAuthDeleteOpen = true;
+	}
+	async function confirmDeleteFwdAuth(): Promise<void> {
+		if (fwdAuthDeleteTarget !== null) await deleteFwdAuth(fwdAuthDeleteTarget);
+		fwdAuthDeleteOpen = false;
+	}
+
 	// License URL ref resolution (Step G G.2).
 	// Version for the About card. The authoritative source is the
 	// backend's main.version (ldflag-injected), exposed by
@@ -1345,7 +1359,7 @@
 										<Button variant="ghost" size="sm" onclick={() => openFwdAuthEdit(p)}>
 											Edit
 										</Button>
-										<Button variant="ghost" size="sm" onclick={() => deleteFwdAuth(p.name)}>
+										<Button variant="ghost" size="sm" onclick={() => askDeleteFwdAuth(p.name)}>
 											Delete
 										</Button>
 									</div>
@@ -1656,6 +1670,16 @@
 		cancelLabel={language.current && t('settingsSubcards.automationResetDialogCancel')}
 		confirmVariant="danger"
 		onConfirm={confirmAutomationReset}
+	/>
+
+	<ConfirmDialog
+		bind:open={fwdAuthDeleteOpen}
+		title={language.current && t('settingsSubcards.fwdAuthDeleteTitle')}
+		message={language.current && t('settingsSubcards.fwdAuthDeleteMessage', { name: fwdAuthDeleteTarget ?? '' })}
+		confirmLabel={language.current && t('settingsSubcards.fwdAuthDeleteConfirm')}
+		cancelLabel={language.current && t('settingsSubcards.fwdAuthDeleteCancel')}
+		confirmVariant="danger"
+		onConfirm={confirmDeleteFwdAuth}
 	/>
 
 	<!-- Step O.4 delete-managed-domain dialog migrated to /certs
