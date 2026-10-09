@@ -31,7 +31,7 @@
 //     so it's testable by `queryByLabelText` returning null /
 //     non-null rather than by computed style.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { tick } from 'svelte';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
@@ -280,6 +280,14 @@ beforeEach(() => {
 	settingsMock.listDNSProviders.mockResolvedValue([]);
 	externalCertsMock.list.mockResolvedValue([]);
 	metricsMock.fetchRouteSummary.mockRejectedValue(new Error('no metrics in this test'));
+});
+
+// Opening a row writes ?edit=<id> into the URL, and the page opens
+// that route on mount. Reset after every test, not only the deep-link
+// ones: a row click in one test would otherwise auto-open a route
+// sharing that id in the next.
+afterEach(() => {
+	window.history.replaceState(null, '', '/');
 });
 
 // Opens the create form (clicks "+ Add route") and returns after
@@ -1427,6 +1435,102 @@ describe('Routes page — table row interaction affordance', () => {
 
 		expect(row.classList.contains('route-row-selected')).toBe(false);
 		expect(screen.queryByLabelText('Host')).not.toBeInTheDocument();
+	});
+});
+
+// The open route lives in ?edit=<id> so other pages (WAF-off
+// empty state on /security/<id>, …) can link straight to its form.
+// The page reads window.location directly, so the initial URL is
+// set with history.replaceState before render.
+describe('Routes page — ?edit= deep link', () => {
+	const mk = (id: string, host: string): Route =>
+		makeRoute({ id, host, upstreams: [{ url: 'http://127.0.0.1:9000', weight: 1 }] });
+
+	const editParam = (): string | null =>
+		new URL(window.location.href).searchParams.get('edit');
+
+	it('opens the form of the route named by ?edit=<id> once the list has loaded', async () => {
+		window.history.replaceState(null, '', '/routes?edit=r-b');
+		apiMock.listRoutes.mockResolvedValue([
+			mk('r-a', 'alpha.example'),
+			mk('r-b', 'beta.example'),
+		]);
+		render(Page);
+
+		await waitFor(() => {
+			expect((screen.getByLabelText('Host') as HTMLInputElement).value).toBe('beta.example');
+		});
+		// The panel header repeats the host, so pick the table cell.
+		const betaRow = screen
+			.getAllByText('beta.example')
+			.map((el) => el.closest('tr'))
+			.find((tr) => tr !== null)!;
+		expect(betaRow.classList.contains('route-row-selected')).toBe(true);
+		expect(editParam()).toBe('r-b');
+	});
+
+	it('an unknown id opens nothing and is dropped from the URL', async () => {
+		window.history.replaceState(null, '', '/routes?edit=gone');
+		apiMock.listRoutes.mockResolvedValue([mk('r-a', 'alpha.example')]);
+		render(Page);
+
+		await screen.findByText('alpha.example');
+		await waitFor(() => expect(editParam()).toBeNull());
+		expect(screen.queryByLabelText('Host')).not.toBeInTheDocument();
+	});
+
+	it('keeps the param when the list failed to load (cannot tell it is unknown)', async () => {
+		window.history.replaceState(null, '', '/routes?edit=r-a');
+		apiMock.listRoutes.mockRejectedValue(new Error('boom'));
+		render(Page);
+
+		await waitFor(() => expect(toastMock.pushToast).toHaveBeenCalled());
+		await tick();
+		expect(screen.queryByLabelText('Host')).not.toBeInTheDocument();
+		expect(editParam()).toBe('r-a');
+	});
+
+	it('opening a row sets ?edit, closing it removes it, without adding history entries', async () => {
+		window.history.replaceState(null, '', '/routes');
+		apiMock.listRoutes.mockResolvedValue([
+			mk('r-a', 'alpha.example'),
+			mk('r-b', 'beta.example'),
+		]);
+		render(Page);
+
+		const alphaRow = (await screen.findByText('alpha.example')).closest('tr')!;
+		const betaRow = screen.getByText('beta.example').closest('tr')!;
+		const historyLength = window.history.length;
+
+		await userEvent.click(alphaRow);
+		await tick();
+		expect(editParam()).toBe('r-a');
+
+		await userEvent.click(betaRow);
+		await tick();
+		expect(editParam()).toBe('r-b');
+
+		// Same row again → toggle closed.
+		await userEvent.click(betaRow);
+		await tick();
+		expect(editParam()).toBeNull();
+		expect(window.location.pathname).toBe('/routes');
+		expect(window.history.length).toBe(historyLength);
+	});
+
+	it('switching to the create form removes ?edit', async () => {
+		window.history.replaceState(null, '', '/routes');
+		apiMock.listRoutes.mockResolvedValue([mk('r-a', 'alpha.example')]);
+		render(Page);
+
+		const row = (await screen.findByText('alpha.example')).closest('tr')!;
+		await userEvent.click(row);
+		await tick();
+		expect(editParam()).toBe('r-a');
+
+		await openCreateForm();
+		expect(hostInput().value).toBe('');
+		expect(editParam()).toBeNull();
 	});
 });
 

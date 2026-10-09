@@ -1212,6 +1212,7 @@
 		// probe state so a stale result from a previous edit
 		// session doesn't bleed into the next form open.
 		upstreamTests = {};
+		syncEditParam(null);
 	}
 
 	// DOM refs for the click-outside action (C11 Pack A polish
@@ -1465,6 +1466,7 @@
 		seedRetryParts();
 		stateChoice = 'active';
 		formOpen = true;
+		syncEditParam(null);
 		// v2.61 — same reveal as selecting a route: in create mode the
 		// panel is just as far down the page when the layout is stacked.
 		revealPanelIfStacked();
@@ -1521,6 +1523,45 @@
 		queueMicrotask(() => {
 			panelEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 		});
+	}
+
+	// The route being edited lives in ?edit=<id> so its form can be
+	// linked to (e.g. from /security/<id>) and survives a refresh. Called
+	// only from openEdit / openCreate / closePanel, the three places
+	// the panel changes route. replaceState, not pushState: opening
+	// rows one after another must not fill the back-button history
+	// (same reasoning as the ?tab sync on /security).
+	const EDIT_PARAM = 'edit';
+
+	function syncEditParam(id: string | null): void {
+		if (typeof window === 'undefined') return;
+		const url = new URL(window.location.href);
+		if (id === null) {
+			url.searchParams.delete(EDIT_PARAM);
+		} else {
+			url.searchParams.set(EDIT_PARAM, id);
+		}
+		if (url.href === window.location.href) return;
+		// Keep SvelteKit's own history entry state (its navigation
+		// index lives there) rather than wiping it.
+		window.history.replaceState(window.history.state, '', url);
+	}
+
+	// Deep link: open the form of the route named by ?edit=, once the
+	// first list has arrived. An id that no longer exists is dropped
+	// silently; if the list failed to load we cannot tell, so the
+	// link is left for the next attempt.
+	function openEditFromURL(): void {
+		if (typeof window === 'undefined') return;
+		const id = new URL(window.location.href).searchParams.get(EDIT_PARAM);
+		if (id === null) return;
+		const r = routes.find((x) => x.id === id);
+		if (r) {
+			openEdit(r);
+			revealPanelIfStacked();
+		} else if (loadError === null) {
+			syncEditParam(null);
+		}
 	}
 
 	function openEdit(r: Route) {
@@ -1814,6 +1855,7 @@
 		seedRetryParts();
 		stateChoice = routeState(r);
 		formOpen = true;
+		syncEditParam(r.id);
 		// v2.41 — reference point for the "unsaved changes" marker.
 		snapshotForm();
 	}
@@ -3463,7 +3505,7 @@
 
 	onMount(async () => {
 		await Promise.all([
-			loadRoutes(),
+			loadRoutes().then(openEditFromURL),
 			loadDNSProvider(),
 			loadForwardAuthProviders(),
 			loadManagedDomainsForRoutes(),
