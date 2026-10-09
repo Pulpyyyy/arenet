@@ -131,6 +131,20 @@
 		"reduceMotionDisabled": "Disabled",
 		"reduceMotionHint": "(system preference)",
 		"changePassword": "Change password",
+		"unsaved": {
+			"marker": "Unsaved changes",
+			"dialogTitle": "Discard your unsaved changes?",
+			"dialogMessage": "Not saved yet: {cards}. Leaving now drops these changes.",
+			"dialogConfirm": "Discard and leave",
+			"dialogCancel": "Keep editing",
+			"cardAutomation": "Security Automation",
+			"cardForwardAuth": "Forward-auth providers"
+		},
+		"automationRules": {
+			"durationHint": "Window, duration and cooldown: a whole number followed by s, m (or min), h or d — e.g. 30s, 5m, 2h, 1d. A number alone counts as seconds.",
+			"durationUnreadable": "Not a duration — e.g. 30s, 5m, 2h, 1d",
+			"unreadableSummary": "Saving is blocked: {count} duration(s) cannot be read. Fix the fields marked in red."
+		},
 		"dnsProviders": {
 			"title": "DNS Providers",
 			"subtitle": "DNS accounts used to issue wildcard certificates (ACME DNS-01).",

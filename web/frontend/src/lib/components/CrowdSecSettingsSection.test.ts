@@ -477,3 +477,57 @@ describe('CrowdSecSettingsSection — Reset (CS.2 follow-up)', () => {
 		expect(screen.getByText(/^Configured$/i)).toBeInTheDocument();
 	});
 });
+
+// The settings page asks before it is left with unsaved edits; the card
+// says which one holds them.
+describe('CrowdSecSettingsSection — unsaved changes', () => {
+	async function renderLoaded(): Promise<void> {
+		getMock.mockResolvedValue(configuredSettings);
+		render(CrowdSecSettingsSection);
+		await waitFor(() => expect(screen.getByText(/^Configured$/i)).toBeInTheDocument());
+	}
+
+	it('is clean on load: the blank key field means "keep the stored key"', async () => {
+		await renderLoaded();
+		expect(screen.queryByTestId('crowdsec-unsaved')).toBeNull();
+	});
+
+	it('marks an edit, and clears the mark when the edit is undone', async () => {
+		await renderLoaded();
+		const url = screen.getByLabelText(/LAPI URL/i) as HTMLInputElement;
+
+		await fireEvent.input(url, { target: { value: 'http://crowdsec:8080' } });
+		expect(screen.getByTestId('crowdsec-unsaved')).toBeInTheDocument();
+
+		await fireEvent.input(url, { target: { value: configuredSettings.lapiUrl } });
+		expect(screen.queryByTestId('crowdsec-unsaved')).toBeNull();
+
+		// A typed key is an edit too.
+		const key = screen.getByLabelText(/Bouncer API key/i) as HTMLInputElement;
+		await fireEvent.input(key, { target: { value: 'new-key' } });
+		expect(screen.getByTestId('crowdsec-unsaved')).toBeInTheDocument();
+	});
+
+	it('clears the mark once the edit is saved', async () => {
+		putMock.mockResolvedValue({ ...configuredSettings, lapiUrl: 'http://crowdsec:8080' });
+		await renderLoaded();
+		const url = screen.getByLabelText(/LAPI URL/i) as HTMLInputElement;
+		await fireEvent.input(url, { target: { value: 'http://crowdsec:8080' } });
+		expect(screen.getByTestId('crowdsec-unsaved')).toBeInTheDocument();
+
+		await fireEvent.click(screen.getByRole('button', { name: /Save & apply/i }));
+		await waitFor(() => expect(putMock).toHaveBeenCalled());
+		await waitFor(() => expect(screen.queryByTestId('crowdsec-unsaved')).toBeNull());
+	});
+
+	it('keeps the mark when the save is refused', async () => {
+		putMock.mockRejectedValue(new ApiError('lapiUrl: invalid', 400, 'validation'));
+		await renderLoaded();
+		const url = screen.getByLabelText(/LAPI URL/i) as HTMLInputElement;
+		await fireEvent.input(url, { target: { value: 'not a url' } });
+
+		await fireEvent.click(screen.getByRole('button', { name: /Save & apply/i }));
+		await waitFor(() => expect(screen.getByText('lapiUrl: invalid')).toBeInTheDocument());
+		expect(screen.getByTestId('crowdsec-unsaved')).toBeInTheDocument();
+	});
+});

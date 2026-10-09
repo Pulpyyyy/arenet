@@ -25,7 +25,14 @@ vi.mock('$lib/api/settings', () => {
 			rules: { rules: {} },
 			credentials: { lapiUrl: '', machineId: '', configured: false }
 		}),
-		listForwardAuthProviders: vi.fn().mockResolvedValue([])
+		listForwardAuthProviders: vi.fn().mockResolvedValue([]),
+		getAccessLog: vi.fn().mockResolvedValue({
+			enabled: false,
+			rollSizeMB: 10,
+			rollKeep: 5,
+			compress: true,
+			redactQueryParams: []
+		})
 	};
 	return {
 		settingsApi: new Proxy(known, {
@@ -44,16 +51,22 @@ vi.mock('$lib/api/auth', () => ({
 }));
 vi.mock('$lib/stores/toast', () => ({ pushToast: vi.fn() }));
 
-const { afterNavigateMock } = vi.hoisted(() => ({
-	afterNavigateMock: { cb: null as null | (() => void | Promise<void>) }
+const { afterNavigateMock, beforeNavigateMock } = vi.hoisted(() => ({
+	afterNavigateMock: { cb: null as null | (() => void | Promise<void>) },
+	beforeNavigateMock: { cb: null as null | ((nav: unknown) => void) }
 }));
 vi.mock('$app/navigation', () => ({
 	afterNavigate: (cb: () => void | Promise<void>) => {
 		afterNavigateMock.cb = cb;
 	},
+	// Captured so a test can play a navigation through the page's guard.
+	beforeNavigate: (cb: (nav: unknown) => void) => {
+		beforeNavigateMock.cb = cb;
+	},
 	goto: vi.fn()
 }));
 
+import { goto } from '$app/navigation';
 import Page from './+page.svelte';
 
 function tab(id: string): HTMLElement {
@@ -66,6 +79,8 @@ beforeEach(() => {
 	window.scrollTo = vi.fn();
 	window.history.replaceState(null, '', '/settings');
 	afterNavigateMock.cb = null;
+	beforeNavigateMock.cb = null;
+	vi.mocked(goto).mockClear();
 });
 
 afterEach(() => {
@@ -134,6 +149,75 @@ describe('Settings page — v2.41 categories', () => {
 		await afterNavigateMock.cb?.();
 		await waitFor(() => expect(tab('security').getAttribute('aria-selected')).toBe('true'));
 		expect(document.getElementById('oidc-config')).not.toBeNull();
+	});
+});
+
+// Leaving /settings — a sidebar link, the back button — dropped every
+// card's unsaved draft without a word. It now asks first, naming the
+// cards concerned.
+describe('Settings page — leaving with unsaved edits', () => {
+	function leave(to = 'http://localhost/routes') {
+		const cancel = vi.fn();
+		beforeNavigateMock.cb!({ type: 'link', to: { url: new URL(to) }, cancel });
+		return cancel;
+	}
+
+	async function openAccessLog(): Promise<HTMLInputElement> {
+		render(Page);
+		await userEvent.click(tab('security'));
+		// Save is disabled until the card has loaded its settings.
+		await waitFor(() => expect(screen.getByTestId('access-log-save')).not.toBeDisabled());
+		return screen.getByTestId('access-log-enabled') as HTMLInputElement;
+	}
+
+	it('lets the operator leave when nothing is unsaved', async () => {
+		await openAccessLog();
+		expect(screen.queryByTestId('access-log-unsaved')).toBeNull();
+		expect(leave()).not.toHaveBeenCalled();
+		expect(screen.queryByText('Discard your unsaved changes?')).toBeNull();
+	});
+
+	it('marks the card and its tab, and asks before leaving', async () => {
+		const enabled = await openAccessLog();
+		await userEvent.click(enabled);
+
+		expect(screen.getByTestId('access-log-unsaved')).toBeInTheDocument();
+		expect(tab('security').textContent).toContain('•');
+		expect(tab('network').textContent).not.toContain('•');
+
+		const cancel = leave();
+		expect(cancel).toHaveBeenCalled();
+		expect(await screen.findByText('Discard your unsaved changes?')).toBeInTheDocument();
+		expect(screen.getByText(/Not saved yet: HTTP access log\./)).toBeInTheDocument();
+		expect(goto).not.toHaveBeenCalled();
+
+		// Keep editing: nothing is lost, nothing navigates.
+		await userEvent.click(screen.getByText('Keep editing'));
+		await waitFor(() => expect(screen.queryByText('Discard your unsaved changes?')).toBeNull());
+		expect(enabled.checked).toBe(true);
+		expect(goto).not.toHaveBeenCalled();
+	});
+
+	it('resumes the navigation once the operator agrees to discard', async () => {
+		const enabled = await openAccessLog();
+		await userEvent.click(enabled);
+
+		leave('http://localhost/certs');
+		await userEvent.click(await screen.findByText('Discard and leave'));
+
+		expect(goto).toHaveBeenCalledWith(new URL('http://localhost/certs'));
+		// The resumed navigation goes through the guard again: it must pass.
+		expect(leave('http://localhost/certs')).not.toHaveBeenCalled();
+	});
+
+	it('clears the mark when the edit is undone', async () => {
+		const enabled = await openAccessLog();
+		await userEvent.click(enabled);
+		expect(screen.getByTestId('access-log-unsaved')).toBeInTheDocument();
+
+		await userEvent.click(enabled);
+		expect(screen.queryByTestId('access-log-unsaved')).toBeNull();
+		expect(leave()).not.toHaveBeenCalled();
 	});
 });
 

@@ -35,6 +35,14 @@
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
 	import { relativeTime } from '$lib/utils/audit-format';
+	import UnsavedMarker from './UnsavedMarker.svelte';
+
+	interface Props {
+		/** Out: the credentials form differs from what was last loaded or saved. */
+		dirty?: boolean;
+	}
+
+	let { dirty = $bindable(false) }: Props = $props();
 
 	// Interval presets in hours, mapped to i18n leaves below.
 	const PRESETS = [24, 168, 336] as const;
@@ -52,6 +60,18 @@
 	let testing = $state(false);
 	let updating = $state(false);
 	let resetOpen = $state(false);
+
+	// Only the credentials form can hold an edit: the auto-update
+	// controls save as they change. A blank key means "keep", so only
+	// a typed key counts.
+	function formKey(): string {
+		return JSON.stringify(form);
+	}
+	let savedKey = $state(formKey());
+	const isDirty = $derived(formKey() !== savedKey);
+	$effect(() => {
+		dirty = isDirty;
+	});
 
 	/** Maps the API's lastStatus / triggerGeoIPUpdate status strings
 	 * to the i18n leaf under geoipSettings.status.*. */
@@ -82,6 +102,7 @@
 			status = st;
 			form.accountId = mm.accountId;
 			form.licenseKey = ''; // never round-trip the secret
+			savedKey = formKey();
 		} catch (err) {
 			loadError = err instanceof Error ? err.message : t('geoipSettings.loadFailed');
 		} finally {
@@ -104,6 +125,7 @@
 			maxmind = next;
 			form.accountId = next.accountId;
 			form.licenseKey = ''; // clear so a re-visit doesn't show ghost value
+			savedKey = formKey();
 			await load();
 			pushToast(t('geoipSettings.saveAppliedToast'), 'success');
 		} catch (err) {
@@ -217,6 +239,7 @@
 		<header class="flex items-center justify-between border-b border-border-subtle pb-3 mb-4">
 			<div>
 				<h2 class="text-xl font-semibold">{language.current && t('geoipSettings.title')}</h2>
+				<UnsavedMarker dirty={isDirty} testid="geoip-unsaved" />
 				<p class="text-xs text-muted mt-1">{language.current && t('geoipSettings.subtitle')}</p>
 			</div>
 			{#if loading}

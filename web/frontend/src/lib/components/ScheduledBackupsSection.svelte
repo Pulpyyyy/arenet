@@ -29,6 +29,14 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
+	import UnsavedMarker from '$lib/components/settings/UnsavedMarker.svelte';
+
+	interface Props {
+		/** Out: the schedule form differs from the stored schedule. */
+		dirty?: boolean;
+	}
+
+	let { dirty = $bindable(false) }: Props = $props();
 
 	const selectClass =
 		'px-2 py-1 rounded-md bg-surface border border-border-default text-primary outline-none focus:border-accent-cyan';
@@ -67,6 +75,31 @@
 	let deleteOpen = $state(false);
 
 	let emailChannels = $derived(channels.filter((c) => c.kind === 'email'));
+
+	// Compared with the stored schedule (`view`), which applyView
+	// refreshes on load and save. A blank passphrase keeps the stored
+	// one, so only a typed one counts. Alert channels compare as a set:
+	// ticking one off and on again changes their order, not the choice.
+	const isDirty = $derived.by(() => {
+		if (!view) return false;
+		const sorted = (ids: string[] | undefined) => [...(ids ?? [])].sort().join(',');
+		return (
+			enabled !== view.enabled ||
+			frequency !== view.frequency ||
+			time !== view.time ||
+			weekday !== view.weekday ||
+			keep !== view.keep ||
+			dir !== view.dir ||
+			emailMode !== view.emailMode ||
+			emailChannelId !== view.emailChannelId ||
+			sorted(alertChannelIds) !== sorted(view.alertChannelIds) ||
+			passphrase !== '' ||
+			passphraseConfirm !== ''
+		);
+	});
+	$effect(() => {
+		dirty = isDirty;
+	});
 
 	function errorText(err: unknown): string {
 		if (err instanceof ApiError) {
@@ -237,6 +270,7 @@
 	<Card padding="p-6" class="mb-6">
 		<header class="border-b border-border-subtle pb-3 mb-4">
 			<h2 class="text-xl font-semibold">{language.current && t('scheduledBackups.title')}</h2>
+			<UnsavedMarker dirty={isDirty} testid="sched-unsaved" />
 			<p class="text-xs text-muted mt-1">{language.current && t('scheduledBackups.subtitle')}</p>
 		</header>
 

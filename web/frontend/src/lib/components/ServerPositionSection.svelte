@@ -47,6 +47,14 @@
 	import Input from '$lib/components/Input.svelte';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
+	import UnsavedMarker from '$lib/components/settings/UnsavedMarker.svelte';
+
+	interface Props {
+		/** Out: the form differs from the last-known backend state. */
+		dirty?: boolean;
+	}
+
+	let { dirty = $bindable(false) }: Props = $props();
 
 	// Last-known backend state. Used both to populate the form
 	// on mount and as the "reset to" reference. null while
@@ -70,6 +78,17 @@
 	// change so the operator sees their fix take effect.
 	let latError = $state('');
 	let lonError = $state('');
+
+	// The form as resetForm last filled it. String() because the
+	// number inputs hand back numbers once typed in.
+	function formKey(): string {
+		return JSON.stringify([latStr, lonStr, city, country].map((v) => String(v ?? '')));
+	}
+	let savedKey = $state(formKey());
+	const isDirty = $derived(formKey() !== savedKey);
+	$effect(() => {
+		dirty = isDirty;
+	});
 
 	// Submit + redetect spinners. Disabled state on the
 	// buttons prevents double-submits.
@@ -106,6 +125,7 @@
 		}
 		latError = '';
 		lonError = '';
+		savedKey = formKey();
 	}
 
 	function trimNumber(n: number): string {
@@ -215,6 +235,7 @@
 		>
 			<div>
 				<h2 class="text-xl font-semibold">{language.current && t('serverPosition.title')}</h2>
+				<UnsavedMarker dirty={isDirty} testid="server-position-unsaved" />
 				<p class="text-xs text-muted mt-1">
 					{language.current && t('serverPosition.subtitle')}
 				</p>

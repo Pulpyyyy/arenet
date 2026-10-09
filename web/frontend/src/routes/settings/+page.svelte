@@ -45,6 +45,7 @@
 	import { ApiError, type AccessLogSettings } from '$lib/api/types';
 	import { serverErrorMessage } from '$lib/api/server-errors';
 	import { relativeTime } from '$lib/utils/audit-format';
+	import { humanToNs, nsToHuman } from '$lib/utils/rule-duration';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import Card from '$lib/components/Card.svelte';
@@ -65,6 +66,8 @@
 	import ScheduledBackupsSection from '$lib/components/ScheduledBackupsSection.svelte';
 	import RouteCheckSection from '$lib/components/RouteCheckSection.svelte';
 	import ServerPositionSection from '$lib/components/ServerPositionSection.svelte';
+	import UnsavedMarker from '$lib/components/settings/UnsavedMarker.svelte';
+	import { guardNavigation } from '$lib/utils/navigation-guard';
 
 	// v2.9.12 i18n Phase 2 — theme toggle options are derived from
 	// the active language so the on-screen labels switch live with
@@ -242,6 +245,12 @@
 	);
 	let rulesSubmitting = $state(false);
 	let rulesFormError = $state<string | null>(null);
+	// Duration fields whose text could not be read, keyed
+	// "source.field", holding what the operator typed so the
+	// input keeps showing it. Save is refused while any is
+	// listed: an unreadable "5 minutes" used to go out as 0.
+	let unreadableDurations = $state<Record<string, string>>({});
+	const unreadableCount = $derived(Object.keys(unreadableDurations).length);
 
 	// Credentials form. Empty password triggers the J.4
 	// preserve-on-edit path (server keeps stored value).
@@ -251,6 +260,11 @@
 	let credsForm = $state({ lapiUrl: '', machineId: '', password: '' });
 	let credsSubmitting = $state(false);
 	let credsFormError = $state<string | null>(null);
+	// The credentials as last loaded or saved, password blank ("keep").
+	function credsKey(): string {
+		return JSON.stringify(credsForm);
+	}
+	let credsSaved = $state(credsKey());
 
 	async function loadAutomation(): Promise<void> {
 		automationLoading = true;
@@ -263,11 +277,13 @@
 			// re-runs on every load so the operator sees
 			// the live state, not a stale draft.
 			rulesDraft = { ...res.rules.rules };
+			unreadableDurations = {};
 			credsForm = {
 				lapiUrl: res.credentials.lapiUrl,
 				machineId: res.credentials.machineId,
 				password: ''
 			};
+			credsSaved = credsKey();
 		} catch (err) {
 			automationLoadError =
 				err instanceof Error ? err.message : 'Failed to load automation config';
@@ -277,6 +293,8 @@
 	}
 
 	async function submitAutomationRules(): Promise<void> {
+		// Save is disabled meanwhile; this also covers Enter.
+		if (unreadableCount > 0) return;
 		rulesSubmitting = true;
 		rulesFormError = null;
 		try {
@@ -309,6 +327,7 @@
 				'success'
 			);
 			credsForm.password = '';
+			credsSaved = credsKey();
 		} catch (err) {
 			credsFormError = err instanceof ApiError ? err.message : String(err);
 		} finally {
@@ -336,6 +355,7 @@
 			credsForm.lapiUrl = next.lapiUrl;
 			credsForm.machineId = next.machineId;
 			credsForm.password = '';
+			credsSaved = credsKey();
 			credsFormError = null;
 			pushToast(t('settingsSubcards.automationResetToastSuccess'), 'success');
 			automationResetConfirmOpen = false;
@@ -346,27 +366,30 @@
 		}
 	}
 
-	// Helper: ns ↔ "60s" / "4h" / "7d" round-trip. Keep the
-	// UI numbers operator-friendly without abandoning the
-	// wire's nanosecond format.
-	function nsToHuman(ns: number): string {
-		if (ns <= 0) return '0s';
-		const s = Math.floor(ns / 1e9);
-		if (s % 86400 === 0) return `${s / 86400}d`;
-		if (s % 3600 === 0) return `${s / 3600}h`;
-		if (s % 60 === 0) return `${s / 60}m`;
-		return `${s}s`;
-	}
-	function humanToNs(s: string): number {
-		const m = s.trim().match(/^(\d+)\s*([smhd]?)$/);
-		if (!m) return 0;
-		const n = Number(m[1]);
-		switch (m[2]) {
-			case 'd': return n * 86400 * 1e9;
-			case 'h': return n * 3600 * 1e9;
-			case 'm': return n * 60 * 1e9;
-			default:  return n * 1e9; // 's' or empty = seconds
+	// The three duration columns, edited as text ("60s" / "4h" /
+	// "7d", see $lib/utils/rule-duration) and stored as the
+	// wire's nanoseconds.
+	type RuleDurationField = 'window_ns' | 'duration_ns' | 'cooldown_ns';
+	const RULE_DURATION_FIELDS: readonly {
+		key: RuleDurationField;
+		label: string;
+		placeholder: string;
+	}[] = [
+		{ key: 'window_ns', label: 'Window', placeholder: '60s' },
+		{ key: 'duration_ns', label: 'Duration', placeholder: '4h' },
+		{ key: 'cooldown_ns', label: 'Cooldown', placeholder: '24h' }
+	];
+	function setRuleDuration(s: AutomationSource, field: RuleDurationField, text: string): void {
+		const key = `${s}.${field}`;
+		const ns = humanToNs(text);
+		if (ns === null) {
+			unreadableDurations = { ...unreadableDurations, [key]: text };
+			return;
 		}
+		const next = { ...unreadableDurations };
+		delete next[key];
+		unreadableDurations = next;
+		setRuleField(s, field, ns);
 	}
 
 	// Per-rule field accessors. Svelte 5 runes work better
@@ -414,6 +437,8 @@
 	let fwdAuthDeleteError = $state<string | null>(null);
 	// Edit-mode flag for the placeholder pattern on the secret input.
 	let fwdAuthEditingSecretSet = $state(false);
+	// The form as it opened; anything different is unsaved.
+	let fwdAuthOpenedKey = $state('');
 
 	async function loadForwardAuthProviders(): Promise<void> {
 		fwdAuthLoading = true;
@@ -441,6 +466,7 @@
 			authPassthroughPrefix: '',
 			rewriteVerifyHost: false
 		};
+		fwdAuthOpenedKey = JSON.stringify(fwdAuthForm);
 		fwdAuthFormError = null;
 		fwdAuthFormOpen = true;
 	}
@@ -458,6 +484,7 @@
 			authPassthroughPrefix: p.authPassthroughPrefix ?? '',
 			rewriteVerifyHost: p.rewriteVerifyHost ?? false
 		};
+		fwdAuthOpenedKey = JSON.stringify(fwdAuthForm);
 		fwdAuthFormError = null;
 		fwdAuthFormOpen = true;
 	}
@@ -610,6 +637,11 @@
 	// A list of names is what it is; a row editor would be four clicks to
 	// add "code".
 	let alRedactInput = $state('');
+	// The draft as last loaded or saved.
+	function alKey(): string {
+		return JSON.stringify([alEnabled, alPath, alRollSizeMB, alRollKeep, alCompress, alRedactInput]);
+	}
+	let alSaved = $state(alKey());
 
 	// The number the operator actually wants: how big can this get.
 	const alCeilingMB = $derived(alRollSizeMB * (alRollKeep + 1));
@@ -626,6 +658,7 @@
 			alRollKeep = cfg.rollKeep ?? 5;
 			alCompress = cfg.compress ?? true;
 			alRedactInput = (cfg.redactQueryParams ?? []).join(', ');
+			alSaved = alKey();
 		} catch (err) {
 			accessLogError = serverErrorMessage(err);
 		} finally {
@@ -662,6 +695,7 @@
 			alRollSizeMB = accessLog.rollSizeMB ?? 10;
 			alRollKeep = accessLog.rollKeep ?? 5;
 			alRedactInput = (accessLog.redactQueryParams ?? []).join(', ');
+			alSaved = alKey();
 			pushToast(tl('settings.accessLog.saved'), 'success');
 		} catch (err) {
 			accessLogError = serverErrorMessage(err);
@@ -699,7 +733,8 @@
 	const settingsTabs = $derived(
 		TAB_IDS.map((id) => ({
 			id,
-			label: (language.current && t(`settings.tab.${id}`)) as string,
+			// A dot on a tab holding unsaved edits, so they can be found.
+			label: ((language.current && t(`settings.tab.${id}`)) as string) + (dirtyTabs.has(id) ? ' •' : ''),
 			testId: `settings-tab-${id}`
 		}))
 	);
@@ -714,6 +749,9 @@
 	}
 
 	afterNavigate(async () => {
+		// A navigation that kept this page (a link back to /settings)
+		// also kept its edits: guard them again.
+		discarding = false;
 		await tick();
 		const hash = window.location.hash.slice(1);
 		if (!hash) return;
@@ -729,6 +767,71 @@
 		if (target instanceof Element) {
 			target.scrollIntoView({ behavior: 'smooth', block: 'start' });
 		}
+	});
+
+	// --- Unsaved edits ----------------------------------------------
+	//
+	// Each card keeps its own draft. Leaving the page (a sidebar link,
+	// the back button, closing the tab) dropped every one of them
+	// without a word; it now asks first, naming the cards concerned.
+	// The self-contained sections report through bind:dirty.
+	let oidcDirty = $state(false);
+	let crowdsecDirty = $state(false);
+	let dnsDirty = $state(false);
+	let geoipDirty = $state(false);
+	let positionDirty = $state(false);
+	let scheduledBackupsDirty = $state(false);
+
+	const accessLogDirty = $derived(alKey() !== alSaved);
+	const automationDirty = $derived(
+		credsKey() !== credsSaved ||
+			unreadableCount > 0 ||
+			JSON.stringify(rulesDraft) !== JSON.stringify(automationRules.rules)
+	);
+	const fwdAuthDirty = $derived(fwdAuthFormOpen && JSON.stringify(fwdAuthForm) !== fwdAuthOpenedKey);
+
+	// Set once the operator agreed to drop the edits, so the guard lets
+	// the navigation they asked for through.
+	let discarding = $state(false);
+
+	const dirtyCards = $derived(
+		[
+			{ tab: 'security', dirty: accessLogDirty, name: tl('settings.accessLog.title') },
+			{ tab: 'security', dirty: automationDirty, name: tl('settings.unsaved.cardAutomation') },
+			{ tab: 'security', dirty: fwdAuthDirty, name: tl('settings.unsaved.cardForwardAuth') },
+			{ tab: 'security', dirty: oidcDirty, name: tl('oidcSettings.title') },
+			{ tab: 'security', dirty: crowdsecDirty, name: tl('crowdsecSettings.title') },
+			{ tab: 'network', dirty: dnsDirty, name: tl('settings.dnsProviders.title') },
+			{ tab: 'network', dirty: geoipDirty, name: tl('geoipSettings.title') },
+			{ tab: 'network', dirty: positionDirty, name: tl('serverPosition.title') },
+			{ tab: 'backups', dirty: scheduledBackupsDirty, name: tl('scheduledBackups.title') }
+		].filter((c) => c.dirty)
+	);
+	const dirtyTabs = $derived(new Set<string>(dirtyCards.map((c) => c.tab)));
+
+	let leaveConfirmOpen = $state(false);
+	let pendingLeave: (() => void) | null = null;
+
+	guardNavigation(
+		() => !discarding && dirtyCards.length > 0,
+		(proceed) => {
+			pendingLeave = proceed;
+			leaveConfirmOpen = true;
+		}
+	);
+
+	function confirmLeave(): void {
+		leaveConfirmOpen = false;
+		discarding = true;
+		const proceed = pendingLeave;
+		pendingLeave = null;
+		proceed?.();
+	}
+
+	// ConfirmDialog reports only the affirmative answer; a dialog
+	// closed any other way leaves nothing armed.
+	$effect(() => {
+		if (!leaveConfirmOpen) pendingLeave = null;
 	});
 </script>
 
@@ -961,6 +1064,7 @@
 					<header class="flex items-center justify-between border-b border-border-subtle pb-3 mb-4">
 						<div>
 							<h2 class="text-xl font-semibold">{tl('settings.accessLog.title')}</h2>
+							<UnsavedMarker dirty={accessLogDirty} testid="access-log-unsaved" />
 							<p class="text-xs text-muted mt-1">{tl('settings.accessLog.subtitle')}</p>
 						</div>
 						{#if accessLogLoading}
@@ -1109,6 +1213,7 @@
 					<header class="flex items-center justify-between border-b border-border-subtle pb-3 mb-4">
 						<div>
 							<h2 class="text-xl font-semibold">Security Automation</h2>
+							<UnsavedMarker dirty={automationDirty} testid="automation-unsaved" />
 							<p class="text-xs text-muted mt-1">
 								Push CrowdSec bans to LAPI automatically when WAF / throttle / auth-failure events cross operator-configured thresholds. Decisions appear in the CrowdSec dashboard with scenario prefix <code>arenet/</code>.
 							</p>
@@ -1220,6 +1325,9 @@
 						<p class="text-xs text-muted mb-3">
 							Each category is disabled by default. When enabled, Arenet bans a source IP after <em>threshold</em> events in <em>window</em>, for <em>duration</em>, with a <em>cooldown</em> after an operator unban that suppresses re-ban for that long.
 						</p>
+						<p id="automation-duration-hint" class="text-xs text-muted mb-3">
+							{tl('settings.automationRules.durationHint')}
+						</p>
 						<form
 							onsubmit={(e) => {
 								e.preventDefault();
@@ -1262,39 +1370,34 @@
 														aria-label={`Threshold for ${AUTOMATION_SOURCE_LABELS[src]}`}
 													/>
 												</td>
-												<td class="py-2 px-2">
-													<input
-														type="text"
-														value={nsToHuman(getRule(src).window_ns)}
-														onchange={(e) =>
-															setRuleField(src, 'window_ns', humanToNs((e.target as HTMLInputElement).value))}
-														placeholder="60s"
-														class="w-20 bg-surface border border-border-default rounded-md px-2 py-1 text-sm font-mono"
-														aria-label={`Window for ${AUTOMATION_SOURCE_LABELS[src]}`}
-													/>
-												</td>
-												<td class="py-2 px-2">
-													<input
-														type="text"
-														value={nsToHuman(getRule(src).duration_ns)}
-														onchange={(e) =>
-															setRuleField(src, 'duration_ns', humanToNs((e.target as HTMLInputElement).value))}
-														placeholder="4h"
-														class="w-20 bg-surface border border-border-default rounded-md px-2 py-1 text-sm font-mono"
-														aria-label={`Duration for ${AUTOMATION_SOURCE_LABELS[src]}`}
-													/>
-												</td>
-												<td class="py-2 px-2">
-													<input
-														type="text"
-														value={nsToHuman(getRule(src).cooldown_ns)}
-														onchange={(e) =>
-															setRuleField(src, 'cooldown_ns', humanToNs((e.target as HTMLInputElement).value))}
-														placeholder="24h"
-														class="w-20 bg-surface border border-border-default rounded-md px-2 py-1 text-sm font-mono"
-														aria-label={`Cooldown for ${AUTOMATION_SOURCE_LABELS[src]}`}
-													/>
-												</td>
+												{#each RULE_DURATION_FIELDS as f (f.key)}
+													{@const key = `${src}.${f.key}`}
+													{@const unreadable = key in unreadableDurations}
+													{@const errorId = `automation-${src}-${f.key}-error`}
+													<td class="py-2 px-2">
+														<input
+															type="text"
+															value={unreadableDurations[key] ?? nsToHuman(getRule(src)[f.key])}
+															onchange={(e) =>
+																setRuleDuration(src, f.key, (e.target as HTMLInputElement).value)}
+															placeholder={f.placeholder}
+															class="w-20 bg-surface border rounded-md px-2 py-1 text-sm font-mono"
+															class:border-down={unreadable}
+															class:border-border-default={!unreadable}
+															aria-label={`${f.label} for ${AUTOMATION_SOURCE_LABELS[src]}`}
+															aria-invalid={unreadable ? 'true' : undefined}
+															aria-describedby={unreadable
+																? `${errorId} automation-duration-hint`
+																: 'automation-duration-hint'}
+															data-testid={`automation-${src}-${f.key}`}
+														/>
+														{#if unreadable}
+															<p id={errorId} class="text-xs text-down mt-1">
+																{tl('settings.automationRules.durationUnreadable')}
+															</p>
+														{/if}
+													</td>
+												{/each}
 											</tr>
 										{/each}
 									</tbody>
@@ -1303,8 +1406,23 @@
 							{#if rulesFormError}
 								<p class="text-sm text-down mt-3" role="alert">{rulesFormError}</p>
 							{/if}
+							{#if unreadableCount > 0}
+								<p
+									id="automation-rules-unreadable"
+									class="text-sm text-down mt-3"
+									role="alert"
+									data-testid="automation-rules-unreadable"
+								>
+									{tl('settings.automationRules.unreadableSummary', { count: unreadableCount })}
+								</p>
+							{/if}
 							<div class="flex justify-end mt-4">
-								<Button type="submit" disabled={rulesSubmitting}>
+								<Button
+									type="submit"
+									disabled={rulesSubmitting || unreadableCount > 0}
+									aria-describedby={unreadableCount > 0 ? 'automation-rules-unreadable' : undefined}
+									data-testid="automation-rules-save"
+								>
 									{rulesSubmitting ? 'Saving…' : 'Save rules'}
 								</Button>
 							</div>
@@ -1326,6 +1444,7 @@
 					<header class="flex items-center justify-between border-b border-border-subtle pb-3 mb-4">
 						<div>
 							<h2 class="text-xl font-semibold">Forward-auth providers</h2>
+							<UnsavedMarker dirty={fwdAuthDirty} testid="fwdauth-unsaved" />
 							<p class="text-xs text-muted mt-1">
 								Configure identity providers (Authelia / Authentik /
 								Keycloak / generic) that routes delegate auth to.
@@ -1564,14 +1683,14 @@
 			     the "Modifier la config" button in the
 			     OIDCConfigSummary sidebar on /utilisateurs. -->
 			<div id="oidc-config">
-				<OIDCSettingsSection />
+				<OIDCSettingsSection bind:dirty={oidcDirty} />
 			</div>
 			<!-- ROW 2.87 — CrowdSec bouncer (Step CS.1). Sits next
 			     to OIDC since both are admin-facing secret-config
 			     sections that hot-reload Caddy on save. The chain
 			     position #2 implication (country_block fires first)
 			     is documented in docs/setup/crowdsec.md. -->
-			<CrowdSecSettingsSection />
+			<CrowdSecSettingsSection bind:dirty={crowdsecDirty} />
 		</div>
 		{/if}
 
@@ -1582,11 +1701,11 @@
 			     pre-v2.12 singleton OVH credentials form. The section root
 			     carries id="dns-providers" so the wildcard wizard's
 			     empty-state CTA can deep-link here. -->
-			<DNSProvidersSection />
+			<DNSProvidersSection bind:dirty={dnsDirty} />
 			<!-- Brick 4, Task 3 — GeoIP settings (MaxMind credentials +
 			     auto-update). Mounted right after UpdatesSection: both are
 			     opt-in "keep this data fresh" mini-sections. -->
-			<GeoIPSettingsSection />
+			<GeoIPSettingsSection bind:dirty={geoipDirty} />
 			<!-- ROW 2.85 — Post-apply route check (v2.35). -->
 			<RouteCheckSection />
 			<!-- ROW 2.95 — Server geographic position (Step V.7 §5.1-§5.3).
@@ -1594,7 +1713,7 @@
 			     mode badge (Auto/Manuel/Dégradé), lat/lon/city/country
 			     form with [-90, 90] / [-180, 180] inline validation,
 			     Re-détecter button driving the POST :redetect path. -->
-			<ServerPositionSection />
+			<ServerPositionSection bind:dirty={positionDirty} />
 		</div>
 		{/if}
 
@@ -1603,7 +1722,7 @@
 			<!-- ROW 2.9 — Backup & restore (Step K.3 §5.3). -->
 			<BackupSection />
 			<!-- ROW 2.91 — Scheduled backups (v2.33): folder / NAS / email. -->
-			<ScheduledBackupsSection />
+			<ScheduledBackupsSection bind:dirty={scheduledBackupsDirty} />
 		</div>
 		{/if}
 
@@ -1683,6 +1802,18 @@
 		cancelLabel={language.current && t('settingsSubcards.automationResetDialogCancel')}
 		confirmVariant="danger"
 		onConfirm={confirmAutomationReset}
+	/>
+
+	<!-- Leaving the page with unsaved edits (see guardNavigation). -->
+	<ConfirmDialog
+		bind:open={leaveConfirmOpen}
+		title={language.current && t('settings.unsaved.dialogTitle')}
+		message={language.current &&
+			t('settings.unsaved.dialogMessage', { cards: dirtyCards.map((c) => c.name).join(', ') })}
+		confirmLabel={language.current && t('settings.unsaved.dialogConfirm')}
+		cancelLabel={language.current && t('settings.unsaved.dialogCancel')}
+		confirmVariant="danger"
+		onConfirm={confirmLeave}
 	/>
 
 	<!-- Step O.4 delete-managed-domain dialog migrated to /certs

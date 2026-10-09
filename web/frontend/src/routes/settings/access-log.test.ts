@@ -44,7 +44,12 @@ vi.mock('$lib/api/auth', () => ({
 	}
 }));
 vi.mock('$lib/stores/toast', () => ({ pushToast: vi.fn() }));
-vi.mock('$app/navigation', () => ({ afterNavigate: () => {}, goto: vi.fn() }));
+vi.mock('$app/navigation', () => ({
+	afterNavigate: () => {},
+	// The page guards unsaved edits through beforeNavigate.
+	beforeNavigate: () => {},
+	goto: vi.fn()
+}));
 
 import Page from './+page.svelte';
 

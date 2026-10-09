@@ -3,7 +3,7 @@
 // Licensed under the GNU AGPL v3 or later. See LICENSE.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/svelte';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { ApiError } from '$lib/api/types';
 import type { BackupSchedule } from '$lib/api/settings';
@@ -137,5 +137,45 @@ describe('ScheduledBackupsSection', () => {
 		const dialogRestore = screen.getAllByRole('button', { name: 'Restore' }).at(-1)!;
 		await userEvent.click(dialogRestore);
 		await waitFor(() => expect(api.restoreBackupFile).toHaveBeenCalledWith('arenet-backup-auto-20260921-030000.json'));
+	});
+
+	// The settings page asks before it is left with unsaved edits; the
+	// card says which one holds them.
+	describe('unsaved changes', () => {
+		it('marks an edit, and clears the mark when the edit is undone', async () => {
+			await renderLoaded();
+			expect(screen.queryByTestId('sched-unsaved')).toBeNull();
+
+			const keep = screen.getByTestId('sched-keep');
+			await fireEvent.input(keep, { target: { value: '30' } });
+			expect(screen.getByTestId('sched-unsaved')).toBeInTheDocument();
+			await fireEvent.input(keep, { target: { value: '14' } });
+			expect(screen.queryByTestId('sched-unsaved')).toBeNull();
+
+			// Ticking a channel and unticking it again changes nothing.
+			await userEvent.click(screen.getByLabelText(/discord/));
+			expect(screen.getByTestId('sched-unsaved')).toBeInTheDocument();
+			await userEvent.click(screen.getByLabelText(/discord/));
+			expect(screen.queryByTestId('sched-unsaved')).toBeNull();
+
+			// A blank passphrase keeps the stored one; a typed one is an edit.
+			const [pass] = screen.getAllByLabelText(/passphrase/i);
+			await userEvent.type(pass, 'x');
+			expect(screen.getByTestId('sched-unsaved')).toBeInTheDocument();
+		});
+
+		it('clears the mark once the schedule is saved', async () => {
+			api.putBackupSchedule.mockImplementation(async (r) => ({ ...baseView, ...r, passphraseSet: true }));
+			await renderLoaded();
+			await userEvent.click(screen.getByTestId('sched-enabled'));
+			const [pass, confirm] = screen.getAllByLabelText(/passphrase/i);
+			await userEvent.type(pass, 'a long enough passphrase');
+			await userEvent.type(confirm, 'a long enough passphrase');
+			expect(screen.getByTestId('sched-unsaved')).toBeInTheDocument();
+
+			await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+			await waitFor(() => expect(api.putBackupSchedule).toHaveBeenCalled());
+			await waitFor(() => expect(screen.queryByTestId('sched-unsaved')).toBeNull());
+		});
 	});
 });

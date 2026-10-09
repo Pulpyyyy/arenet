@@ -48,6 +48,14 @@
 	import Spinner from '$lib/components/Spinner.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import UnsavedMarker from './UnsavedMarker.svelte';
+
+	interface Props {
+		/** Out: the add/edit form is open with edits not yet saved. */
+		dirty?: boolean;
+	}
+
+	let { dirty = $bindable(false) }: Props = $props();
 
 	let providers = $state<DNSProvider[]>([]);
 	let types = $state<DNSProviderType[]>([]);
@@ -70,6 +78,14 @@
 	});
 
 	const formType = $derived(types.find((ty) => ty.type === form.type));
+
+	// The form as the modal opened with it. Stored secrets are blank
+	// then ("keep"), so only a typed secret counts as an edit.
+	let openedKey = $state('');
+	const isDirty = $derived(modalOpen && JSON.stringify(form) !== openedKey);
+	$effect(() => {
+		dirty = isDirty;
+	});
 
 	// Delete state.
 	let deleteOpen = $state(false);
@@ -132,6 +148,7 @@
 		editingId = null;
 		editingSecretsSet = {};
 		form = { label: '', type: first, credentials: defaultsFor(first) };
+		openedKey = JSON.stringify(form);
 		formError = null;
 		modalOpen = true;
 	}
@@ -150,6 +167,7 @@
 		// blank submit preserves the stored value.
 		for (const k of Object.keys(editingSecretsSet)) credentials[k] = '';
 		form = { label: p.label, type: p.type, credentials };
+		openedKey = JSON.stringify(form);
 		formError = null;
 		modalOpen = true;
 	}
@@ -305,6 +323,7 @@
 				<h2 class="text-xl font-semibold">
 					{language.current && t('settings.dnsProviders.title')}
 				</h2>
+				<UnsavedMarker dirty={isDirty} testid="dns-providers-unsaved" />
 				<p class="text-xs text-muted mt-1">
 					{language.current && t('settings.dnsProviders.subtitle')}
 				</p>
