@@ -93,14 +93,16 @@
 		"navTCPServices": "TCP / UDP services",
 		"navLogs": "Logs",
 		"navWAF": "WAF",
-		"navSecurity": "Security",
+		"navSecurity": "Threats",
 		"navCertificates": "Certificates",
 		"navAlerting": "Alerting",
 		"navUsers": "Users",
 		"navSettings": "Settings",
 		"navErrorPages": "Error pages",
 		"navAuditLog": "Audit log",
-		"navApiDocs": "API docs"
+		"navApiDocs": "API docs",
+		"crumbObservability": "Metrics",
+		"crumbRoute": "Route"
 	},
 	"topbar": {
 		"statusAriaLabel": "Gateway status",
@@ -868,7 +870,8 @@
 		"perfPivot": "View the performance drill-down (requests / latency) →"
 	},
 	"security": {
-		"eyebrow": "Security · Posture",
+		"headTitle": "Threats · Arenet",
+		"eyebrow": "Security · Threats",
 		"subtitle": "Posture overview plus the CrowdSec drill-down (snapshot, live LAPI, scenarios).",
 		"tabsAria": "Security sections",
 		"tabOverview": "Overview",
@@ -1517,6 +1520,9 @@
 	"errorPages": {
 		"headTitle": "Error pages · Arenet",
 		"eyebrow": "Settings · Error pages",
+		"settingsCardTitle": "Error pages",
+		"settingsCardDescription": "The HTML pages Caddy serves for 4xx and 5xx errors, with your own templates per route.",
+		"settingsCardLink": "Manage error pages →",
 		"titleList": "Custom error pages",
 		"titleBuiltinPreview": "Preview: Arenet default",
 		"titleEdit": "Edit template",

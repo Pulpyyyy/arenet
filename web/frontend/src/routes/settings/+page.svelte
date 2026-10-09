@@ -1589,6 +1589,27 @@
 			<SystemInfoSection />
 			<!-- v2.12.3 — opt-in update checker mini-card. -->
 			<UpdatesSection />
+			<!-- Error pages left the sidebar: it is a settings sub-page,
+			     so its way in is here. -->
+			<Card padding="p-6">
+				<div class="flex items-center justify-between gap-4">
+					<div>
+						<h2 class="text-xl font-semibold">
+							{language.current && t('errorPages.settingsCardTitle')}
+						</h2>
+						<p class="text-xs text-muted mt-1">
+							{language.current && t('errorPages.settingsCardDescription')}
+						</p>
+					</div>
+					<a
+						href="/settings/error-pages"
+						class="text-sm text-cyan hover:underline shrink-0"
+						data-testid="settings-error-pages-link"
+					>
+						{language.current && t('errorPages.settingsCardLink')}
+					</a>
+				</div>
+			</Card>
 			<!-- ROW 3 — About, full-width (footer-meta, intentionally aerated) -->
 			<Card padding="p-6">
 				<header class="border-b border-border-subtle pb-3 mb-4">

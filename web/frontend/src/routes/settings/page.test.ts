@@ -34,7 +34,10 @@ vi.mock('$lib/api/settings', () => {
 	};
 });
 vi.mock('$lib/api/system', () => ({
-	systemApi: new Proxy({}, { get: () => vi.fn().mockResolvedValue({}) })
+	systemApi: new Proxy({}, { get: () => vi.fn().mockResolvedValue({}) }),
+	// The System tab's host card reads nested fields; an empty object
+	// would throw, a refusal renders its error line instead.
+	getSystemInfo: vi.fn().mockRejectedValue(new Error('not under test'))
 }));
 vi.mock('$lib/api/auth', () => ({
 	authApi: {
@@ -114,6 +117,15 @@ describe('Settings page — v2.41 categories', () => {
 		await afterNavigateMock.cb?.();
 		await waitFor(() => expect(tab('security').getAttribute('aria-selected')).toBe('true'));
 		expect(document.getElementById('oidc-config')).not.toBeNull();
+	});
+
+	// Error pages left the sidebar; the System tab is its way in now.
+	it('links to the error pages from the System tab', async () => {
+		render(Page);
+		await userEvent.click(tab('system'));
+		const link = await screen.findByTestId('settings-error-pages-link');
+		expect(link).toHaveAttribute('href', '/settings/error-pages');
+		expect(link.textContent).toMatch(/Manage error pages/);
 	});
 });
 

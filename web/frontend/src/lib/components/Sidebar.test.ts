@@ -36,11 +36,12 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('$app/state', () => ({
-	page: {
-		url: new URL('http://localhost/routes')
-	}
+// Mutable so the active-item tests can set the path before render.
+// Hoisted because vi.mock factories run before top-level consts.
+const { pageMock } = vi.hoisted(() => ({
+	pageMock: { url: new URL('http://localhost/routes') }
 }));
+vi.mock('$app/state', () => ({ page: pageMock }));
 
 // systemApi.getVersion backs the brand version badge next to the logo.
 // Default: a release-shaped version. Individual tests override it.
@@ -86,6 +87,7 @@ describe('Sidebar', () => {
 		// Reset the auth store between tests so admin-visibility
 		// assertions start from a known state.
 		auth.user = null;
+		pageMock.url = new URL('http://localhost/routes');
 		// Default: a release-shaped version so unrelated tests don't
 		// hit an unresolved getVersion() promise.
 		getVersionMock.mockReset().mockResolvedValue(sysVersion());
@@ -99,15 +101,15 @@ describe('Sidebar', () => {
 		// (no cookie / no localStorage in jsdom).
 		expect(screen.getByText('Overview')).toBeInTheDocument();
 		expect(screen.getByText('Traffic')).toBeInTheDocument();
-		// "Security" appears BOTH as a section header AND as a nav
-		// item (EN labels collide ; FR labels did too — "Sécurité"
-		// section + "Security" nav item happened to differ). Assert
-		// both surfaces exist via getAllByText.
-		expect(screen.getAllByText('Security')).toHaveLength(2);
+		// The section is "Security"; the /security item under it is
+		// "Threats" — it used to be "Security" too, the same word
+		// twice in a row.
+		expect(screen.getAllByText('Security')).toHaveLength(1);
+		expect(screen.getByText('Threats')).toBeInTheDocument();
 		// Administration is admin-only; default = no user set in store.
 		expect(screen.queryByText('Administration')).not.toBeInTheDocument();
 
-		// 8 non-admin nav items (Security counted above).
+		// The other non-admin nav items.
 		expect(screen.getByText('Dashboard')).toBeInTheDocument();
 		expect(screen.getByText('Topology')).toBeInTheDocument();
 		expect(screen.getByText('Map')).toBeInTheDocument();
@@ -135,9 +137,6 @@ describe('Sidebar', () => {
 
 		expect(screen.getByText('Administration')).toBeInTheDocument();
 		expect(screen.getByText('Users')).toBeInTheDocument();
-		// "Settings" is both an admin nav item and the route /settings;
-		// getAllByText returns 2 hits (the link + the /settings/error-pages
-		// sibling text "Error pages" comes from its own key, not "Settings").
 		expect(screen.getByText('Settings')).toBeInTheDocument();
 		// CS.2 follow-up — Audit log entry closes
 		// #R-AUDIT-not-in-nav. Admin-only.
@@ -161,11 +160,9 @@ describe('Sidebar', () => {
 		expect(auditLink).toHaveAttribute('href', '/audit');
 	});
 
-	// Step R Phase 2.1 — sidebar link for the /settings/
-	// error-pages CRUD page. Closes a nav gap : the page
-	// existed since Phase 2 (commit dceb57f) but had no
-	// sidebar entry, forcing operators to type the URL.
-	it("'Error pages' link points to /settings/error-pages (admin only)", () => {
+	// Error pages is a settings sub-page: Settings → System links to
+	// it, so the sidebar no longer carries its own entry.
+	it('has no Error pages item, even for an admin', () => {
 		auth.user = {
 			username: 'admin',
 			displayName: 'Admin',
@@ -175,26 +172,11 @@ describe('Sidebar', () => {
 		} as never;
 
 		render(Sidebar);
-		// v2.9.12 i18n Phase 2 — label flipped from "Pages d'erreur"
-		// (hardcoded FR) to "Error pages" (EN default via t()).
-		const link = screen
-			.getAllByRole('link', { hidden: false })
-			.find((l) => l.textContent?.includes('Error pages'));
-		expect(link).toBeDefined();
-		expect(link).toHaveAttribute('href', '/settings/error-pages');
-	});
-
-	it("'Error pages' is hidden from non-admin (viewer)", () => {
-		auth.user = {
-			username: 'viewer',
-			displayName: 'Viewer',
-			role: 'viewer',
-			mfa: 'none',
-			passwordCompromised: false
-		} as never;
-
-		render(Sidebar);
 		expect(screen.queryByText('Error pages')).not.toBeInTheDocument();
+		const hrefs = screen
+			.getAllByRole('link', { hidden: false })
+			.map((l) => l.getAttribute('href'));
+		expect(hrefs).not.toContain('/settings/error-pages');
 	});
 
 	it('keeps /security sub-routes OUT of the sidebar (R.4 D8 design)', () => {
@@ -244,6 +226,47 @@ describe('Sidebar', () => {
 			.getAllByRole('link', { hidden: false })
 			.find((l) => l.textContent?.includes('Dashboard'));
 		expect(dashboard).not.toHaveAttribute('aria-current');
+	});
+
+	// Sub-pages light up their parent item (longest-prefix match);
+	// exact match left nothing highlighted on them.
+	function activeHrefs(): (string | null)[] {
+		return screen
+			.getAllByRole('link', { hidden: false })
+			.filter((l) => l.getAttribute('aria-current') === 'page')
+			.map((l) => l.getAttribute('href'));
+	}
+
+	it('highlights Threats on a per-route /security/<id> page', () => {
+		pageMock.url = new URL('http://localhost/security/f2aa08ff-8c86-4ede-8bc1-96670b1342a5');
+		render(Sidebar);
+		expect(activeHrefs()).toEqual(['/security']);
+	});
+
+	it('highlights Settings on /settings/error-pages', () => {
+		auth.user = {
+			username: 'admin',
+			displayName: 'Admin',
+			role: 'admin',
+			mfa: 'none',
+			passwordCompromised: false
+		} as never;
+		pageMock.url = new URL('http://localhost/settings/error-pages');
+		render(Sidebar);
+		expect(activeHrefs()).toEqual(['/settings']);
+	});
+
+	it('highlights nothing on a page without a parent item', () => {
+		pageMock.url = new URL('http://localhost/observability/f2aa08ff-8c86-4ede-8bc1-96670b1342a5');
+		render(Sidebar);
+		expect(activeHrefs()).toEqual([]);
+	});
+
+	it('matches whole segments only, not a bare string prefix', () => {
+		// /routes-archive is not under /routes.
+		pageMock.url = new URL('http://localhost/routes-archive');
+		render(Sidebar);
+		expect(activeHrefs()).toEqual([]);
 	});
 
 	it('exposes a sign-out button in the sidebar-foot', () => {

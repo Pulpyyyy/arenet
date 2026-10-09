@@ -14,7 +14,8 @@
 
   Per spec D8 outcome, /security/[routeId] is NOT exposed in
   the sidebar — it remains reachable via "Voir tout" links
-  injected from /routes detail pages in R.4. Same for
+  injected from /routes detail pages in R.4 (the "Threats"
+  item, /security, is highlighted while on it). Same for
   /admin/users which is still routed but the sidebar entry
   points to the new /users top-level route.
 
@@ -85,7 +86,6 @@
 		| 'settings'
 		| 'audit'
 		| 'alerting'
-		| 'error-pages'
 		| 'api';
 
 	// v2.9.12 i18n Phase 2 — section / nav structures now carry
@@ -142,13 +142,10 @@
 			adminOnly: true,
 			items: [
 				{ href: '/users', labelKey: 'sidebar.navUsers', icon: 'users', adminOnly: true },
+				// Error pages is reached from Settings → System, not
+				// from here: it is a settings sub-page, and the prefix
+				// match below lights Settings up while on it.
 				{ href: '/settings', labelKey: 'sidebar.navSettings', icon: 'settings', adminOnly: true },
-				{
-					href: '/settings/error-pages',
-					labelKey: 'sidebar.navErrorPages',
-					icon: 'error-pages',
-					adminOnly: true
-				},
 				{ href: '/audit', labelKey: 'sidebar.navAuditLog', icon: 'audit', adminOnly: true },
 				// v2.39 — OpenAPI documentation of the admin API.
 				{ href: '/api-docs', labelKey: 'sidebar.navApiDocs', icon: 'api', adminOnly: true }
@@ -160,14 +157,22 @@
 	const visibleSections = $derived(sections.filter((s) => !s.adminOnly || isAdmin));
 
 	const currentPath = $derived(page.url.pathname);
+	// Longest-prefix match over the visible items, so a sub-page
+	// lights up its parent: /security/<routeId> → Threats,
+	// /settings/error-pages → Settings. Exact match alone left
+	// nothing highlighted on those pages. The trailing '/' in the
+	// prefix test keeps /users from matching /users-something, and
+	// pages with no parent item (/observability/<routeId>) stay
+	// unhighlighted.
+	const activeHref = $derived(
+		visibleSections
+			.flatMap((s) => s.items)
+			.map((i) => i.href)
+			.filter((h) => currentPath === h || currentPath.startsWith(h + '/'))
+			.reduce<string | null>((best, h) => (best === null || h.length > best.length ? h : best), null)
+	);
 	function isActive(href: string): boolean {
-		// Exact-match on pathname. CS.3 moved /security/decisions
-		// into /security?tab=crowdsec, which still matches the
-		// /security pathname — so opening the CrowdSec tab keeps
-		// the Security sidebar item active. /security/[routeId]
-		// keeps its own context per D8 (sidebar item not active
-		// on a per-route drill-down — that has its own breadcrumb).
-		return currentPath === href;
+		return href === activeHref;
 	}
 
 	// Identity block: 2-letter avatar derived from displayName / username.
@@ -254,16 +259,6 @@
 			<!-- Bell glyph: dome + base + clapper. AL.4.b.1. -->
 			<path d="M8 2c-2.5 0-4 1.7-4 4v3l-1.5 2h11L12 9V6c0-2.3-1.5-4-4-4z" />
 			<path d="M6.5 13.5a1.5 1.5 0 003 0" />
-		{:else if icon === 'error-pages'}
-			<!-- Document with exclamation glyph : page outline +
-			     dog-eared corner + central "!" mark. Conveys
-			     "error page template" without using a pure
-			     AlertTriangle (which is reserved for runtime
-			     warnings in the rest of the UI). Step R Phase 2.1. -->
-			<path d="M3.5 2h6l3 3v9a.5.5 0 01-.5.5h-8.5a.5.5 0 01-.5-.5V2.5a.5.5 0 01.5-.5z" />
-			<path d="M9.5 2v3h3" />
-			<path d="M8 8v3" />
-			<circle cx="8" cy="12.7" r="0.5" fill="currentColor" stroke="none" />
 		{:else if icon === 'api'}
 			<!-- Braces glyph "{ }": the API / code documentation. v2.39. -->
 			<path d="M5.5 2.5c-1.5 0-2 .7-2 2v1.5c0 1-.5 1.5-1.5 2 1 .5 1.5 1 1.5 2v1.5c0 1.3.5 2 2 2" />

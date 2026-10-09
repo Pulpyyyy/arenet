@@ -117,7 +117,7 @@
 </script>
 
 <svelte:head>
-	<title>Security · Arenet</title>
+	<title>{tl('security.headTitle')}</title>
 </svelte:head>
 
 <PageHeader
