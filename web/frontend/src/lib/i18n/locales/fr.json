@@ -103,8 +103,11 @@
 		"navApiDocs": "Documentation API"
 	},
 	"topbar": {
-		"statusAriaLabel": "État de la passerelle",
-		"statusHealthy": "Passerelle saine"
+		"statusHealthy": "Passerelle saine",
+		"statusDegraded": "Passerelle dégradée",
+		"statusUnhealthy": "Passerelle en panne",
+		"statusUnknown": "État de la passerelle inconnu",
+		"statusUnknownTitle": "Le rapport de santé (/system/health) n'a pas pu être lu."
 	},
 	"settings": {
 		"languageLabel": "Langue",

@@ -134,3 +134,40 @@ export interface SystemInfo {
 
 export const getSystemInfo = (): Promise<SystemInfo> =>
 	request<SystemInfo>('GET', '/system/info');
+
+// --- Gateway health ------------------------------------------------
+//
+//   GET /system/health  (no auth; mounted at the root, not /api/v1)
+//
+// Backend mirror: internal/api/system_health.go, internal/systemhealth.
+// Answers 503 with the same JSON body when the gateway is unhealthy,
+// so the body is read whatever the status code.
+
+/** Health of one component, or of the gateway as a whole. */
+export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy';
+
+/** One component's line in the health report. */
+export interface HealthComponent {
+	name: string;
+	status: HealthStatus;
+	latency_ms?: number;
+	message: string;
+}
+
+/** GET /system/health body. */
+export interface HealthReport {
+	status: HealthStatus;
+	timestamp: string;
+	version?: string;
+	components: HealthComponent[];
+}
+
+/** Reads the gateway health report. Throws when no report could be read. */
+export async function fetchSystemHealth(): Promise<HealthReport> {
+	const res = await fetch('/system/health', { cache: 'no-store' });
+	const body = (await res.json()) as HealthReport;
+	if (!body || typeof body.status !== 'string') {
+		throw new Error(`system health: unexpected body (HTTP ${res.status})`);
+	}
+	return body;
+}
