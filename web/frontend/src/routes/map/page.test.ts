@@ -19,7 +19,7 @@
 // real CDN.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { render, screen, waitFor, within } from '@testing-library/svelte';
 import type { ServerPosition, GeoEvent, GeoEventsResponse } from '$lib/api/types';
 import type { GeoEventStreamHandle, GeoEventStreamState } from '$lib/ws/geo-events-stream';
 
@@ -381,6 +381,28 @@ describe('/map page — V.7 LAN counter', () => {
 		await waitFor(() => {
 			expect(screen.getByTestId('map-legend')).toBeInTheDocument();
 		});
+	});
+
+	// The counters bump on every WS event; a live region on them
+	// would make a screen reader announce each bump. Only the WS
+	// connection pill stays role="status".
+	it('keeps the counters out of live regions — only the WS pill is role="status"', async () => {
+		fetchServerPositionMock.mockResolvedValue(happyPosition);
+		render(MapPage);
+		await waitFor(() => {
+			expect(streamCapture.onEvent).not.toBeNull();
+		});
+		streamCapture.onEvent?.(mkEvent({ isLan: true, sourceLat: 0, sourceLon: 0 }));
+		streamCapture.onEvent?.(mkEvent({ category: 'country_block' }));
+		await waitFor(() => {
+			expect(screen.getByTestId('map-lan-pill')).toBeInTheDocument();
+			expect(screen.getByTestId('map-country-block-pill')).toBeInTheDocument();
+		});
+		expect(screen.getByTestId('map-lan-pill')).not.toHaveAttribute('role');
+		expect(screen.getByTestId('map-country-block-pill')).not.toHaveAttribute('role');
+		const statuses = within(screen.getByTestId('map-frame')).getAllByRole('status');
+		expect(statuses).toHaveLength(1);
+		expect(statuses[0]).toHaveAttribute('data-testid', 'map-ws-pill');
 	});
 
 	it('has a tooltip explaining why LAN events do not arc', async () => {

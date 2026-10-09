@@ -9,6 +9,11 @@
 		"success": "Succès",
 		"signOut": "Se déconnecter",
 		"signedInAs": "Connecté en tant que {name}",
+		"dataTable": {
+			"detailsColumn": "Détails",
+			"toggleDetails": "Détails de la ligne",
+			"toggleDetailsFor": "Détails de {label}"
+		},
 		"noItems": "Aucun élément.",
 		"loadingAria": "Chargement",
 		"dismissNotification": "Fermer la notification",
@@ -1190,7 +1195,8 @@
 		"refusedProtocol": "mauvais protocole",
 		"refusedIPFilter": "filtre source",
 		"refusedCrowdSec": "CrowdSec",
-		"refusedTooltip": "Connexions fermées par une garde avant le backend. Non comptées comme connexions : elles n'ont jamais atteint le relai."
+		"refusedTooltip": "Connexions fermées par une garde avant le backend. Non comptées comme connexions : elles n'ont jamais atteint le relai.",
+		"editAria": "Modifier {name}"
 	},
 	"map": {
 		"emptyTitle": "Aucun événement de sécurité",

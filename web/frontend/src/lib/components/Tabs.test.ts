@@ -13,6 +13,8 @@
 //   - clicking the already-active tab is a no-op (onChange NOT
 //     fired) — caller invariant from the pre-extraction code
 //   - keyboard activation: Enter/Space natively via <button>
+//   - arrow / Home / End move focus (roving tabindex, manual
+//     activation) and aria-controls follows an optional panelId
 
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
@@ -116,6 +118,63 @@ describe('Tabs', () => {
 		// button; do both for stability.
 		await fireEvent.click(liveTab);
 		expect(onChange).toHaveBeenCalledWith('live');
+	});
+
+	it('is a single Tab stop: only the selected tab is tabbable (roving tabindex)', () => {
+		render(Tabs, {
+			value: 'live' as DemoTab,
+			tabs: demoTabs,
+			ariaLabel: 'Demo tabs'
+		});
+		expect(screen.getByTestId('tab-live')).toHaveAttribute('tabindex', '0');
+		expect(screen.getByTestId('tab-snapshot')).toHaveAttribute('tabindex', '-1');
+		expect(screen.getByTestId('tab-scenarios')).toHaveAttribute('tabindex', '-1');
+	});
+
+	it('moves focus with the arrow keys, Home and End — without selecting (manual activation)', async () => {
+		const onChange = vi.fn();
+		render(Tabs, {
+			value: 'snapshot' as DemoTab,
+			tabs: demoTabs,
+			ariaLabel: 'Demo tabs',
+			onChange
+		});
+		const tablist = screen.getByRole('tablist', { name: 'Demo tabs' });
+		screen.getByTestId('tab-snapshot').focus();
+
+		await fireEvent.keyDown(tablist, { key: 'ArrowRight' });
+		expect(screen.getByTestId('tab-live')).toHaveFocus();
+
+		await fireEvent.keyDown(tablist, { key: 'End' });
+		expect(screen.getByTestId('tab-scenarios')).toHaveFocus();
+
+		// Wraps from the last tab to the first.
+		await fireEvent.keyDown(tablist, { key: 'ArrowRight' });
+		expect(screen.getByTestId('tab-snapshot')).toHaveFocus();
+
+		// And from the first back to the last.
+		await fireEvent.keyDown(tablist, { key: 'ArrowLeft' });
+		expect(screen.getByTestId('tab-scenarios')).toHaveFocus();
+
+		await fireEvent.keyDown(tablist, { key: 'Home' });
+		expect(screen.getByTestId('tab-snapshot')).toHaveFocus();
+
+		// Moving focus never selected anything.
+		expect(onChange).not.toHaveBeenCalled();
+		expect(screen.getByTestId('tab-snapshot')).toHaveAttribute('aria-selected', 'true');
+	});
+
+	it('emits aria-controls only for tabs whose caller provides a panelId', () => {
+		render(Tabs, {
+			value: 'a',
+			tabs: [
+				{ id: 'a' as const, label: 'A', panelId: 'panel-a' },
+				{ id: 'b' as const, label: 'B' }
+			],
+			ariaLabel: 'Panels'
+		});
+		expect(screen.getByRole('tab', { name: 'A' })).toHaveAttribute('aria-controls', 'panel-a');
+		expect(screen.getByRole('tab', { name: 'B' })).not.toHaveAttribute('aria-controls');
 	});
 
 	it('renders without a testId when callers omit it', () => {

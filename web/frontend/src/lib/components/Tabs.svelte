@@ -14,15 +14,26 @@
   ARIA contract:
     - role="tablist" wrapper with operator-supplied aria-label
     - role="tab" buttons with aria-selected reflecting state
-    - keyboard activation: Enter and Space both trigger select
-      (matches the native <button> behavior used by the
-      pre-extraction inline implementation in
-      /security/decisions and /certs)
+    - the tablist is ONE Tab stop (roving tabindex: only the
+      selected tab has tabindex=0)
+    - ArrowLeft / ArrowRight move focus between tabs (wrapping),
+      Home / End jump to the first / last tab
+    - MANUAL activation: moving focus does not select. Enter and
+      Space (native <button> behaviour) select the focused tab.
+      WAI-ARIA recommends automatic activation only when a panel
+      shows without noticeable latency; several callers do real
+      work in onChange (CrowdSecDecisionsPanel starts live LAPI
+      polling or fetches scenarios, /settings rewrites the hash
+      and scrolls to the top), so selecting on every arrow press
+      would fire that work for each tab crossed on the way.
+    - aria-controls is emitted when the caller gives a tab a
+      `panelId` (the id of the element holding that tab's panel)
 
   Public API (Svelte 5 runes):
 
     value           — generic string discriminant (bindable)
-    tabs            — readonly array of { id, label, testId? }
+    tabs            — readonly array of { id, label, testId?,
+                      panelId? }
     ariaLabel       — wrapper aria-label (required for a11y)
     onChange?       — optional callback fired on user selection.
                       Receives the new id. If omitted, the
@@ -46,6 +57,8 @@
 		id: TId;
 		label: string;
 		testId?: string;
+		/** id of the element holding this tab's panel; emitted as aria-controls. */
+		panelId?: string;
 	}
 
 	interface Props {
@@ -57,21 +70,56 @@
 
 	let { value = $bindable(), tabs, ariaLabel, onChange }: Props = $props();
 
+	/** Index of the tab that owns the Tab stop: the selected one, or the
+	 *  first tab if `value` matches none (so the list stays reachable). */
+	const tabStop = $derived(Math.max(0, tabs.findIndex((tab) => tab.id === value)));
+
 	function select(next: T): void {
 		if (next === value) return;
 		value = next;
 		onChange?.(next);
 	}
+
+	function onKeydown(e: KeyboardEvent): void {
+		const buttons = Array.from(
+			(e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="tab"]')
+		);
+		if (buttons.length === 0) return;
+		const focused = buttons.indexOf(document.activeElement as HTMLButtonElement);
+		const from = focused >= 0 ? focused : tabStop;
+		let next: number;
+		switch (e.key) {
+			case 'ArrowLeft':
+				next = (from - 1 + buttons.length) % buttons.length;
+				break;
+			case 'ArrowRight':
+				next = (from + 1) % buttons.length;
+				break;
+			case 'Home':
+				next = 0;
+				break;
+			case 'End':
+				next = buttons.length - 1;
+				break;
+			default:
+				return;
+		}
+		e.preventDefault();
+		buttons[next].focus();
+	}
 </script>
 
-<div class="tabs" role="tablist" aria-label={ariaLabel}>
-	{#each tabs as tab (tab.id)}
+<!-- svelte-ignore a11y_interactive_supports_focus -->
+<div class="tabs" role="tablist" aria-label={ariaLabel} onkeydown={onKeydown}>
+	{#each tabs as tab, i (tab.id)}
 		<button
 			type="button"
 			role="tab"
 			class="tab"
 			class:active={value === tab.id}
 			aria-selected={value === tab.id}
+			aria-controls={tab.panelId}
+			tabindex={i === tabStop ? 0 : -1}
 			data-testid={tab.testId}
 			onclick={() => select(tab.id)}
 		>

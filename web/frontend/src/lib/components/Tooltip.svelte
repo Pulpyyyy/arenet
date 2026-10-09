@@ -16,7 +16,26 @@
   Side: 'top' | 'bottom' | 'left' | 'right' — defaults to 'top'.
 
   Reduced-motion is respected by the global @media block in
-  app.css (the transition:fade duration collapses to 0).
+  app.css (the bubble's fade-in animation duration collapses to 0).
+
+  Accessibility (WCAG 1.3.1 / 4.1.2 / 1.4.13):
+
+    - aria-describedby goes on the FOCUSABLE trigger, not on the
+      wrapper: on mount the component looks for the first focusable
+      element inside `children` (button, link, input, [tabindex]…)
+      and adds the bubble's id to that element's aria-describedby
+      (merged with any ids the caller already set; removed again on
+      unmount). Callers therefore just wrap a focusable element —
+      no id plumbing needed.
+    - When `children` holds nothing focusable (e.g. a Badge), the
+      wrapper itself becomes the trigger: it gets tabindex="0" and
+      the aria-describedby, so keyboard and screen-reader users can
+      still reach the text.
+    - The bubble stays in the DOM (hidden while closed) so the
+      description resolves the moment focus lands, not one render
+      later.
+    - Escape dismisses the open tooltip, whether it was opened by
+      hover or by focus, without moving the pointer or the focus.
 
   Public API (add-only per §1.3):
 
@@ -25,7 +44,6 @@
     children — Snippet (the trigger element)
 -->
 <script lang="ts">
-	import { fade } from 'svelte/transition';
 	import type { Snippet } from 'svelte';
 
 	type Side = 'top' | 'bottom' | 'left' | 'right';
@@ -38,30 +56,78 @@
 
 	let { label, side = 'top', children }: Props = $props();
 
+	/** Elements that take keyboard focus on their own. */
+	const FOCUSABLE_SELECTOR = [
+		'a[href]',
+		'button:not([disabled])',
+		'input:not([disabled]):not([type="hidden"])',
+		'select:not([disabled])',
+		'textarea:not([disabled])',
+		'summary',
+		'[contenteditable="true"]',
+		'[tabindex]:not([tabindex="-1"])'
+	].join(', ');
+
 	let open = $state(false);
+	/** True when `children` has no focusable element: the wrapper is the trigger. */
+	let wrapperIsTrigger = $state(false);
+	let wrapper: HTMLSpanElement | undefined = $state();
 	const id = `tt-${Math.random().toString(36).slice(2, 9)}`;
+
+	$effect(() => {
+		if (!wrapper) return;
+		const trigger = wrapper.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+		if (!trigger) {
+			wrapperIsTrigger = true;
+			return;
+		}
+		wrapperIsTrigger = false;
+		const existing = (trigger.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+		if (!existing.includes(id)) {
+			trigger.setAttribute('aria-describedby', [...existing, id].join(' '));
+		}
+		return () => {
+			const rest = (trigger.getAttribute('aria-describedby') ?? '')
+				.split(/\s+/)
+				.filter((token) => token && token !== id);
+			if (rest.length > 0) {
+				trigger.setAttribute('aria-describedby', rest.join(' '));
+			} else {
+				trigger.removeAttribute('aria-describedby');
+			}
+		};
+	});
+
+	function onWindowKeydown(event: KeyboardEvent): void {
+		if (open && event.key === 'Escape') {
+			open = false;
+		}
+	}
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions —
-     the wrapper is purely a positioning container; the actual
-     interactive surface is the child element passed via children.
-     mouseenter/leave drive tooltip visibility, focusin/out for
-     keyboard nav. Adding role="group" or "presentation" would
-     mislead AT users; we mark and explain instead. -->
+<svelte:window onkeydown={onWindowKeydown} />
+
+<!-- svelte-ignore a11y_no_static_element_interactions, a11y_no_noninteractive_tabindex —
+     the wrapper is a positioning container; the interactive surface
+     is normally the focusable child passed via children, which gets
+     the aria-describedby. Only when that child is not focusable does
+     the wrapper take a tabindex so the description stays reachable
+     from the keyboard. mouseenter/leave drive hover, focusin/out
+     drive keyboard nav. -->
 <span
 	class="tt-wrapper"
+	bind:this={wrapper}
 	onmouseenter={() => (open = true)}
 	onmouseleave={() => (open = false)}
 	onfocusin={() => (open = true)}
 	onfocusout={() => (open = false)}
-	aria-describedby={open ? id : undefined}
+	tabindex={wrapperIsTrigger ? 0 : undefined}
+	aria-describedby={wrapperIsTrigger ? id : undefined}
 >
 	{@render children?.()}
-	{#if open}
-		<span class="tt-bubble tt-{side}" {id} role="tooltip" transition:fade={{ duration: 100 }}>
-			{label}
-		</span>
-	{/if}
+	<span class="tt-bubble tt-{side}" {id} role="tooltip" hidden={!open}>
+		{label}
+	</span>
 </span>
 
 <style>
@@ -83,6 +149,18 @@
 		box-shadow: var(--shadow-md);
 		pointer-events: none;
 		line-height: 1.3;
+		/* Fades in each time `hidden` is lifted (display: none → box
+		   restarts the animation). Reduced motion collapses it via
+		   the global block in app.css. */
+		animation: tt-fade-in 100ms ease-out;
+	}
+	@keyframes tt-fade-in {
+		from {
+			opacity: 0;
+		}
+		to {
+			opacity: 1;
+		}
 	}
 	.tt-top {
 		bottom: calc(100% + var(--space-1));

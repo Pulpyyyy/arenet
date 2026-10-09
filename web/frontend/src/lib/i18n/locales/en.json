@@ -9,6 +9,11 @@
 		"success": "Success",
 		"signOut": "Sign out",
 		"signedInAs": "Signed in as {name}",
+		"dataTable": {
+			"detailsColumn": "Details",
+			"toggleDetails": "Row details",
+			"toggleDetailsFor": "Details for {label}"
+		},
 		"noItems": "No items.",
 		"loadingAria": "Loading",
 		"dismissNotification": "Dismiss notification",
@@ -1190,7 +1195,8 @@
 		"refusedProtocol": "wrong protocol",
 		"refusedIPFilter": "source filter",
 		"refusedCrowdSec": "CrowdSec",
-		"refusedTooltip": "Connections closed by a guard before the backend. Not counted as connections: they never reached the relay."
+		"refusedTooltip": "Connections closed by a guard before the backend. Not counted as connections: they never reached the relay.",
+		"editAria": "Edit {name}"
 	},
 	"map": {
 		"emptyTitle": "No security event yet",
