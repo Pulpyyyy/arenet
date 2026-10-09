@@ -16,7 +16,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { tick } from 'svelte';
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import type { ExternalCertificate } from '$lib/api/external-certs';
 import { ApiError } from '$lib/api/types';
@@ -42,6 +42,11 @@ vi.mock('$lib/api/external-certs', () => apiMock);
 import Panel from './ExternalCertsPanel.svelte';
 
 const NOW = new Date('2026-06-05T12:00:00Z');
+
+// Header-shaped PEM fixtures: the wrong-content checks only read the
+// BEGIN lines, so the bodies needn't be real DER.
+const PEM_CERT = '-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----';
+const PEM_KEY = '-----BEGIN PRIVATE KEY-----\nMIIEfake\n-----END PRIVATE KEY-----';
 
 function daysFromNow(days: number): string {
 	return new Date(NOW.getTime() + days * 86_400_000).toISOString();
@@ -240,6 +245,143 @@ describe('ExternalCertsPanel — upload', () => {
 		const inlineError = await screen.findByTestId('external-cert-chain-error-inline');
 		expect(inlineError.textContent ?? '').not.toContain('chain_specified_twice:');
 		expect(inlineError.textContent ?? '').toContain('chain is specified twice');
+	});
+
+	it('fills a PEM field from a picked file', async () => {
+		render(Panel);
+		await screen.findByTestId('external-cert-upload-form');
+
+		const file = new File([`${PEM_CERT}\n`], 'cert.pem', { type: 'application/x-pem-file' });
+		await fireEvent.change(screen.getByTestId('external-cert-cert-file-input'), {
+			target: { files: [file] }
+		});
+
+		const field = screen.getByTestId('external-cert-cert-pem') as HTMLTextAreaElement;
+		await waitFor(() => expect(field.value).toBe(PEM_CERT));
+		// The visible trigger names the field it fills.
+		expect(screen.getByTestId('external-cert-cert-file').getAttribute('aria-label')).toBe(
+			'Load Certificate (PEM) from a file'
+		);
+	});
+
+	it('refuses a picked file that is not PEM text', async () => {
+		render(Panel);
+		await screen.findByTestId('external-cert-upload-form');
+
+		const file = new File(['0\u0082binary'], 'cert.cer');
+		await fireEvent.change(screen.getByTestId('external-cert-cert-file-input'), {
+			target: { files: [file] }
+		});
+
+		const err = await screen.findByTestId('external-cert-cert-file-error');
+		expect(err.textContent ?? '').toMatch(/cert\.cer is not PEM text/);
+		expect((screen.getByTestId('external-cert-cert-pem') as HTMLTextAreaElement).value).toBe('');
+	});
+
+	it('flags a private key pasted in the Certificate field and blocks the upload', async () => {
+		render(Panel);
+		await screen.findByTestId('external-cert-upload-form');
+
+		await fireEvent.input(screen.getByTestId('external-cert-name'), {
+			target: { value: 'swapped' }
+		});
+		await fireEvent.input(screen.getByTestId('external-cert-cert-pem'), {
+			target: { value: PEM_KEY }
+		});
+		await fireEvent.input(screen.getByTestId('external-cert-key-pem'), {
+			target: { value: PEM_CERT }
+		});
+
+		expect(screen.getByTestId('external-cert-cert-issue').textContent ?? '').toMatch(
+			/contains a private key/
+		);
+		expect(screen.getByTestId('external-cert-key-issue').textContent ?? '').toMatch(
+			/contains a certificate, not a private key/
+		);
+		expect(screen.getByTestId('external-cert-cert-pem')).toHaveAttribute('aria-invalid', 'true');
+		expect(screen.getByTestId('external-cert-upload-btn')).toBeDisabled();
+		expect(apiMock.externalCertsApi.upload).not.toHaveBeenCalled();
+	});
+
+	it('flags a fullchain in the Certificate field when the Chain field is also filled', async () => {
+		render(Panel);
+		await screen.findByTestId('external-cert-upload-form');
+
+		await fireEvent.input(screen.getByTestId('external-cert-cert-pem'), {
+			target: { value: `${PEM_CERT}\n${PEM_CERT}` }
+		});
+		expect(screen.queryByTestId('external-cert-cert-issue')).not.toBeInTheDocument();
+
+		await fireEvent.input(screen.getByTestId('external-cert-chain-pem'), {
+			target: { value: PEM_CERT }
+		});
+		expect(screen.getByTestId('external-cert-cert-issue').textContent ?? '').toMatch(
+			/full chain and the Chain field is filled too/
+		);
+	});
+
+	it('translates a backend code on the cert-only re-import', async () => {
+		const pending = extCert({
+			name: 'Reimport',
+			status: 'pending_csr',
+			createdAt: daysFromNow(0),
+			csrSubject: { commonName: 'app.corp.local', keyAlgorithm: 'rsa_4096' }
+		});
+		apiMock.externalCertsApi.list.mockResolvedValue([pending]);
+		apiMock.externalCertsApi.update.mockRejectedValue(
+			new ApiError('key_does_not_match_cert: tls: private key does not match public key', 400)
+		);
+
+		render(Panel);
+		await screen.findByTestId('external-certs-empty');
+		await userEvent.click(screen.getByTestId('external-certs-tab-pending'));
+		await userEvent.click(await screen.findByTestId(`external-cert-reimport-${pending.id}`));
+		await fireEvent.input(await screen.findByTestId('external-cert-reimport-cert-pem'), {
+			target: { value: PEM_CERT }
+		});
+		await userEvent.click(screen.getByTestId('external-cert-reimport-submit'));
+
+		const err = await screen.findByTestId('external-cert-reimport-error');
+		expect(err.textContent ?? '').not.toContain('key_does_not_match_cert');
+		expect(err.textContent ?? '').toMatch(/does not match the certificate/);
+	});
+});
+
+describe('ExternalCertsPanel — row labelling', () => {
+	it('names the certificate in each delete button aria-label', async () => {
+		const cert = extCert({ name: 'corp-wildcard' });
+		apiMock.externalCertsApi.list.mockResolvedValue([cert]);
+		render(Panel);
+		const btn = await screen.findByTestId(`external-cert-delete-${cert.id}`);
+		expect(btn.getAttribute('aria-label')).toBe('Delete certificate "corp-wildcard"');
+	});
+
+	it('names the pending CSR in its delete button aria-label', async () => {
+		const pending = extCert({
+			name: 'csr-1',
+			status: 'pending_csr',
+			createdAt: daysFromNow(0),
+			csrSubject: { commonName: 'app.corp.local', keyAlgorithm: 'rsa_4096' }
+		});
+		apiMock.externalCertsApi.list.mockResolvedValue([pending]);
+		render(Panel);
+		await screen.findByTestId('external-certs-empty');
+		await userEvent.click(screen.getByTestId('external-certs-tab-pending'));
+		const btn = await screen.findByTestId(`external-cert-pending-delete-${pending.id}`);
+		expect(btn.getAttribute('aria-label')).toBe('Delete pending CSR "csr-1"');
+	});
+
+	it('shows the absolute expiry date and says renewal is manual', async () => {
+		const cert = extCert({ name: 'manual', notAfter: daysFromNow(60) });
+		apiMock.externalCertsApi.list.mockResolvedValue([cert]);
+		render(Panel);
+		await screen.findByTestId('external-certs-table');
+		const hint = screen.getByTestId('external-cert-expiry-hint');
+		const expected = new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(
+			new Date(cert.notAfter)
+		);
+		expect(hint.textContent ?? '').toContain(expected);
+		expect(hint.textContent ?? '').toMatch(/manual renewal/);
 	});
 });
 

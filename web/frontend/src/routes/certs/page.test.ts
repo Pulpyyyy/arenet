@@ -730,7 +730,61 @@ describe('/certs — cert delete action (Task 7)', () => {
 		]);
 		render(Page);
 		const btn = await screen.findByTestId('cert-delete-labeled.example.com');
-		expect(btn.getAttribute('aria-label')).toBe('Delete certificate');
+		// Every row used to share the same label; a screen-reader user
+		// tabbing through the table couldn't tell the buttons apart.
+		expect(btn.getAttribute('aria-label')).toBe(
+			'Delete certificate for labeled.example.com',
+		);
+	});
+});
+
+describe('/certs — absolute dates and SAN list', () => {
+	const fmt = (iso: string) =>
+		new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(new Date(iso));
+
+	it('shows the absolute issue and expiry dates under the relative ones', async () => {
+		certsMock.certificatesApi.list.mockResolvedValue(fixtureCerts);
+		render(Page);
+		await screen.findByTestId('certs-table');
+		const rows = screen.getAllByTestId('cert-row');
+		const valid = rows.find((r) => r.dataset.domain === 'valid.example.com')!;
+		const fixture = fixtureCerts.find((c) => c.domain === 'valid.example.com')!;
+
+		const expiry = valid.querySelector('[data-testid="cert-expiry-date"]');
+		expect(expiry?.textContent ?? '').toContain(fmt(fixture.notAfter));
+		expect(expiry?.querySelector('time')?.getAttribute('datetime')).toBe(fixture.notAfter);
+		const issued = valid.querySelector('[data-testid="cert-issued-date"]');
+		expect(issued?.textContent ?? '').toContain(fmt(fixture.notBefore));
+	});
+
+	it('renders no absolute date for a never-obtained (zero-time) cert', async () => {
+		certsMock.certificatesApi.list.mockResolvedValue(fixtureCerts);
+		render(Page);
+		await screen.findByTestId('certs-table');
+		const broken = screen
+			.getAllByTestId('cert-row')
+			.find((r) => r.dataset.domain === '*.test.local')!;
+		expect(broken.querySelector('[data-testid="cert-expiry-date"]')).toBeNull();
+		expect(broken.querySelector('[data-testid="cert-issued-date"]')).toBeNull();
+	});
+
+	it('lets the operator see which names a cert covers, not just the count', async () => {
+		certsMock.certificatesApi.list.mockResolvedValue(fixtureCerts);
+		render(Page);
+		await screen.findByTestId('certs-table');
+		const soon = screen
+			.getAllByTestId('cert-row')
+			.find((r) => r.dataset.domain === 'soon.example.com')!;
+		const list = soon.querySelector('[data-testid="cert-san-list"]') as HTMLDetailsElement;
+		expect(list).not.toBeNull();
+		expect(list.querySelector('summary')?.getAttribute('title')).toBe(
+			'soon.example.com, www.soon.example.com',
+		);
+		const items = Array.from(list.querySelectorAll('li')).map((li) => li.textContent);
+		expect(items).toEqual(['soon.example.com', 'www.soon.example.com']);
+		expect(list.querySelector('ul')?.getAttribute('aria-label')).toBe(
+			'Subject alternative names of soon.example.com',
+		);
 	});
 });
 

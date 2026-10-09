@@ -44,6 +44,7 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import WildcardApexWizard from '$lib/components/certs/WildcardApexWizard.svelte';
 	import ExternalCertsPanel from '$lib/components/certs/ExternalCertsPanel.svelte';
+	import { absoluteDate } from '$lib/utils/date-format';
 	import { settingsApi } from '$lib/api/settings';
 	import { certificatesApi } from '$lib/api/certificates';
 	import { fetchCertEvents } from '$lib/api/security';
@@ -725,10 +726,39 @@
 							</td>
 							<td>{cert.issuer || '—'}</td>
 							<td class="mono">
-								{(cert.sanList ?? []).length} SAN
+								{#if (cert.sanList ?? []).length > 0}
+									<!-- The count alone hid which names the cert
+									     covers; the list opens in place. -->
+									<details class="san-list" data-testid="cert-san-list">
+										<summary title={(cert.sanList ?? []).join(', ')}
+											>{(cert.sanList ?? []).length} SAN</summary
+										>
+										<ul
+											aria-label={language.current &&
+												t('certs.sanListAria', { domain: cert.domain })}
+										>
+											{#each cert.sanList ?? [] as san}
+												<li>{san}</li>
+											{/each}
+										</ul>
+									</details>
+								{:else}
+									0 SAN
+								{/if}
 							</td>
 							<td class="dim">
-								{notBeforeMissing ? '—' : relativeTime(cert.notBefore)}
+								{#if notBeforeMissing}
+									—
+								{:else}
+									<time
+										datetime={cert.notBefore}
+										title={language.current && absoluteDate(cert.notBefore, true)}
+										>{relativeTime(cert.notBefore)}</time
+									>
+									<div class="cell-sub" data-testid="cert-issued-date">
+										{language.current && absoluteDate(cert.notBefore)}
+									</div>
+								{/if}
 							</td>
 							<td>
 								<span
@@ -746,6 +776,15 @@
 										{language.current && t('certs.expiryDays', { days, plural: days === 1 ? '' : 's' })}
 									{/if}
 								</span>
+								{#if days !== null}
+									<div class="dim cell-sub" data-testid="cert-expiry-date">
+										<time
+											datetime={cert.notAfter}
+											title={language.current && absoluteDate(cert.notAfter, true)}
+											>{language.current && absoluteDate(cert.notAfter)}</time
+										>
+									</div>
+								{/if}
 							</td>
 							<td>
 								{#if cert.status === 'OBTAIN_FAILED' && cert.lastError}
@@ -771,7 +810,8 @@
 									type="button"
 									class="row-delete-btn"
 									data-testid={`cert-delete-${cert.domain}`}
-									aria-label={language.current && t('certs.delete.action')}
+									aria-label={language.current &&
+										t('certs.delete.actionAria', { domain: cert.domain })}
 									onclick={() => (deleteTarget = cert.domain)}
 								>
 									{language.current && t('certs.delete.action')}
@@ -1326,6 +1366,18 @@
 	.cell-sub {
 		font-size: 11px;
 		margin-top: 3px;
+	}
+
+	/* SAN cell: "<n> SAN" opens the list of names in place. */
+	.san-list summary {
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.san-list ul {
+		margin: 4px 0 0 0;
+		padding-left: 14px;
+		font-size: 11px;
+		word-break: break-all;
 	}
 
 	/* Cert.B (2026-06-23) — domain cell now hosts the stale-

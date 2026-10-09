@@ -210,6 +210,114 @@ describe('WildcardApexWizard', () => {
 		expect(onClose).not.toHaveBeenCalled();
 	});
 
+	it('lists an unconfigured provider as disabled and preselects a configured one', async () => {
+		settingsMock.settingsApi.listDNSProviders.mockResolvedValue([
+			provider({ id: 'half', label: 'Half done', configured: false }),
+			provider({ id: 'ready', label: 'Ready' }),
+		]);
+		render(WildcardApexWizard, { open: true, onClose: vi.fn() });
+		const select = (await screen.findByLabelText('DNS provider')) as HTMLSelectElement;
+		const half = screen.getByRole('option', { name: /Half done/ }) as HTMLOptionElement;
+		expect(half.disabled).toBe(true);
+		expect(half.textContent ?? '').toMatch(/not configured/);
+		expect((screen.getByRole('option', { name: /Ready/ }) as HTMLOptionElement).disabled).toBe(
+			false,
+		);
+		expect(select.value).toBe('ready');
+	});
+
+	it('shows the empty state when every provider is unconfigured', async () => {
+		settingsMock.settingsApi.listDNSProviders.mockResolvedValue([
+			provider({ configured: false }),
+		]);
+		render(WildcardApexWizard, { open: true, onClose: vi.fn() });
+		expect(await screen.findByTestId('wizard-provider-empty')).toBeInTheDocument();
+		expect(screen.queryByLabelText('DNS provider')).not.toBeInTheDocument();
+	});
+
+	it('shows a load error with Retry (not the empty state) when the provider fetch fails', async () => {
+		settingsMock.settingsApi.listDNSProviders
+			.mockRejectedValueOnce(new Error('boom'))
+			.mockResolvedValueOnce([provider()]);
+		render(WildcardApexWizard, { open: true, onClose: vi.fn() });
+		const err = await screen.findByTestId('wizard-provider-load-error');
+		expect(err.textContent ?? '').toMatch(/Could not load the DNS providers/);
+		expect(screen.queryByTestId('wizard-provider-empty')).not.toBeInTheDocument();
+
+		await userEvent.click(screen.getByTestId('wizard-provider-retry'));
+		expect(await screen.findByLabelText('DNS provider')).toBeInTheDocument();
+		expect(settingsMock.settingsApi.listDNSProviders).toHaveBeenCalledTimes(2);
+	});
+
+	it('normalises a pasted URL / wildcard apex and submits the bare domain', async () => {
+		settingsMock.settingsApi.createManagedDomain.mockResolvedValue({});
+		render(WildcardApexWizard, { open: true, onClose: vi.fn() });
+		await screen.findByLabelText('DNS provider');
+		await fireEvent.input(screen.getByLabelText('Apex domain'), {
+			target: { value: 'https://*.Example.com/' },
+		});
+		expect(screen.getByTestId('wizard-apex-normalized').textContent ?? '').toMatch(
+			/example\.com/,
+		);
+		expect(screen.getByTestId('wizard-summary').textContent ?? '').toMatch(
+			/\*\.example\.com \+ example\.com via OVH perso \(DNS-01\)/,
+		);
+		await fireEvent.submit(screen.getByTestId('wildcard-wizard-form'));
+		await waitFor(() =>
+			expect(settingsMock.settingsApi.createManagedDomain).toHaveBeenCalledWith(
+				expect.objectContaining({ apex: 'example.com' }),
+			),
+		);
+	});
+
+	it('summary drops the bare apex when "include apex" is unticked', async () => {
+		render(WildcardApexWizard, { open: true, onClose: vi.fn() });
+		await screen.findByLabelText('DNS provider');
+		await fireEvent.input(screen.getByLabelText('Apex domain'), {
+			target: { value: 'example.com' },
+		});
+		await userEvent.click(screen.getByLabelText('Include bare apex in cert SAN'));
+		const summary = screen.getByTestId('wizard-summary').textContent ?? '';
+		expect(summary).toMatch(/\*\.example\.com via OVH perso/);
+		expect(summary).not.toMatch(/\+/);
+	});
+
+	it('flags an apex that is not a domain inline and keeps Declare disabled', async () => {
+		render(WildcardApexWizard, { open: true, onClose: vi.fn() });
+		await screen.findByLabelText('DNS provider');
+		await fireEvent.input(screen.getByLabelText('Apex domain'), {
+			target: { value: 'not a domain' },
+		});
+		const invalid = screen.getByTestId('wizard-apex-invalid');
+		expect(invalid.textContent ?? '').toMatch(/doesn't look like a domain name/);
+		expect(screen.getByLabelText('Apex domain')).toHaveAttribute('aria-invalid', 'true');
+		expect(screen.queryByTestId('wizard-summary')).not.toBeInTheDocument();
+		expect(screen.getByRole('button', { name: /^declare$/i })).toBeDisabled();
+
+		await fireEvent.submit(screen.getByTestId('wildcard-wizard-form'));
+		await tick();
+		expect(settingsMock.settingsApi.createManagedDomain).not.toHaveBeenCalled();
+	});
+
+	it('translates a known backend refusal', async () => {
+		settingsMock.settingsApi.createManagedDomain.mockRejectedValue(
+			new ApiError(
+				'managed domain app.example.com is already covered by existing managed domain example.com',
+				409,
+				'validation',
+			),
+		);
+		render(WildcardApexWizard, { open: true, onClose: vi.fn() });
+		await screen.findByLabelText('DNS provider');
+		await fireEvent.input(screen.getByLabelText('Apex domain'), {
+			target: { value: 'app.example.com' },
+		});
+		await fireEvent.submit(screen.getByTestId('wildcard-wizard-form'));
+		expect((await screen.findByTestId('wizard-error')).textContent ?? '').toMatch(
+			/already covered by the policy for example\.com/,
+		);
+	});
+
 	it('Declare button is disabled until apex is non-empty', async () => {
 		// v2.9.21 i18n — submit button migrated to t() → "Declare"
 		// in EN bundle (test boot default).

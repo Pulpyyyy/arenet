@@ -29,8 +29,8 @@
 	import Button from '$lib/components/Button.svelte';
 	import { externalCertsApi } from '$lib/api/external-certs';
 	import type { ExternalCertificate } from '$lib/api/external-certs';
-	import { ApiError } from '$lib/api/types';
 	import { t } from '$lib/i18n';
+	import { resolveCertError } from '$lib/utils/cert-errors';
 	import { language } from '$lib/stores/language.svelte';
 
 	interface Props {
@@ -124,7 +124,9 @@
 			resetForm();
 			onCreated?.(created);
 		} catch (err) {
-			submitError = err instanceof ApiError ? err.message : String(err);
+			// cn_required / invalid_country / invalid_key_algorithm
+			// (internal/storage/csr.go:40-42) → translated messages.
+			submitError = resolveCertError(err).message;
 		} finally {
 			submitting = false;
 		}

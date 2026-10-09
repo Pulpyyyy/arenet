@@ -28,6 +28,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, fireEvent } from '@testing-library/svelte';
 import GenerateCSRForm from './GenerateCSRForm.svelte';
 import { externalCertsApi } from '$lib/api/external-certs';
+import { ApiError } from '$lib/api/types';
 
 beforeEach(() => {
 	vi.restoreAllMocks();
@@ -60,5 +61,22 @@ describe('GenerateCSRForm', () => {
 		expect(spy).toHaveBeenCalled();
 		expect(spy.mock.calls[0][0].csrSubject.commonName).toBe('app.corp.local');
 		expect(spy.mock.calls[0][0].csrSubject.keyAlgorithm).toBe('rsa_4096');
+	});
+
+	it('shows a translated message, not the raw code, when the backend refuses the CSR', async () => {
+		// internal/storage/csr.go:41 — the API relays the bare code.
+		vi.spyOn(externalCertsApi, 'generateCSR').mockRejectedValue(
+			new ApiError('invalid_country', 400)
+		);
+		const { getByTestId, findByTestId } = render(GenerateCSRForm);
+
+		await fireEvent.input(getByTestId('csr-common-name'), {
+			target: { value: 'app.corp.local' }
+		});
+		await fireEvent.click(getByTestId('csr-generate-btn'));
+
+		const err = await findByTestId('csr-submit-error');
+		expect(err.textContent ?? '').not.toContain('invalid_country');
+		expect(err.textContent ?? '').toMatch(/two-letter/i);
 	});
 });
