@@ -165,3 +165,48 @@ describe('observability route page: the quantile selector', () => {
 		}
 	});
 });
+
+describe('observability route page: the window toggle (shared TimeRange)', () => {
+	/** The window argument of every fetch for one metric. */
+	function windowsFor(metric: string): unknown[] {
+		return mocks.fetchTimeseries.mock.calls.filter((c) => c[1] === metric).map((c) => c[2]);
+	}
+
+	it('offers exactly 24h and 30d, 24h pressed', async () => {
+		render(Page);
+		// The toggle renders once the first load has settled.
+		const day = await screen.findByTestId('window-24h');
+		expect(windowsFor('req_per_sec')).toEqual(['24h']);
+
+		expect(day.getAttribute('aria-pressed')).toBe('true');
+		expect(screen.getByTestId('window-30d').getAttribute('aria-pressed')).toBe('false');
+		expect(screen.queryByTestId('window-1h')).toBeNull();
+		expect(screen.queryByTestId('window-7d')).toBeNull();
+	});
+
+	it('refetches every series over 30d when switched', async () => {
+		render(Page);
+		await fireEvent.click(await screen.findByTestId('window-30d'));
+
+		await waitFor(() => expect(windowsFor('req_per_sec')).toEqual(['24h', '30d']));
+		for (const metric of ['four_xx_rate', 'five_xx_rate', 'total_ms', 'ttfb_ms']) {
+			expect(windowsFor(metric)).toEqual(['24h', '30d']);
+		}
+		await waitFor(() =>
+			expect(screen.getByTestId('window-30d').getAttribute('aria-pressed')).toBe('true')
+		);
+		expect(screen.getByTestId('window-24h').getAttribute('aria-pressed')).toBe('false');
+	});
+
+	it('switches with the keyboard as well', async () => {
+		render(Page);
+		await fireEvent.keyDown(await screen.findByTestId('window-24h'), { key: 'ArrowRight' });
+		await waitFor(() => expect(windowsFor('req_per_sec')).toEqual(['24h', '30d']));
+
+		await waitFor(() =>
+			expect(screen.getByTestId('window-30d').getAttribute('aria-pressed')).toBe('true')
+		);
+		await fireEvent.keyDown(screen.getByTestId('window-30d'), { key: 'ArrowLeft' });
+		await waitFor(() => expect(windowsFor('req_per_sec')).toEqual(['24h', '30d', '24h']));
+	});
+});

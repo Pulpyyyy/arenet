@@ -26,32 +26,18 @@
 	import AuditExpandedDetails from '$lib/components/AuditExpandedDetails.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
-
-	// 15 action values per D7 (canonical list lives in
-	// docs/superpowers/decisions/2026-05-17-step-d-design-decisions-final.md).
-	// Empty string at index 0 = "All actions" in the dropdown.
-	const ACTIONS = [
-		'',
-		'login_success',
-		'login_failure',
-		'logout',
-		'unlock_success',
-		'unlock_failure',
-		'session_revoked',
-		'setup_admin_created',
-		'password_changed',
-		'route_created',
-		'route_updated',
-		'route_deleted',
-		'audit_viewed',
-		'password_hibp_clean',
-		'password_hibp_pending',
-		'password_compromised_detected'
-	];
+	import {
+		AUDIT_ACTION_GROUPS,
+		auditActionLabel,
+		isKnownAuditAction
+	} from '$lib/utils/audit-actions';
+	import { localInputToIso } from '$lib/utils/datetime-local';
 
 	const DEBOUNCE_MS = 300;
 	const PAGE_SIZE = 50;
 
+	// datetime-local values ("2026-05-01T14:30", local wall-clock
+	// time). Converted to ISO only when applied — see fromIso / toIso.
 	let fromValue = $state('');
 	let toValue = $state('');
 	let actionFilter = $state('');
@@ -75,10 +61,16 @@
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 	let suppressEffectReload = true; // skip the very first $effect fire (mount only)
 
+	// '' = no bound, null = not a complete date-time (never applied).
+	// Deriveds, so a keystroke that leaves the instant unchanged does
+	// not refetch.
+	const fromIso = $derived(localInputToIso(fromValue));
+	const toIso = $derived(localInputToIso(toValue));
+
 	function buildFilter(append: boolean): AuditFilter {
 		const filter: AuditFilter = { limit: PAGE_SIZE };
-		if (fromValue) filter.from = fromValue;
-		if (toValue) filter.to = toValue;
+		if (fromIso) filter.from = fromIso;
+		if (toIso) filter.to = toIso;
 		if (actionFilter) filter.action = actionFilter;
 		if (actorFilter) filter.actorUserId = actorFilter;
 		if (append && nextCursor) filter.cursor = nextCursor;
@@ -121,11 +113,18 @@
 
 	// Auto-apply filter changes. The first $effect fire is the mount,
 	// which we suppress; subsequent changes go through scheduleReload.
+	// An invalid date bound cancels any pending reload instead of
+	// firing a request the server would reject.
 	$effect(() => {
-		// Read all filter values to subscribe to changes.
-		void (fromValue + toValue + actionFilter + actorFilter);
+		// Read all applied filter values to subscribe to changes.
+		void [fromIso, toIso, actionFilter, actorFilter];
 		if (suppressEffectReload) {
 			suppressEffectReload = false;
+			return;
+		}
+		if (fromIso === null || toIso === null) {
+			if (debounceTimer !== null) clearTimeout(debounceTimer);
+			debounceTimer = null;
 			return;
 		}
 		scheduleReload();
@@ -206,15 +205,23 @@
 	<div
 		class="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-elevated border border-border-default rounded-lg"
 	>
+		<!-- datetime-local, not free text: a half-typed RFC 3339 string
+		     used to fire a request (and flash an error) on every pause.
+		     The browser only reports complete values; localInputToIso
+		     converts them to UTC ISO and rejects anything else. -->
 		<Input
+			id="audit-filter-from"
+			type="datetime-local"
 			bind:value={fromValue}
 			label={language.current && t('audit.filterFromLabel')}
-			placeholder="2026-05-01T00:00:00Z"
+			error={fromIso === null ? language.current && t('audit.filterInvalidDate') : undefined}
 		/>
 		<Input
+			id="audit-filter-to"
+			type="datetime-local"
 			bind:value={toValue}
 			label={language.current && t('audit.filterToLabel')}
-			placeholder="2026-05-18T00:00:00Z"
+			error={toIso === null ? language.current && t('audit.filterInvalidDate') : undefined}
 		/>
 		<div>
 			<label
@@ -228,8 +235,18 @@
 				bind:value={actionFilter}
 				class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary"
 			>
-				{#each ACTIONS as action (action)}
-					<option value={action}>{action || (language.current && t('audit.filterAllActions'))}</option>
+				<option value="">{language.current && t('audit.filterAllActions')}</option>
+				{#if actionFilter && !isKnownAuditAction(actionFilter)}
+					<!-- An action this build does not list yet (newer
+					     backend), selected from a row badge. -->
+					<option value={actionFilter}>{actionFilter}</option>
+				{/if}
+				{#each AUDIT_ACTION_GROUPS as group (group.id)}
+					<optgroup label={language.current && t(`audit.actionGroups.${group.id}`)}>
+						{#each group.actions as action (action)}
+							<option value={action}>{language.current && auditActionLabel(action)}</option>
+						{/each}
+					</optgroup>
 				{/each}
 			</select>
 		</div>
@@ -240,10 +257,10 @@
 		<div class="flex flex-wrap items-center gap-2">
 			{#if actionFilter}
 				<span class="filter-pill">
-					{language.current && t('audit.pillActionPrefix', { value: actionFilter })}
+					{language.current && t('audit.pillActionPrefix', { value: auditActionLabel(actionFilter) })}
 					<button
 						type="button"
-						aria-label={language.current && t('audit.ariaRemoveFilterAction', { value: actionFilter })}
+						aria-label={language.current && t('audit.ariaRemoveFilterAction', { value: auditActionLabel(actionFilter) })}
 						onclick={() => removePill('action')}
 					>×</button>
 				</span>
@@ -260,20 +277,20 @@
 			{/if}
 			{#if fromValue}
 				<span class="filter-pill">
-					{language.current && t('audit.pillFromPrefix', { value: fromValue })}
+					{language.current && t('audit.pillFromPrefix', { value: fromValue.replace('T', ' ') })}
 					<button
 						type="button"
-						aria-label={language.current && t('audit.ariaRemoveFilterFrom', { value: fromValue })}
+						aria-label={language.current && t('audit.ariaRemoveFilterFrom', { value: fromValue.replace('T', ' ') })}
 						onclick={() => removePill('from')}
 					>×</button>
 				</span>
 			{/if}
 			{#if toValue}
 				<span class="filter-pill">
-					{language.current && t('audit.pillToPrefix', { value: toValue })}
+					{language.current && t('audit.pillToPrefix', { value: toValue.replace('T', ' ') })}
 					<button
 						type="button"
-						aria-label={language.current && t('audit.ariaRemoveFilterTo', { value: toValue })}
+						aria-label={language.current && t('audit.ariaRemoveFilterTo', { value: toValue.replace('T', ' ') })}
 						onclick={() => removePill('to')}
 					>×</button>
 				</span>
