@@ -274,7 +274,10 @@
 		</div>
 	{/if}
 
-	<div class="app-shell">
+	<!-- Locked: the shell behind LockScreen leaves the tab order and
+	     the accessibility tree. `|| undefined` drops the attribute
+	     rather than writing inert="false". -->
+	<div class="app-shell" inert={auth.state === 'locked' || undefined}>
 		<Sidebar />
 		<div class="app-col">
 			<Topbar />

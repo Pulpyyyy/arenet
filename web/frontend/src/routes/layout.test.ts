@@ -8,15 +8,17 @@
 //   - the page asked for rides along as ?next=, and the redirect
 //     replaces the history entry
 //   - /login and /setup are left alone
+// Root layout, locked session: the app shell behind LockScreen is
+// inert, and only while locked.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, waitFor } from '@testing-library/svelte';
 
 const { authStoreMock, authApiMock, pageMock, gotoMock } = vi.hoisted(() => ({
-	// Already anonymous at mount: the plain-object mock is not reactive,
-	// so the redirect effect has to see the final state on its first run.
+	// Already in its final state at mount: the plain-object mock is not
+	// reactive, so the layout has to see that state on its first run.
 	authStoreMock: {
-		state: 'anonymous' as const,
+		state: 'anonymous' as 'anonymous' | 'authenticated' | 'locked',
 		user: null,
 		isBootstrapping: false,
 		bootstrapErrorStatus: 0,
@@ -41,6 +43,17 @@ vi.mock('$lib/api/auth', () => ({
 		heartbeat: () => authApiMock.heartbeat()
 	}
 }));
+// The signed-in chrome renders as empty stubs: the shell around it is
+// under test, not the APIs and stores the real components reach for.
+vi.mock('$lib/components/Sidebar.svelte', async () => ({
+	default: (await import('./ChromeStub.test.svelte')).default
+}));
+vi.mock('$lib/components/Topbar.svelte', async () => ({
+	default: (await import('./ChromeStub.test.svelte')).default
+}));
+vi.mock('$lib/components/LockScreen.svelte', async () => ({
+	default: (await import('./ChromeStub.test.svelte')).default
+}));
 
 import Layout from './+layout.svelte';
 
@@ -49,6 +62,7 @@ function at(pathAndQuery: string): void {
 }
 
 beforeEach(() => {
+	authStoreMock.state = 'anonymous';
 	at('/certs?tab=acme');
 	gotoMock.mockReset();
 	gotoMock.mockResolvedValue(undefined);
@@ -103,5 +117,30 @@ describe('root layout — anonymous redirect', () => {
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(authApiMock.setupStatus).not.toHaveBeenCalled();
 		expect(gotoMock).not.toHaveBeenCalled();
+	});
+});
+
+// Svelte may write `inert` as the DOM property rather than the
+// attribute; a browser reflects one into the other, jsdom may not.
+// Either one set means the shell is inert.
+function isInert(el: Element): boolean {
+	return el.hasAttribute('inert') || (el as Element & { inert?: unknown }).inert === true;
+}
+
+describe('root layout — locked session', () => {
+	it('makes the app shell inert behind the LockScreen', () => {
+		authStoreMock.state = 'locked';
+		const { container } = render(Layout);
+		const shell = container.querySelector('.app-shell');
+		expect(shell).not.toBeNull();
+		expect(isInert(shell!)).toBe(true);
+	});
+
+	it('leaves the app shell alone while authenticated', () => {
+		authStoreMock.state = 'authenticated';
+		const { container } = render(Layout);
+		const shell = container.querySelector('.app-shell');
+		expect(shell).not.toBeNull();
+		expect(isInert(shell!)).toBe(false);
 	});
 });
