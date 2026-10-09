@@ -53,7 +53,10 @@
 	import type { Topology } from 'topojson-specification';
 	import type { Feature, FeatureCollection, Geometry } from 'geojson';
 	import type { GeoEvent } from '$lib/api/types';
+	import { CATEGORY_DASHES } from './categoryColors';
 	import { CATEGORY_COLORS } from './categoryColors';
+	import { t } from '$lib/i18n';
+	import { language } from '$lib/stores/language.svelte';
 	import {
 		ARC_TOTAL_MS,
 		ARC_TRAVEL_MS,
@@ -424,6 +427,57 @@
 	});
 
 	// Geometry helpers live in arcMath.ts (imported above).
+
+	// Text alternative for the arcs.
+	//
+	// The arcs are the map's content and they exist only as moving,
+	// coloured lines inside an svg role="img" — nothing a screen
+	// reader can reach. A visually hidden list states the most recent
+	// events the map draws (same filter as the spawn effect: no LAN,
+	// no unplaced source), newest first, as "category from country".
+	// Not a live region: on a busy instance it would talk over
+	// everything else; it is there to be read when the user goes to it.
+	const RECENT_EVENTS_LISTED = 10;
+
+	const recentEvents = $derived.by(() => {
+		const drawn: GeoEvent[] = [];
+		for (let i = events.length - 1; i >= 0 && drawn.length < RECENT_EVENTS_LISTED; i--) {
+			const ev = events[i];
+			if (ev.isLan) continue;
+			if (ev.sourceLat === 0 && ev.sourceLon === 0) continue;
+			drawn.push(ev);
+		}
+		return drawn;
+	});
+
+	// Country names in the app language, not the browser's. Falls
+	// back to the raw code where Intl.DisplayNames is missing or does
+	// not know it.
+	const regionNames = $derived.by(() => {
+		try {
+			return new Intl.DisplayNames([language.current], { type: 'region' });
+		} catch {
+			return null;
+		}
+	});
+
+	function eventCountry(ev: GeoEvent): string {
+		const code = (ev.sourceCountry ?? '').toUpperCase();
+		if (!code || code === 'UNK') return t('map.recentEvents.unknownCountry');
+		if (code.length !== 2 || !regionNames) return code;
+		try {
+			return regionNames.of(code) ?? code;
+		} catch {
+			return code;
+		}
+	}
+
+	function eventLabel(ev: GeoEvent): string {
+		return t('map.recentEvents.item', {
+			category: t(`map.eventCategory.${ev.category}`),
+			country: eventCountry(ev)
+		});
+	}
 </script>
 
 <div class="worldmap" data-testid="worldmap-container">
@@ -464,6 +518,7 @@
 							? arcPathAt(arc.source, arc.target, 1)
 							: arcPathAt(arc.source, arc.target, state.progress)}
 						stroke={CATEGORY_COLORS[arc.event.category]}
+						stroke-dasharray={CATEGORY_DASHES[arc.event.category]}
 						opacity={state.opacity}
 						data-category={arc.event.category}
 					/>
@@ -496,6 +551,17 @@
 			</g>
 		{/if}
 	</svg>
+	<div class="worldmap__sr-only" data-testid="worldmap-recent-events">
+		{#if recentEvents.length === 0}
+			<p>{language.current && t('map.recentEvents.empty')}</p>
+		{:else}
+			<ul aria-label={language.current && t('map.recentEvents.title')}>
+				{#each recentEvents as ev, i (i)}
+					<li data-category={ev.category}>{language.current && eventLabel(ev)}</li>
+				{/each}
+			</ul>
+		{/if}
+	</div>
 </div>
 
 <style>
@@ -545,6 +611,20 @@
 	}
 	.arc__head {
 		pointer-events: none;
+	}
+
+	/* Text alternative for the arcs: in the accessibility tree,
+	   out of sight. */
+	.worldmap__sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	/* Marker — pulsing halo + solid core. */

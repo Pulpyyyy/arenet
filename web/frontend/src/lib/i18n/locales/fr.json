@@ -990,6 +990,20 @@
 		"eyebrow": "Trafic · Carte",
 		"subtitle": "Visualisation géographique en temps réel des sources de trafic et des décisions de sécurité. WAF, throttle, CrowdSec et échecs d'authentification sont rendus sous forme d'arcs colorés depuis la source jusqu'à cette instance Arenet.",
 		"loading": "Chargement de la position du serveur…",
+		"eventCategory": {
+			"normal": "Requête légitime",
+			"throttle": "Requête limitée (429)",
+			"waf": "Bloqué par le WAF",
+			"crowdsec": "Bloqué par CrowdSec",
+			"auth": "Échec d'authentification",
+			"country_block": "Bloqué par une règle de pays"
+		},
+		"recentEvents": {
+			"title": "Événements récents tracés sur la carte, du plus récent au plus ancien",
+			"item": "{category} depuis {country}",
+			"empty": "Aucun événement tracé sur la carte pour l'instant.",
+			"unknownCountry": "un pays inconnu"
+		},
 		"errorTitle": "Erreur de chargement.",
 		"degradedTitle": "GeoIP indisponible.",
 		"degradedBody1": "La position du serveur n'a pas pu être détectée automatiquement. Vérifie que la base GeoLite2-City est présente à",
@@ -2460,6 +2474,15 @@
 		"errorRetry": "Réessayer",
 		"liveLive": "live",
 		"liveReconnecting": "reconnexion…",
+		"liveConnecting": "connexion…",
+		"liveLastUpdate": "dernière mise à jour {time}",
+		"upstreamHealth": {
+			"up": "en service",
+			"down": "hors service",
+			"draining": "en drainage",
+			"unknown": "santé inconnue",
+			"nodeLabel": "Upstream {url} : {state}"
+		},
 		"sidebar": {
 			"ariaLabel": "Panneau latéral topology",
 			"panelLegendTitle": "Légende des flux",

@@ -990,6 +990,20 @@
 		"eyebrow": "Traffic · Map",
 		"subtitle": "Real-time geographic view of traffic sources and security decisions. WAF, throttle, CrowdSec and auth failures are drawn as coloured arcs from the source to this Arenet instance.",
 		"loading": "Loading the server position…",
+		"eventCategory": {
+			"normal": "Legitimate request",
+			"throttle": "Rate-limited request (429)",
+			"waf": "Blocked by the WAF",
+			"crowdsec": "Blocked by CrowdSec",
+			"auth": "Authentication failure",
+			"country_block": "Blocked by a country rule"
+		},
+		"recentEvents": {
+			"title": "Recent events drawn on the map, newest first",
+			"item": "{category} from {country}",
+			"empty": "No event drawn on the map yet.",
+			"unknownCountry": "an unknown country"
+		},
 		"errorTitle": "Could not load.",
 		"degradedTitle": "GeoIP unavailable.",
 		"degradedBody1": "The server position could not be detected automatically. Check that the GeoLite2-City database sits at",
@@ -2460,6 +2474,15 @@
 		"errorRetry": "Retry",
 		"liveLive": "live",
 		"liveReconnecting": "reconnecting…",
+		"liveConnecting": "connecting…",
+		"liveLastUpdate": "last update {time}",
+		"upstreamHealth": {
+			"up": "up",
+			"down": "down",
+			"draining": "draining",
+			"unknown": "health unknown",
+			"nodeLabel": "Upstream {url}: {state}"
+		},
 		"sidebar": {
 			"ariaLabel": "Topology side panel",
 			"panelLegendTitle": "Flow legend",

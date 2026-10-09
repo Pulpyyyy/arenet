@@ -26,7 +26,13 @@
 	const ringOpacity = $derived(color === 'current' ? '0.25' : '1');
 </script>
 
+<!-- The rotation is a CSS animation on the <svg> itself, not SMIL.
+     An <animateTransform> kept spinning under prefers-reduced-motion,
+     because no stylesheet reaches SMIL. As CSS it is stopped both by
+     the global rule in app.css and by the rule below. The ring is a
+     full circle, so turning the whole graphic only moves the arc. -->
 <svg
+	class="spinner"
 	width={sizePx}
 	height={sizePx}
 	viewBox="0 0 24 24"
@@ -47,14 +53,25 @@
 		stroke={arcStroke}
 		stroke-width="3"
 		stroke-linecap="round"
-	>
-		<animateTransform
-			attributeName="transform"
-			type="rotate"
-			from="0 12 12"
-			to="360 12 12"
-			dur="0.9s"
-			repeatCount="indefinite"
-		/>
-	</path>
+	/>
 </svg>
+
+<style>
+	.spinner {
+		animation: spinner-rotate 0.9s linear infinite;
+	}
+
+	@keyframes spinner-rotate {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	/* Static under reduced motion: the ring and arc still say
+	   "loading" (and role="status" says it to assistive tech). */
+	@media (prefers-reduced-motion: reduce) {
+		.spinner {
+			animation: none;
+		}
+	}
+</style>

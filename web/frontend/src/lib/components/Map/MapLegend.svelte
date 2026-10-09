@@ -11,8 +11,8 @@
       + 14/14/12 padding
     - <h3> title at 13 px / weight 600
     - <ul class="legend-list"> with per-row <li>
-    - 4-dot SVG inline (viewBox 0 0 56 8) showing the
-      category color via currentColor
+    - line-sample SVG inline (viewBox 0 0 56 8) showing the
+      category color via currentColor and its dash pattern
     - <p class="legend-note"> at the bottom explaining the
       animation lifecycle, mirroring topology's note about
       the 60 s sliding window.
@@ -45,7 +45,7 @@
   the row shape.
 -->
 <script lang="ts">
-	import { CATEGORY_COLORS } from './categoryColors';
+	import { CATEGORY_COLORS, CATEGORY_DASHES } from './categoryColors';
 	import type { GeoEventCategory } from '$lib/api/types';
 
 	interface LegendRow {
@@ -124,10 +124,19 @@
 						aria-hidden="true"
 						style="color: {CATEGORY_COLORS[row.category]};"
 					>
-						<circle cx="4" cy="4" r="2" fill="currentColor" />
-						<circle cx="18" cy="4" r="2" fill="currentColor" />
-						<circle cx="32" cy="4" r="2" fill="currentColor" />
-						<circle cx="46" cy="4" r="2" fill="currentColor" />
+						<!-- The arc's own line, colour AND dash rhythm
+						     (CATEGORY_DASHES), so the key can be read
+						     without telling hues apart. -->
+						<line
+							x1="2"
+							y1="4"
+							x2="54"
+							y2="4"
+							stroke="currentColor"
+							stroke-width="1.6"
+							stroke-linecap="round"
+							stroke-dasharray={CATEGORY_DASHES[row.category]}
+						/>
 					</svg>
 					<span class="legend-label">
 						{row.label}{#if row.comingSoon}

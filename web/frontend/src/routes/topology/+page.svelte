@@ -23,8 +23,9 @@
   the graph in place — Svelte Flow keeps drag positions because
   the layout builders emit stable, deterministic node ids per
   route. Reconnect attempts run silently in the background with
-  the backoff schedule documented in _api.ts; a small dot in the
-  toolbar surfaces the disconnected state.
+  the backoff schedule documented in _api.ts; while disconnected the
+  canvas is dimmed, its particles stop, and the toolbar indicator
+  (role="status") gives the time of the last update.
 -->
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
@@ -124,11 +125,44 @@
 	let pageStatus = $state<PageStatus>('loading');
 	let pageError = $state<string>('');
 
-	// Live indicator — 'live' when the WS is connected, 'reconnecting'
-	// when an automatic reconnect is in flight. The indicator is a
-	// small dot in the canvas toolbar.
-	type LiveStatus = 'live' | 'reconnecting';
-	let liveStatus = $state<LiveStatus>('reconnecting');
+	// Live indicator — 'connecting' until the first frame arrives,
+	// 'live' while frames do, 'reconnecting' after the stream dropped.
+	//
+	// It used to START as 'reconnecting', so every page load said
+	// "reconnecting" for the moment before the first frame: a claim
+	// that something had broken when nothing had connected yet.
+	type LiveStatus = 'connecting' | 'live' | 'reconnecting';
+	let liveStatus = $state<LiveStatus>('connecting');
+
+	// When the data on the canvas was last refreshed (client clock,
+	// ms) — the snapshot, then each live frame. Shown once the stream
+	// drops, so the operator knows how old the picture is.
+	let lastUpdateMs = $state<number | null>(null);
+
+	// A dropped stream used to change one toolbar dot and nothing
+	// else: the particles kept flowing at the last rates and the
+	// graph looked live. While stale the canvas is dimmed and the
+	// particles hidden (see .canvas-frame.is-stale), and the
+	// indicator states the time of the last update.
+	const isStale = $derived(liveStatus === 'reconnecting');
+
+	function formatClock(ms: number, lang: string): string {
+		return new Intl.DateTimeFormat(lang, {
+			hour: '2-digit',
+			minute: '2-digit',
+			second: '2-digit'
+		}).format(new Date(ms));
+	}
+
+	const liveLabel = $derived.by(() => {
+		const lang = language.current;
+		if (liveStatus === 'live') return t('topology.liveLive');
+		if (liveStatus === 'connecting') return t('topology.liveConnecting');
+		if (lastUpdateMs === null) return t('topology.liveReconnecting');
+		return `${t('topology.liveReconnecting')} · ${t('topology.liveLastUpdate', {
+			time: formatClock(lastUpdateMs, lang)
+		})}`;
+	});
 
 	let closeStream: (() => void) | null = null;
 
@@ -288,6 +322,7 @@
 			const snap = await fetchSnapshot();
 			routes = snap.routes;
 			rebuildGraph(filterForView(snap.routes, topoView), topoView);
+			lastUpdateMs = Date.now();
 			pageStatus = 'connected';
 			// Now that we have the initial graph, open the live
 			// stream. The WS handler's initial-emit-on-connect
@@ -327,13 +362,15 @@
 				// claimed "the WS handler owns the per-frame rebuild";
 				// it did, and it was the handler that forgot to filter.
 				rebuildGraph(filterForView(nextRoutes, topoView), topoView);
+				lastUpdateMs = Date.now();
 				liveStatus = 'live';
 			},
 			() => {
 				// onDisconnect — the stream client is mid-reconnect.
 				// We don't reset routes; the canvas keeps showing
 				// the last-known state until the next successful
-				// tick. The dot turns amber.
+				// tick, dimmed and without particles, and the
+				// indicator says when that state dates from.
 				liveStatus = 'reconnecting';
 			}
 		);
@@ -564,12 +601,19 @@
 		<div class="topo-content">
 			<div class="topo-canvas-wrap">
 				<div class="canvas-toolbar">
-					<div class="live-indicator" class:reconnecting={liveStatus === 'reconnecting'}>
-						<span class="dot"></span>
-						<span class="label">{language.current && (liveStatus === 'live' ? t('topology.liveLive') : t('topology.liveReconnecting'))}</span>
+					<div
+						class="live-indicator"
+						class:reconnecting={liveStatus === 'reconnecting'}
+						class:connecting={liveStatus === 'connecting'}
+						role="status"
+						data-testid="topology-live-status"
+						data-live-status={liveStatus}
+					>
+						<span class="dot" aria-hidden="true"></span>
+						<span class="label">{liveLabel}</span>
 					</div>
 				</div>
-				<div class="canvas-frame">
+				<div class="canvas-frame" class:is-stale={isStale} data-stale={isStale}>
 					<SvelteFlow
 						bind:nodes
 						bind:edges
@@ -809,6 +853,34 @@
 
 	.live-indicator.reconnecting .dot {
 		box-shadow: none;
+	}
+
+	/* Not yet live, not broken either: neutral, no glow. */
+	.live-indicator.connecting {
+		color: var(--text-secondary);
+		background: color-mix(in oklch, var(--text-secondary) 12%, transparent);
+	}
+
+	.live-indicator.connecting .dot {
+		box-shadow: none;
+	}
+
+	/* Stale canvas — the stream dropped. The last-known graph stays
+	   readable (and draggable) but visibly is not live: dimmed,
+	   desaturated, and without the particles that would otherwise
+	   keep flowing at the last rates. The controls sit outside the
+	   viewport and stay at full strength. */
+	.canvas-frame :global(.svelte-flow__viewport) {
+		transition: opacity 0.3s ease, filter 0.3s ease;
+	}
+
+	.canvas-frame.is-stale :global(.svelte-flow__viewport) {
+		opacity: 0.45;
+		filter: grayscale(0.7);
+	}
+
+	.canvas-frame.is-stale :global(circle.particle) {
+		display: none;
 	}
 
 	/* Phase 3.c (2026-06-17): override SvelteFlow Controls palette.

@@ -46,17 +46,65 @@
 <script lang="ts">
         import { Handle, Position, type NodeProps } from '@xyflow/svelte';
         import type { UpstreamNodeData } from '../../_types';
+        import { t } from '$lib/i18n';
+        import { language } from '$lib/stores/language.svelte';
 
         let { data }: NodeProps & { data: UpstreamNodeData } = $props();
+
+        // Health in a glyph and a word, not only the stripe's hue.
+        //
+        // The left stripe is green / red / amber, three colours a
+        // deuteranope cannot tell apart, and it was the only health
+        // signal on the node. A monitored upstream now also carries a
+        // glyph (✓ ✕ ◐), the word for the two states that need action
+        // ("down", "draining"), and the full state in its accessible
+        // name and tooltip. 'unknown' keeps the neutral stripe alone:
+        // no probe result is nothing to announce.
+        type Health = UpstreamNodeData['status'];
+        const HEALTH_GLYPH: Record<Health, string> = {
+                healthy: '✓',
+                unhealthy: '✕',
+                draining: '◐',
+                unknown: '',
+        };
+        const HEALTH_KEY: Record<Health, string> = {
+                healthy: 'topology.upstreamHealth.up',
+                unhealthy: 'topology.upstreamHealth.down',
+                draining: 'topology.upstreamHealth.draining',
+                unknown: 'topology.upstreamHealth.unknown',
+        };
+        let healthWord = $derived(language.current && t(HEALTH_KEY[data.status]));
+        let showHealthWord = $derived(
+                data.healthCheckConfigured && (data.status === 'unhealthy' || data.status === 'draining'),
+        );
+        let nodeLabel = $derived(
+                data.healthCheckConfigured
+                        ? language.current &&
+                                  t('topology.upstreamHealth.nodeLabel', { url: data.url, state: healthWord })
+                        : data.url,
+        );
 </script>
 
-<div class="upstream-node" data-status={data.status} data-monitored={data.healthCheckConfigured}>
+<div
+        class="upstream-node"
+        data-status={data.status}
+        data-monitored={data.healthCheckConfigured}
+        role="group"
+        aria-label={nodeLabel}
+        title={nodeLabel}
+>
         <!-- Inbound handle (caddy-hub -> upstream). No source handle:
              upstreams never originate flow in our topology. -->
         <Handle type="target" position={Position.Left} />
 
         <div class="up-line-1">
                 <span class="up-url" title={data.url}>{data.displayUrl}</span>
+                {#if data.healthCheckConfigured && HEALTH_GLYPH[data.status]}
+                        <span class="up-health" data-testid="upstream-health" data-health={data.status}>
+                                <span class="up-health-glyph" aria-hidden="true">{HEALTH_GLYPH[data.status]}</span>
+                                {#if showHealthWord}<span class="up-health-word">{healthWord}</span>{/if}
+                        </span>
+                {/if}
                 <span class="up-icons" aria-hidden="true">
                         {#if data.wasHttps}
                                 <!-- TLS lock — minimal padlock glyph. Inherits
@@ -168,6 +216,29 @@
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+        }
+
+        /* Glyph + word health tag. Coloured like the stripe for those
+           who see the hue, readable by shape and word for those who
+           do not. */
+        .up-health {
+                flex: 0 0 auto;
+                display: inline-flex;
+                align-items: center;
+                gap: 3px;
+                font-family: var(--font-display, system-ui, sans-serif);
+                font-size: 10px;
+                font-weight: 600;
+                line-height: 1;
+        }
+        .up-health[data-health='healthy'] {
+                color: var(--status-up);
+        }
+        .up-health[data-health='unhealthy'] {
+                color: var(--status-down);
+        }
+        .up-health[data-health='draining'] {
+                color: var(--status-warn);
         }
 
         .up-icons {

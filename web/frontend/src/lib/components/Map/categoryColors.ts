@@ -54,6 +54,36 @@ export const CATEGORY_COLORS: Record<GeoEventCategory, string> = {
 };
 
 /**
+ * SVG `stroke-dasharray` for an arc of the given category — the
+ * second channel next to the hue.
+ *
+ * Hue alone did not separate the categories: normal (green) and
+ * waf (red) collapse for a deuteranope, and crowdsec (brand
+ * purple-blue) and auth (info blue) sit close together for
+ * everyone. Each category therefore also has its own line rhythm.
+ * Arcs use a round linecap, so a `0.1` dash draws a dot and every
+ * gap is chosen wide enough to survive the caps eating into it.
+ *
+ *   normal         ───────────  solid
+ *   throttle       ── ── ── ──  long dash
+ *   waf            · · · · · ·  dotted
+ *   crowdsec       ── · ── · ─  dash-dot
+ *   auth           - - - - - -  short dash
+ *   country_block  ── · · ── ·  dash-dot-dot
+ *
+ * The legend draws the same patterns (MapLegend.svelte), so the
+ * key matches the map.
+ */
+export const CATEGORY_DASHES: Record<GeoEventCategory, string> = {
+	normal: 'none',
+	throttle: '8 4',
+	waf: '0.1 4',
+	crowdsec: '10 4 0.1 4',
+	auth: '3 4',
+	country_block: '10 4 0.1 4 0.1 4'
+};
+
+/**
  * Operator-facing French labels for each category. Used by
  * tooltips and the future legend. Kept here next to the
  * color map so adding a category requires touching one file.
