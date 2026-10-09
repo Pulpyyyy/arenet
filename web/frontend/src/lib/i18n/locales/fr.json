@@ -2570,6 +2570,11 @@
 		"body": "Ce compte a été créé par un administrateur, qui connaît son premier mot de passe. Choisis le tien avant d'aller plus loin.",
 		"action": "Changer mon mot de passe"
 	},
+	"bootstrap": {
+		"unreachable": "Impossible de joindre Arenet.",
+		"serverError": "Arenet a répondu par une erreur (HTTP {status}).",
+		"retry": "Réessayer"
+	},
 	"observability": {
 		"latencyTitle": "Latence (ms)",
 		"latencySeriesTtfb": "serveur",

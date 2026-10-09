@@ -2570,6 +2570,11 @@
 		"body": "This account was created by an administrator, who knows its first password. Choose your own before going any further.",
 		"action": "Change my password"
 	},
+	"bootstrap": {
+		"unreachable": "Arenet could not be reached.",
+		"serverError": "Arenet answered with an error (HTTP {status}).",
+		"retry": "Retry"
+	},
 	"observability": {
 		"latencyTitle": "Latency (ms)",
 		"latencySeriesTtfb": "server",

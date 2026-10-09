@@ -18,6 +18,7 @@
   State transitions:
 
     unknown      → centered Spinner (bootstrap pending)
+    error        → centered panel: why /me failed + Retry (no redirect)
     anonymous    → render children unchanged (so /login and /setup,
                    which use +layout@.svelte resets, take over)
                    + redirect non-login/setup paths to /login
@@ -25,7 +26,8 @@
                     + LockScreen=false
     locked       → Sidebar + Topbar + main + LockScreen overlay (z-1000)
 
-  Bootstrap runs once at mount. Subsequent state changes happen via
+  Bootstrap runs once at mount, and again only from the error panel's
+  Retry button. Subsequent state changes happen via
   the API client interceptors (401 → clear, 403 → setLocked) and the
   client-side idle timer.
 -->
@@ -60,9 +62,15 @@
 	let changePasswordModalOpen = $state(false);
 
 	onMount(async () => {
+		await startSession();
+	});
+
+	// Shared by mount and the error panel's Retry: whichever bootstrap
+	// succeeds needs the same idle/heartbeat wiring and login redirect.
+	async function startSession(): Promise<void> {
 		// Bootstrap the auth store. This call sets state to one of
-		// authenticated / locked / anonymous (or leaves unknown on
-		// network failure so the user can refresh).
+		// authenticated / locked / anonymous, or error when /me failed
+		// without a 401 (the panel below then offers a retry).
 		await auth.bootstrap();
 
 		// Wire idle timer + heartbeat once we know we're in a session
@@ -83,7 +91,14 @@
 				void goto('/login');
 			}
 		}
-	});
+	}
+
+	function retryBootstrap(): void {
+		// The button is disabled while loading; this guards a double
+		// activation landing before the re-render.
+		if (auth.isBootstrapping) return;
+		void startSession();
+	}
 
 	onDestroy(() => {
 		idle.stop();
@@ -127,6 +142,28 @@
 	     Prevents flashing /login before /me resolves. -->
 	<div class="flex items-center justify-center min-h-screen bg-base">
 		<Spinner size="lg" />
+	</div>
+{:else if auth.state === 'error'}
+	<!-- /me failed without a 401: say so instead of spinning, and do not
+	     redirect to /login, which would hide the outage and lose the
+	     page asked for. The only spinner is the button's, while a retry
+	     is in flight. -->
+	<div class="flex items-center justify-center min-h-screen bg-base p-4">
+		<div
+			class="max-w-md rounded-xl border border-border-default bg-surface p-6 text-center"
+			role="alert"
+			data-testid="bootstrap-error"
+		>
+			<p class="text-sm text-primary mb-4">
+				{language.current &&
+					(auth.bootstrapErrorStatus === 0
+						? t('bootstrap.unreachable')
+						: t('bootstrap.serverError', { status: auth.bootstrapErrorStatus }))}
+			</p>
+			<Button variant="primary" loading={auth.isBootstrapping} onclick={retryBootstrap}>
+				{#snippet children()}{language.current && t('bootstrap.retry')}{/snippet}
+			</Button>
+		</div>
 	</div>
 {:else if auth.state === 'anonymous'}
 	<!-- /login and /setup own their layout via +layout@.svelte resets.

@@ -37,6 +37,7 @@ function resetStore(): void {
 	auth.user = null;
 	auth.state = 'unknown';
 	auth.isBootstrapping = false;
+	auth.bootstrapErrorStatus = 0;
 }
 
 const sampleUser: User = {
@@ -79,10 +80,56 @@ describe('AuthStore.bootstrap', () => {
 		expect(auth.user).toBeNull();
 	});
 
-	it('stays unknown on network / 5xx error (no kick to login)', async () => {
+	// Before the error state, these failures left 'unknown' and the
+	// layout spun forever with nothing to press.
+	it('transitions unknown → error on a network error (no kick to login)', async () => {
 		authApiMock.me.mockRejectedValueOnce(new ApiError('network', 0, 'system'));
 		await auth.bootstrap();
-		expect(auth.state).toBe('unknown');
+		expect(auth.state).toBe('error');
+		expect(auth.bootstrapErrorStatus).toBe(0);
+		expect(auth.user).toBeNull();
+	});
+
+	it('transitions unknown → error on a 5xx and keeps the status', async () => {
+		authApiMock.me.mockRejectedValueOnce(new ApiError('boom', 503, 'system'));
+		await auth.bootstrap();
+		expect(auth.state).toBe('error');
+		expect(auth.bootstrapErrorStatus).toBe(503);
+	});
+
+	it('treats a non-ApiError throw as unreachable', async () => {
+		authApiMock.me.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+		await auth.bootstrap();
+		expect(auth.state).toBe('error');
+		expect(auth.bootstrapErrorStatus).toBe(0);
+	});
+
+	it('a retry after an error reaches authenticated', async () => {
+		authApiMock.me.mockRejectedValueOnce(new ApiError('network', 0, 'system'));
+		await auth.bootstrap();
+		expect(auth.state).toBe('error');
+		authApiMock.me.mockResolvedValueOnce(sampleUser);
+		await auth.bootstrap();
+		expect(auth.state).toBe('authenticated');
+		expect(auth.user).toEqual(sampleUser);
+		expect(authApiMock.me).toHaveBeenCalledTimes(2);
+	});
+
+	it('a failed refresh of a live session keeps it (no error panel)', async () => {
+		auth.user = sampleUser;
+		auth.state = 'authenticated';
+		authApiMock.me.mockRejectedValueOnce(new ApiError('network', 0, 'system'));
+		await auth.bootstrap();
+		expect(auth.state).toBe('authenticated');
+		expect(auth.user).toEqual(sampleUser);
+	});
+
+	it('a retry after an error that gets a 401 goes anonymous as usual', async () => {
+		authApiMock.me.mockRejectedValueOnce(new ApiError('boom', 500, 'system'));
+		await auth.bootstrap();
+		authApiMock.me.mockRejectedValueOnce(new ApiError('unauth', 401, 'auth'));
+		await auth.bootstrap();
+		expect(auth.state).toBe('anonymous');
 		expect(auth.user).toBeNull();
 	});
 
