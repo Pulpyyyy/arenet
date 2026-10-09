@@ -2228,7 +2228,9 @@
 		"btnConfirmBan": "Confirmer le ban",
 		"selfBanTitle": "Ce ban te bloquerait.",
 		"selfBanAck": "J'ai un autre accès (console locale, autre réseau) et je veux vraiment bannir ma propre adresse.",
-		"btnBanAnyway": "Bannir quand même"
+		"btnBanAnyway": "Bannir quand même",
+		"rowAction": "Bannir…",
+		"rowActionAria": "Bannir {ip} avec CrowdSec"
 	},
 	"certs": {
 		"headTitle": "Certificats · Arenet",
@@ -2505,6 +2507,9 @@
 		"btnResume": "▶ Reprendre",
 		"btnExport": "Exporter",
 		"btnExportTooltip": "Bientôt disponible",
+		"copyIpAria": "Copier l'IP source complète",
+		"ipCopied": "IP copiée",
+		"ipCopyFailed": "Impossible de copier l'IP",
 		"filterEventsAria": "Filtrer les événements",
 		"filterEventsPlaceholder": "ex : 429 · auth · 185.142.* (V2 : status:5xx route:/auth/*)",
 		"filterByRouteAria": "Filtrer par route",

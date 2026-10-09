@@ -6,7 +6,9 @@
   Step CS.3 Commit D — "Bannir une IP" modal.
 
   Admin-only manual ban form invoked from the Live LAPI sub-
-  tab in CrowdSecDecisionsPanel. Validates client-side
+  tab in CrowdSecDecisionsPanel, and from the "Ban…" action on
+  /logs and WafEventList rows (initialValue = the row's source
+  IP). Validates client-side
   (friendly errors before the network) but the backend
   remains the authoritative validator — the same rules live
   in internal/api/crowdsec_manual_ban.go and the same wire
@@ -48,9 +50,12 @@
 		open: boolean;
 		onClose: () => void;
 		onSuccess?: () => void;
+		/** Pre-fills the IP / CIDR field each time the modal opens
+		 *  (ban from a log or WAF row). Still editable. */
+		initialValue?: string;
 	}
 
-	let { open = $bindable(), onClose, onSuccess }: Props = $props();
+	let { open = $bindable(), onClose, onSuccess, initialValue = '' }: Props = $props();
 
 	// Form state. Defaults match the brief's dropdowns.
 	type BanType = 'ban' | 'captcha' | 'throttle';
@@ -98,7 +103,7 @@
 	});
 
 	function resetForm(): void {
-		value = '';
+		value = initialValue;
 		durationPreset = '24h';
 		customDuration = '';
 		banType = 'ban';

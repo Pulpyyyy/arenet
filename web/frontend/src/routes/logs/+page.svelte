@@ -65,7 +65,8 @@
 	import { language } from '$lib/stores/language.svelte';
 	import { sourceMeta } from '$lib/utils/sourceMeta';
 	import { levelMeta } from '$lib/utils/levelMeta';
-	import { formatSourceIP } from '$lib/utils/ipClass';
+	import { formatSourceIP, isFullIP } from '$lib/utils/ipClass';
+	import BanIPModal from '$lib/components/BanIPModal.svelte';
 	import ActivityHistogram from '$lib/components/ActivityHistogram.svelte';
 	import WafExcludeDialog from '$lib/components/WafExcludeDialog.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -172,6 +173,40 @@
 	// the authoritative gate).
 	const isAdmin = $derived(auth.user?.role === 'admin');
 	let excludeEvent = $state<WafEvent | null>(null);
+	// "Ban…" on a row with a real source IP (admins only, like the
+	// CrowdSec panel's ban button): the IP handed to BanIPModal.
+	let banIP = $state<string | null>(null);
+
+	// The SOURCE IP column is masked; this copies the full address.
+	// navigator.clipboard needs a secure context, so a plain-HTTP
+	// admin UI falls back to a hidden-textarea selection.
+	function copyBySelection(text: string): boolean {
+		const ta = document.createElement('textarea');
+		ta.value = text;
+		ta.setAttribute('readonly', '');
+		ta.style.position = 'fixed';
+		ta.style.opacity = '0';
+		document.body.appendChild(ta);
+		ta.select();
+		let ok = false;
+		try {
+			ok = document.execCommand('copy');
+		} catch {
+			ok = false;
+		}
+		ta.remove();
+		return ok;
+	}
+	async function copyIP(ip: string): Promise<void> {
+		let ok: boolean;
+		try {
+			await navigator.clipboard.writeText(ip);
+			ok = true;
+		} catch {
+			ok = copyBySelection(ip);
+		}
+		pushToast(ok ? t('logs.ipCopied') : t('logs.ipCopyFailed'), ok ? 'success' : 'danger');
+	}
 
 	// Phase Z.5.3 — IP → country code cache, populated by
 	// the lookup-batch endpoint after each event load. A
@@ -846,6 +881,17 @@
 								{language.current && t('wafExclude.action')}
 							</button>
 						{/if}
+						{#if isAdmin && isFullIP(r.srcIp)}
+							<button
+								type="button"
+								class="exclude-btn"
+								onclick={() => (banIP = r.srcIp)}
+								aria-label={language.current && t('banIp.rowActionAria', { ip: r.srcIp })}
+								data-testid="logs-ban-open"
+							>
+								{language.current && t('banIp.rowAction')}
+							</button>
+						{/if}
 					</span>
 					<!--
 					  Phase Z.5.3 — SOURCE IP enriched with the
@@ -858,6 +904,20 @@
 					-->
 					<span class="right mono dim" title={r.srcIp}>
 						{formatSourceIP(r.srcIp, countryMap.get(r.srcIp))}
+						{#if isFullIP(r.srcIp)}
+							<button
+								type="button"
+								class="copy-ip-btn"
+								onclick={() => void copyIP(r.srcIp)}
+								aria-label={language.current && t('logs.copyIpAria')}
+								data-testid="logs-copy-ip"
+							>
+								<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">
+									<rect x="5" y="5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4" />
+									<path d="M11 3.5V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h.5" fill="none" stroke="currentColor" stroke-width="1.4" />
+								</svg>
+							</button>
+						{/if}
 					</span>
 				</div>
 			{/each}
@@ -871,6 +931,10 @@
 	host={excludeEvent ? (routeMap.get(excludeEvent.routeId) ?? '') : ''}
 	onClose={() => (excludeEvent = null)}
 />
+
+{#if isAdmin}
+	<BanIPModal open={banIP !== null} initialValue={banIP ?? ''} onClose={() => (banIP = null)} />
+{/if}
 
 <!--
   Phase Z.5.4 — activity histogram. Stacked bars per
@@ -1218,6 +1282,22 @@
 		color: var(--accent-cyan);
 		border-color: var(--accent-cyan);
 		outline: none;
+	}
+	.copy-ip-btn {
+		margin-left: 4px;
+		padding: 0 2px;
+		background: transparent;
+		border: none;
+		color: inherit;
+		cursor: pointer;
+		vertical-align: middle;
+		line-height: 1;
+	}
+	.copy-ip-btn:hover,
+	.copy-ip-btn:focus-visible {
+		color: var(--accent-cyan);
+		outline: 1px solid var(--accent-cyan);
+		border-radius: 2px;
 	}
 	/* Phase Z.5.1 — row tints dialed down to ~5%
 	   (rgba 0.05 mock target). The Z.4 tints at 8% were
