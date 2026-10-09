@@ -446,7 +446,8 @@
 	"toast": {
 		"savedSuccess": "Saved successfully",
 		"savedFailed": "Save failed",
-		"languageChanged": "Language updated"
+		"languageChanged": "Language updated",
+		"dismiss": "Dismiss notification"
 	},
 	"routes": {
 		"check": {
