@@ -80,10 +80,20 @@ describe('request: credentials always included', () => {
 
 describe('request: 401 interceptor', () => {
 	it('clears auth and navigates to /login, carrying the page as ?next=', async () => {
+		Object.defineProperty(window, 'location', {
+			value: { pathname: '/audit' },
+			writable: true
+		});
 		mockFetch(401, { error: 'no active session' });
-		await expect(request('GET', '/routes')).rejects.toMatchObject({ status: 401, kind: 'auth' });
+		await expect(request('GET', '/audit')).rejects.toMatchObject({ status: 401, kind: 'auth' });
 		expect(authMock.clear).toHaveBeenCalledTimes(1);
-		expect(goto).toHaveBeenCalledWith('/login?next=%2Froutes');
+		expect(goto).toHaveBeenCalledWith('/login?next=%2Faudit');
+	});
+
+	it('leaves ?next= out on the default landing, where signing in ends anyway', async () => {
+		mockFetch(401, { error: 'no active session' });
+		await expect(request('GET', '/routes')).rejects.toMatchObject({ status: 401 });
+		expect(goto).toHaveBeenCalledWith('/login');
 	});
 
 	it('keeps the query string of the page in ?next=', async () => {
