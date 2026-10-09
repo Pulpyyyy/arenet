@@ -12,7 +12,7 @@
 // any internal mutation of `value`.
 
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, fireEvent } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import Toggle from './Toggle.svelte';
 
@@ -74,6 +74,59 @@ describe('Toggle', () => {
 		// guards with `if (disabled || v === value) return;` before
 		// invoking onchange.
 		await user.click(screen.getByRole('radio', { name: 'Light' }));
+		expect(onchange).not.toHaveBeenCalled();
+	});
+
+	it('is a single Tab stop: only the checked option is tabbable (roving tabindex)', () => {
+		render(Toggle, {
+			options: themeOptions,
+			value: 'light',
+			ariaLabel: 'Theme'
+		});
+		expect(screen.getByRole('radio', { name: 'Light' })).toHaveAttribute('tabindex', '0');
+		expect(screen.getByRole('radio', { name: 'Dark' })).toHaveAttribute('tabindex', '-1');
+	});
+
+	it('moves the selection and the focus with the arrow keys', async () => {
+		const onchange = vi.fn();
+		const user = userEvent.setup();
+		render(Toggle, {
+			options: themeOptions,
+			value: 'dark',
+			ariaLabel: 'Theme',
+			onchange
+		});
+
+		await user.tab();
+		expect(screen.getByRole('radio', { name: 'Dark' })).toHaveFocus();
+
+		await user.keyboard('{ArrowRight}');
+		expect(onchange).toHaveBeenLastCalledWith('light');
+		expect(screen.getByRole('radio', { name: 'Light' })).toHaveFocus();
+
+		// Two options: ArrowLeft from the first one wraps to the last.
+		onchange.mockClear();
+		screen.getByRole('radio', { name: 'Dark' }).focus();
+		await user.keyboard('{ArrowLeft}');
+		expect(onchange).toHaveBeenCalledWith('light');
+
+		onchange.mockClear();
+		await user.keyboard('{End}');
+		expect(onchange).toHaveBeenCalledWith('light');
+	});
+
+	it('ignores the arrow keys when disabled', async () => {
+		const onchange = vi.fn();
+		render(Toggle, {
+			options: themeOptions,
+			value: 'dark',
+			ariaLabel: 'Theme',
+			disabled: true,
+			onchange
+		});
+		await fireEvent.keyDown(screen.getByRole('radiogroup', { name: 'Theme' }), {
+			key: 'ArrowRight'
+		});
 		expect(onchange).not.toHaveBeenCalled();
 	});
 });

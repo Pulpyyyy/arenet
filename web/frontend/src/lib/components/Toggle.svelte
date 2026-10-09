@@ -58,22 +58,64 @@
 		if (disabled || v === value) return;
 		onchange?.(v);
 	}
+
+	/*
+	 * WAI-ARIA radiogroup keyboard model, same as ModeSelector.svelte:
+	 * the group is ONE Tab stop (roving tabindex — only the checked
+	 * option has tabindex=0) and the arrow keys move the selection.
+	 * Focus follows to the newly picked option so a second arrow press
+	 * keeps going from there even before the controlled `value` prop
+	 * comes back from the caller.
+	 */
+	function onKeydown(e: KeyboardEvent): void {
+		if (disabled) return;
+		const radios = Array.from(
+			(e.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="radio"]')
+		);
+		const focused = radios.indexOf(document.activeElement as HTMLButtonElement);
+		const from = focused >= 0 ? focused : activeIndex;
+		let next: number;
+		switch (e.key) {
+			case 'ArrowLeft':
+			case 'ArrowUp':
+				next = (from - 1 + options.length) % options.length;
+				break;
+			case 'ArrowRight':
+			case 'ArrowDown':
+				next = (from + 1) % options.length;
+				break;
+			case 'Home':
+				next = 0;
+				break;
+			case 'End':
+				next = options.length - 1;
+				break;
+			default:
+				return;
+		}
+		e.preventDefault();
+		radios[next]?.focus();
+		pick(options[next].value);
+	}
 </script>
 
+<!-- svelte-ignore a11y_interactive_supports_focus -->
 <div
 	class="toggle"
 	role="radiogroup"
 	aria-label={ariaLabel}
 	aria-disabled={disabled || undefined}
+	onkeydown={onKeydown}
 >
 	<span class="knob" style:transform="translateX({activeIndex * 100}%)" aria-hidden="true"></span>
-	{#each options as opt (opt.value)}
+	{#each options as opt, i (opt.value)}
 		<button
 			type="button"
 			role="radio"
 			class="opt"
 			class:active={opt.value === value}
 			aria-checked={opt.value === value}
+			tabindex={i === activeIndex ? 0 : -1}
 			{disabled}
 			onclick={() => pick(opt.value)}
 		>

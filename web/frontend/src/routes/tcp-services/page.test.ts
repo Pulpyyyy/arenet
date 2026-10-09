@@ -92,6 +92,23 @@ describe('/tcp-services — list', () => {
 		expect(udp.textContent).toContain('udp/0.0.0.0:51820');
 		expect(udp.textContent).toMatch(/ip\s*:\s*1/);
 	});
+
+	it('opens a service from the keyboard through a real button, not a role=button row', async () => {
+		api.listTCPServices.mockResolvedValue([service()]);
+		render(Page);
+
+		const row = await screen.findByTestId('tcp-row-svc1');
+		// The <tr> stays a row so screen readers keep its cells.
+		expect(row).not.toHaveAttribute('role');
+		expect(row).not.toHaveAttribute('tabindex');
+
+		const open = screen.getByRole('button', { name: 'Edit stalwart-imaps' });
+		expect(open).toHaveAttribute('data-testid', 'tcp-open-svc1');
+		open.focus();
+		await userEvent.keyboard('{Enter}');
+		await tick();
+		expect(screen.getByTestId('tcp-proxy-callout')).toBeInTheDocument();
+	});
 });
 
 describe('/tcp-services — the two refusals, before Save', () => {

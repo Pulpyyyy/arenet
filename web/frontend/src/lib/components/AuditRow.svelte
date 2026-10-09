@@ -4,12 +4,14 @@
   Licensed under the GNU AGPL v3 or later. See LICENSE.
 
   AuditRow (spec §9.4). Renders one collapsed-row of the audit table.
-  The parent <tr> (in DataTable) handles the expand/collapse click;
-  this component only renders the <td> cells.
+  DataTable owns expand/collapse (a disclosure button in its leading
+  cell, plus a mouse click anywhere else on the row); this component
+  only renders the <td> cells.
 
-  Two interactive elements stop click propagation so they don't toggle
-  the row: the action badge (click → filter by action) and the actor
-  filter icon (click → filter by actor user ID).
+  Two interactive elements must not toggle the row: the action badge
+  (click → filter by action) and the actor filter icon (click → filter
+  by actor user ID). DataTable already ignores row clicks that land on
+  a button; they also stop propagation as a belt-and-braces guard.
 -->
 <script lang="ts">
 	import type { AuditEvent } from '$lib/api/audit';

@@ -67,7 +67,7 @@ describe('DataTable', () => {
 
 	it('reveals the expanded snippet when a row is clicked, then collapses on second click', async () => {
 		const user = userEvent.setup();
-		render(DataTable, {
+		const { container } = render(DataTable, {
 			headers: ['Label'],
 			items,
 			row: rowSnippet(),
@@ -75,20 +75,76 @@ describe('DataTable', () => {
 		});
 
 		// Pre-click: expanded panel is not rendered (activeId === null,
-		// the `{#if expanded && activeId === item.id}` branch is false).
+		// the `{#if expanded && open}` branch is false).
 		expect(screen.queryByTestId('expanded-r1')).not.toBeInTheDocument();
 
-		// Click on the first row's <tr> (role="button" via DataTable's
-		// markup). We target by accessible name composed of the inner
-		// <td> text, since each <tr> is role="button".
-		const rows = screen.getAllByRole('button');
-		const firstRow = rows[0];
-		await user.click(firstRow);
+		// Mouse convenience: a click anywhere on the row toggles it.
+		const firstRow = container.querySelectorAll('tr.data-row')[0] as HTMLElement;
+		await user.click(screen.getByText('route one'));
 		expect(screen.getByTestId('expanded-r1')).toBeInTheDocument();
 
 		// Second click on the same row collapses it (activeId returns
 		// to null per the toggle() logic).
 		await user.click(firstRow);
+		expect(screen.queryByTestId('expanded-r1')).not.toBeInTheDocument();
+	});
+
+	it('keeps rows as plain table rows and exposes a disclosure button per row', async () => {
+		const user = userEvent.setup();
+		const { container } = render(DataTable, {
+			headers: ['Label'],
+			items,
+			row: rowSnippet(),
+			expanded: expandedSnippet(),
+			rowLabel: ((item: Item) => item.label) as unknown as (item: { id: string }) => string
+		});
+
+		// The <tr> is not hijacked into a button: screen readers keep
+		// the row/cell structure.
+		for (const r of container.querySelectorAll('tr.data-row')) {
+			expect(r.getAttribute('role')).toBeNull();
+			expect(r.getAttribute('tabindex')).toBeNull();
+			expect(r.getAttribute('aria-expanded')).toBeNull();
+		}
+		expect(screen.getAllByRole('row').length).toBeGreaterThan(items.length);
+
+		// One real button per row, named after the row via rowLabel.
+		const toggle = screen.getByRole('button', { name: 'Details for route one' });
+		expect(toggle).toHaveAttribute('aria-expanded', 'false');
+		expect(toggle).not.toHaveAttribute('aria-controls');
+
+		// Keyboard path: Tab reaches the button, Enter opens it.
+		await user.tab();
+		expect(toggle).toHaveFocus();
+		await user.keyboard('{Enter}');
+		expect(toggle).toHaveAttribute('aria-expanded', 'true');
+		const panel = screen.getByTestId('expanded-r1');
+		const controlsId = toggle.getAttribute('aria-controls');
+		expect(controlsId).toBeTruthy();
+		expect(document.getElementById(controlsId as string)).toContainElement(panel);
+
+		// Space closes it again (native <button> activation).
+		await user.keyboard(' ');
+		expect(toggle).toHaveAttribute('aria-expanded', 'false');
+		expect(screen.queryByTestId('expanded-r1')).not.toBeInTheDocument();
+	});
+
+	it('leaves clicks on controls inside a row to those controls', async () => {
+		const user = userEvent.setup();
+		const withControl = createRawSnippet((getItem: () => Item) => ({
+			render: () => {
+				const item = getItem();
+				return `<td><button type="button">filter ${item.label}</button></td>`;
+			}
+		})) as unknown as Snippet<[{ id: string }]>;
+		render(DataTable, {
+			headers: ['Label'],
+			items,
+			row: withControl,
+			expanded: expandedSnippet()
+		});
+
+		await user.click(screen.getByRole('button', { name: 'filter route one' }));
 		expect(screen.queryByTestId('expanded-r1')).not.toBeInTheDocument();
 	});
 
@@ -107,10 +163,8 @@ describe('DataTable', () => {
 
 	it('drops row interactivity when interactive=false (Step G G.3)', () => {
 		// Sessions table use case: caller passes no expanded snippet and
-		// wants read-only rows. The pre-G.3 component left cursor-pointer
-		// + role=button + tabindex + hover-rail on every row regardless,
-		// causing the parasite-cursor cosmetic bug documented in smoke
-		// doc Step F §5 dette #1.
+		// wants read-only rows: no cursor-pointer, no hover-rail, and no
+		// disclosure button (smoke doc Step F §5 dette #1).
 		const { container } = render(DataTable, {
 			headers: ['Label'],
 			items,
@@ -118,12 +172,12 @@ describe('DataTable', () => {
 			interactive: false
 		});
 
-		// No role=button on rows → screen.queryAllByRole returns 0 for
-		// the row layer (the columnheader role is still there for <th>).
+		// No disclosure buttons and no extra header column.
 		expect(screen.queryAllByRole('button')).toHaveLength(0);
+		expect(screen.getAllByRole('columnheader')).toHaveLength(1);
 
-		// Rows render but without tabindex and without the .interactive
-		// class that drives cursor + hover-rail + focus-ring in CSS.
+		// Rows render without the .interactive class that drives cursor
+		// + hover-rail in CSS.
 		const rows = container.querySelectorAll('tr.data-row');
 		expect(rows).toHaveLength(items.length);
 		for (const r of rows) {
@@ -133,12 +187,10 @@ describe('DataTable', () => {
 		}
 	});
 
-	it('defaults to interactive=true (rétrocompat Routes/Audit)', () => {
-		// Without an explicit interactive prop, behavior must match the
-		// pre-G.3 component: rows are role=button, tabindex=0, .interactive
-		// class is set. Guarantees that Routes + Audit callers (which
-		// don't pass the prop) keep their existing click-to-expand
-		// behavior wired to the same row markup.
+	it('defaults to interactive=true (rétrocompat Audit)', () => {
+		// Without an explicit interactive prop, rows stay click-to-expand
+		// (.interactive class) and each gets a disclosure button, with a
+		// leading header cell so the columns stay aligned.
 		const { container } = render(DataTable, {
 			headers: ['Label'],
 			items,
@@ -149,9 +201,10 @@ describe('DataTable', () => {
 		const rows = container.querySelectorAll('tr.data-row');
 		expect(rows).toHaveLength(items.length);
 		for (const r of rows) {
-			expect(r.getAttribute('tabindex')).toBe('0');
-			expect(r.getAttribute('role')).toBe('button');
 			expect(r.classList.contains('interactive')).toBe(true);
+			expect(r.querySelectorAll('button[aria-expanded]')).toHaveLength(1);
 		}
+		expect(screen.getAllByRole('columnheader')).toHaveLength(2);
+		expect(screen.getAllByRole('button', { name: 'Row details' })).toHaveLength(items.length);
 	});
 });

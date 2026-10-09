@@ -24,6 +24,7 @@
 	import Spinner from '$lib/components/Spinner.svelte';
 	import AuditRow from '$lib/components/AuditRow.svelte';
 	import AuditExpandedDetails from '$lib/components/AuditExpandedDetails.svelte';
+	import { relativeTime } from '$lib/utils/audit-format';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
 
@@ -334,6 +335,7 @@
 			] : []}
 			row={auditRowSnippet}
 			expanded={auditExpandedSnippet}
+			rowLabel={(ev: AuditEvent) => `${ev.action}, ${relativeTime(ev.timestamp)}`}
 		/>
 
 		{#if nextCursor}

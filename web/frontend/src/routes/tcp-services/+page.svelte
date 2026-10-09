@@ -406,21 +406,28 @@
 					</thead>
 					<tbody>
 						{#each services as svc (svc.id)}
+							<!-- The row click is a mouse convenience; the keyboard /
+							     screen-reader path is the name button (a <tr> stays a
+							     row so its cells remain readable). -->
+							<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions, a11y_no_static_element_interactions -->
 							<tr
 								class="border-t border-border-subtle cursor-pointer hover:bg-hover"
 								class:opacity-50={svc.disabled}
 								data-testid="tcp-row-{svc.id}"
 								onclick={() => openEdit(svc)}
-								onkeydown={(e) => {
-									if (e.key === 'Enter' || e.key === ' ') {
-										e.preventDefault();
-										openEdit(svc);
-									}
-								}}
-								tabindex="0"
-								role="button"
 							>
-								<td class="px-4 py-3 font-mono">{svc.name}</td>
+								<td class="px-4 py-3 font-mono">
+									<button
+										type="button"
+										class="font-mono text-left rounded hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+										data-testid="tcp-open-{svc.id}"
+										aria-label={tl('tcpServices.editAria', { name: svc.name })}
+										onclick={(e) => {
+											e.stopPropagation();
+											openEdit(svc);
+										}}>{svc.name}</button
+									>
+								</td>
 								<td class="px-4 py-3 font-mono text-secondary">{listenOf(svc)}</td>
 								<td class="px-4 py-3 font-mono text-secondary">
 									{svc.upstreams[0]?.host}:{svc.upstreams[0]?.port}{svc.upstreams.length > 1

@@ -198,12 +198,16 @@
 	{/if}
 	<div class="map-frame" data-testid="map-frame">
 		<div class="map-overlay-pills">
+		<!-- The LAN and country-block counters are deliberately NOT
+		     role="status": they bump on every WebSocket event, and a
+		     live region would make a screen reader announce each one.
+		     Only the connection pill below is a live region — its
+		     changes are rare and worth hearing. -->
 		{#if lanCount > 0}
 			<div
 				class="lan-pill"
 				data-testid="map-lan-pill"
 				data-lan-count={lanCount}
-				role="status"
 				title={language.current && t('map.lanPillTitle')}
 			>
 				<span class="lan-pill__icon" aria-hidden="true">⌂</span>
@@ -227,7 +231,6 @@
 				class="lan-pill lan-pill--country"
 				data-testid="map-country-block-pill"
 				data-country-block-count={countryBlockCount}
-				role="status"
 				title={language.current && t('map.countryPillTitle')}
 			>
 				<span class="lan-pill__icon" aria-hidden="true">🛡</span>

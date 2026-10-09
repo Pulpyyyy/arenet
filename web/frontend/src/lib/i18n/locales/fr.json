@@ -8,7 +8,12 @@
 		"error": "Erreur",
 		"success": "Succès",
 		"signOut": "Se déconnecter",
-		"signedInAs": "Connecté en tant que {name}"
+		"signedInAs": "Connecté en tant que {name}",
+		"dataTable": {
+			"detailsColumn": "Détails",
+			"toggleDetails": "Détails de la ligne",
+			"toggleDetailsFor": "Détails de {label}"
+		}
 	},
 	"auth": {
 		"loginButton": "Se connecter",
@@ -900,6 +905,7 @@
 		"perRouteAfter": ""
 	},
 	"tcpServices": {
+		"editAria": "Modifier {name}",
 		"headTitle": "Services TCP / UDP — Arenet",
 		"eyebrow": "Trafic · Niveau 4",
 		"title": "Services TCP / UDP",

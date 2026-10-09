@@ -8,7 +8,12 @@
 		"error": "Error",
 		"success": "Success",
 		"signOut": "Sign out",
-		"signedInAs": "Signed in as {name}"
+		"signedInAs": "Signed in as {name}",
+		"dataTable": {
+			"detailsColumn": "Details",
+			"toggleDetails": "Row details",
+			"toggleDetailsFor": "Details for {label}"
+		}
 	},
 	"auth": {
 		"loginButton": "Sign in",
@@ -900,6 +905,7 @@
 		"perRouteAfter": "detail"
 	},
 	"tcpServices": {
+		"editAria": "Edit {name}",
 		"headTitle": "TCP / UDP services — Arenet",
 		"eyebrow": "Traffic · Layer 4",
 		"title": "TCP / UDP services",
