@@ -1128,7 +1128,6 @@
 		"actionDemote": "Demote",
 		"actionPromote": "Promote",
 		"toastTokenCopied": "New token copied",
-		"toastCopyFailed": "Copy failed — select the text manually",
 		"toastDeleted": "{username} deleted",
 		"roleConfirmTitle": "{action} {username}?",
 		"roleConfirmPromoteBody": "{username} will get full admin access (CRUD on routes, settings and users).",
@@ -1957,8 +1956,7 @@
 		"toastNameRequired": "Name required",
 		"toastNetworkError": "Network error",
 		"toastSubmitFailed": "Failed: {err}",
-		"toastTokenCopied": "Token copied to clipboard",
-		"toastCopyFailed": "Copy failed — select the text manually"
+		"toastTokenCopied": "Token copied to clipboard"
 	},
 	"apiDocs": {
 		"operations": "operations",
@@ -2562,8 +2560,11 @@
 		"copied": "Copied",
 		"close": "Close",
 		"toastCreated": "{username} created",
-		"toastCopied": "Password copied",
-		"toastCopyFailed": "Could not copy — select the text and copy it by hand"
+		"toastCopied": "Password copied"
+	},
+	"secretReveal": {
+		"savedConfirm": "I have saved it somewhere safe",
+		"copyFailed": "Could not copy automatically — browsers often refuse on a plain-HTTP address. Select the text above, copy it by hand, then tick the box below."
 	},
 	"mustChange": {
 		"title": "Change your password",

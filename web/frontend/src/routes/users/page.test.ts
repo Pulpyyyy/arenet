@@ -13,9 +13,9 @@
 //   - Delete confirm dialog → API call → row removed
 //   - Self-row Delete button hidden (UX guard)
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { tick } from 'svelte';
-import { render, screen, fireEvent } from '@testing-library/svelte';
+import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 
 const { settingsMock, authMock, toastMock, authStoreMock } = vi.hoisted(() => ({
@@ -23,7 +23,8 @@ const { settingsMock, authMock, toastMock, authStoreMock } = vi.hoisted(() => ({
 		listAdminUsers: vi.fn(),
 		updateUserRole: vi.fn(),
 		deleteAdminUser: vi.fn(),
-		getOIDCConfig: vi.fn()
+		getOIDCConfig: vi.fn(),
+		rotateServiceAccountToken: vi.fn()
 	},
 	authMock: {
 		oidcStatus: vi.fn()
@@ -43,7 +44,8 @@ vi.mock('$lib/api/settings', () => ({
 		listAdminUsers: (...a: unknown[]) => settingsMock.listAdminUsers(...a),
 		updateUserRole: (...a: unknown[]) => settingsMock.updateUserRole(...a),
 		deleteAdminUser: (...a: unknown[]) => settingsMock.deleteAdminUser(...a),
-		getOIDCConfig: (...a: unknown[]) => settingsMock.getOIDCConfig(...a)
+		getOIDCConfig: (...a: unknown[]) => settingsMock.getOIDCConfig(...a),
+		rotateServiceAccountToken: (...a: unknown[]) => settingsMock.rotateServiceAccountToken(...a)
 	}
 }));
 vi.mock('$lib/api/auth', () => ({
@@ -81,6 +83,7 @@ beforeEach(() => {
 	settingsMock.updateUserRole.mockReset();
 	settingsMock.deleteAdminUser.mockReset();
 	settingsMock.getOIDCConfig.mockReset();
+	settingsMock.rotateServiceAccountToken.mockReset();
 	authMock.oidcStatus.mockReset();
 	toastMock.pushToast.mockReset();
 	authStoreMock.state = 'authenticated';
@@ -530,6 +533,72 @@ describe('/utilisateurs — Phase 2 visual polish', () => {
 		// the online state — assert the dot is there.
 		const dot = cell.querySelector('[aria-label^="Status:"]');
 		expect(dot).not.toBeNull();
+	});
+});
+
+// --- Token rotation: confirm, then a show-once reveal -------------
+//
+// Rotating revokes the current token at once, so the new one is the
+// only working credential: the reveal must not be dismissible, and
+// a refused copy (plain HTTP) must still leave a way out.
+
+describe('/utilisateurs — token rotation', () => {
+	async function openRotation(): Promise<void> {
+		settingsMock.listAdminUsers.mockResolvedValue([
+			user({ id: 'svc-1', username: 'ci-deploy', authSource: 'service', role: 'viewer' })
+		]);
+		render(Page);
+		await tick();
+		await tick();
+		await tick();
+		await fireEvent.click(screen.getByTestId('rotate-btn-svc-1'));
+	}
+
+	async function rotate(): Promise<void> {
+		settingsMock.rotateServiceAccountToken.mockResolvedValue({
+			token: 'arn_newtokennewtoken',
+			tokenId: 'tok-2'
+		});
+		await openRotation();
+		await fireEvent.click(screen.getByTestId('rotate-confirm-btn'));
+		await waitFor(() => expect(screen.getByTestId('rotate-revealed-token')).toBeInTheDocument());
+	}
+
+	afterEach(() => {
+		delete (navigator as unknown as Record<string, unknown>).clipboard;
+		delete (document as unknown as Record<string, unknown>).execCommand;
+	});
+
+	it('asks in a labelled dialog, with a danger confirm button', async () => {
+		await openRotation();
+
+		expect(screen.getByRole('dialog', { name: /ci-deploy/ })).toBeInTheDocument();
+		expect(screen.getByTestId('rotate-confirm-btn').className).toContain('bg-down');
+		expect(settingsMock.rotateServiceAccountToken).not.toHaveBeenCalled();
+	});
+
+	it('keeps the new token on Escape until it is saved', async () => {
+		await rotate();
+		expect(settingsMock.rotateServiceAccountToken).toHaveBeenCalledWith('svc-1');
+
+		await fireEvent.keyDown(document, { key: 'Escape' });
+		expect(screen.getByTestId('rotate-revealed-token').textContent).toBe('arn_newtokennewtoken');
+
+		const close = screen.getByTestId('rotate-close-btn') as HTMLButtonElement;
+		expect(close.disabled).toBe(true);
+		await fireEvent.click(screen.getByTestId('rotate-saved-checkbox'));
+		expect(close.disabled).toBe(false);
+	});
+
+	it('says so in the dialog when the copy fails', async () => {
+		await rotate();
+		Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+		Object.defineProperty(document, 'execCommand', { value: () => false, configurable: true });
+
+		await fireEvent.click(screen.getByTestId('rotate-copy-btn'));
+
+		expect(await screen.findByTestId('rotate-copy-failed')).toBeInTheDocument();
+		expect((screen.getByTestId('rotate-close-btn') as HTMLButtonElement).disabled).toBe(true);
 	});
 });
 

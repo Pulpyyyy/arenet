@@ -1128,7 +1128,6 @@
 		"actionDemote": "Rétrograder",
 		"actionPromote": "Promouvoir",
 		"toastTokenCopied": "Nouveau token copié",
-		"toastCopyFailed": "Copie échouée — sélectionne le texte manuellement",
 		"toastDeleted": "{username} supprimé",
 		"roleConfirmTitle": "{action} {username} ?",
 		"roleConfirmPromoteBody": "{username} obtiendra l'accès admin complet (CRUD sur routes, settings et utilisateurs).",
@@ -1957,8 +1956,7 @@
 		"toastNameRequired": "Nom requis",
 		"toastNetworkError": "Erreur réseau",
 		"toastSubmitFailed": "Échec : {err}",
-		"toastTokenCopied": "Token copié dans le presse-papier",
-		"toastCopyFailed": "Copie échouée — sélectionne le texte manuellement"
+		"toastTokenCopied": "Token copié dans le presse-papier"
 	},
 	"apiDocs": {
 		"operations": "opérations",
@@ -2562,8 +2560,11 @@
 		"copied": "Copié",
 		"close": "Fermer",
 		"toastCreated": "{username} créé",
-		"toastCopied": "Mot de passe copié",
-		"toastCopyFailed": "Copie impossible — sélectionne le texte et copie-le à la main"
+		"toastCopied": "Mot de passe copié"
+	},
+	"secretReveal": {
+		"savedConfirm": "Je l'ai mis en lieu sûr",
+		"copyFailed": "Impossible de copier automatiquement — les navigateurs refusent souvent sur une adresse en HTTP simple. Sélectionne le texte ci-dessus, copie-le à la main, puis coche la case ci-dessous."
 	},
 	"mustChange": {
 		"title": "Change ton mot de passe",

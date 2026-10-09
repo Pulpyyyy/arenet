@@ -11,7 +11,9 @@
   crosses exactly one screen: nothing returns it afterwards, and an
   operator who closes the dialog without copying has to delete the
   account and start again. Making "Close" wait for "Copy" is the only
-  honest way to say that.
+  honest way to say that. Escape and the backdrop are inert during the
+  reveal for the same reason, and "I have saved it" also unlocks Close:
+  on a plain-HTTP console the browser may refuse to copy at all.
 
   Generating is the default. An operator asked to invent a password for
   somebody else reaches for something memorable — and nobody needs to
@@ -30,6 +32,7 @@
 	import type { CreateAdminUserResponse, UserRole } from '$lib/api/types';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
+	import { copyText } from '$lib/utils/clipboard';
 
 	interface Props {
 		open: boolean;
@@ -51,6 +54,9 @@
 
 	let revealed = $state<CreateAdminUserResponse | null>(null);
 	let copied = $state(false);
+	let saved = $state(false);
+	let copyFailed = $state(false);
+	let secretEl: HTMLElement | undefined = $state(undefined);
 
 	function reset() {
 		username = '';
@@ -63,6 +69,8 @@
 		formError = null;
 		revealed = null;
 		copied = false;
+		saved = false;
+		copyFailed = false;
 	}
 
 	function handleClose() {
@@ -106,12 +114,13 @@
 
 	async function copyPassword() {
 		if (!revealed?.generatedPassword) return;
-		try {
-			await navigator.clipboard.writeText(revealed.generatedPassword);
+		if (await copyText(revealed.generatedPassword, secretEl)) {
 			copied = true;
+			copyFailed = false;
 			pushToast(t('createUser.toastCopied'), 'success');
-		} catch {
-			pushToast(t('createUser.toastCopyFailed'), 'danger');
+		} else {
+			// Said inside the dialog, next to the text to copy by hand.
+			copyFailed = true;
 		}
 	}
 </script>
@@ -121,6 +130,7 @@
 	title={language.current &&
 		(revealed ? t('createUser.titleReveal') : t('createUser.titleCreate'))}
 	onClose={handleClose}
+	dismissible={!revealed}
 >
 	{#if !revealed}
 		<form
@@ -192,9 +202,24 @@
 		<div class="flex flex-col gap-3">
 			<p class="text-sm">{language.current && t('createUser.revealIntro')}</p>
 			<pre
+				bind:this={secretEl}
 				class="px-3 py-2 rounded-md bg-surface border border-border-default font-mono text-sm break-all whitespace-pre-wrap select-all"
 				data-testid="new-user-revealed">{revealed.generatedPassword}</pre>
+			{#if copyFailed}
+				<p role="alert" class="text-sm text-down" data-testid="new-user-copy-failed">
+					{language.current && t('secretReveal.copyFailed')}
+				</p>
+			{/if}
 			<p class="text-xs text-muted">{language.current && t('createUser.revealWarning')}</p>
+			<label class="inline-flex items-center gap-2 text-sm text-secondary cursor-pointer">
+				<input
+					type="checkbox"
+					class="accent-cyan"
+					bind:checked={saved}
+					data-testid="new-user-saved"
+				/>
+				{language.current && t('secretReveal.savedConfirm')}
+			</label>
 		</div>
 	{/if}
 
@@ -214,13 +239,13 @@
 			<Button variant="secondary" size="sm" onclick={copyPassword} data-testid="new-user-copy">
 				{language.current && (copied ? t('createUser.copied') : t('createUser.copy'))}
 			</Button>
-			<!-- Close waits for Copy: the password is gone once this
-			     dialog closes, and the only recovery is deleting the
-			     account and creating it again. -->
+			<!-- Close waits for Copy (or the "saved" tick): the password
+			     is gone once this dialog closes, and the only recovery is
+			     deleting the account and creating it again. -->
 			<Button
 				variant="primary"
 				size="sm"
-				disabled={!copied}
+				disabled={!copied && !saved}
 				onclick={handleClose}
 				data-testid="new-user-close">{language.current && t('createUser.close')}</Button
 			>

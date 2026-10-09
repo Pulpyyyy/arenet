@@ -10,7 +10,10 @@
        box, REQUIRE the operator to press "Copier" before
        enabling "Fermer". The token is shown ONCE; navigating
        away without copying is a meaningful loss (the operator
-       would have to rotate to get a new one).
+       would have to rotate to get a new one). Escape and the
+       backdrop are inert during the reveal, and an "I have
+       saved it" tick also unlocks Close for consoles on plain
+       HTTP, where the browser may refuse to copy at all.
 
   The token is held in component-local state, never persisted
   beyond the modal lifecycle. Closing the modal nukes the
@@ -25,6 +28,7 @@
 	import type { CreateServiceAccountResponse, UserRole } from '$lib/api/types';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
+	import { copyText } from '$lib/utils/clipboard';
 
 	interface Props {
 		open: boolean;
@@ -48,6 +52,9 @@
 
 	let revealed = $state<CreateServiceAccountResponse | null>(null);
 	let copied = $state(false);
+	let saved = $state(false);
+	let copyFailed = $state(false);
+	let tokenEl: HTMLElement | undefined = $state(undefined);
 
 	function reset() {
 		name = '';
@@ -56,14 +63,13 @@
 		submitting = false;
 		revealed = null;
 		copied = false;
+		saved = false;
+		copyFailed = false;
 	}
 
 	function handleClose() {
-		// Operator-initiated close OR backdrop click. Reveal stage
-		// only allows close once the token has been copied (guarded
-		// at the button-disabled level — Modal still honours Esc /
-		// backdrop because we can't realistically prevent the user
-		// from leaving, only nudge them strongly).
+		// During the reveal only the Close button gets here (the Modal
+		// is not dismissible then), and it waits for Copy or "saved".
 		reset();
 		onClose();
 	}
@@ -111,17 +117,18 @@
 
 	async function copyToken() {
 		if (!revealed) return;
-		try {
-			await navigator.clipboard.writeText(revealed.token);
+		if (await copyText(revealed.token, tokenEl)) {
 			copied = true;
+			copyFailed = false;
 			pushToast(t('createServiceAccount.toastTokenCopied'), 'success');
-		} catch {
-			pushToast(t('createServiceAccount.toastCopyFailed'), 'danger');
+		} else {
+			// Said inside the dialog, next to the text to copy by hand.
+			copyFailed = true;
 		}
 	}
 </script>
 
-<Modal {open} title={language.current && (revealed ? t('createServiceAccount.titleReveal') : t('createServiceAccount.titleCreate'))} onClose={handleClose}>
+<Modal {open} title={language.current && (revealed ? t('createServiceAccount.titleReveal') : t('createServiceAccount.titleCreate'))} onClose={handleClose} dismissible={!revealed}>
 	{#if !revealed}
 		<form
 			class="flex flex-col gap-4"
@@ -178,14 +185,29 @@
 				{language.current && t('createServiceAccount.revealedPrefix')} <strong class="text-down">{language.current && t('createServiceAccount.revealedOnce')}</strong>{language.current && t('createServiceAccount.revealedSuffix')}
 			</p>
 			<pre
+				bind:this={tokenEl}
 				class="px-3 py-2 rounded-md bg-surface border border-border-default font-mono text-xs break-all whitespace-pre-wrap select-all"
 				data-testid="svc-revealed-token">{revealed.token}</pre>
+			{#if copyFailed}
+				<p role="alert" class="text-sm text-down" data-testid="svc-copy-failed">
+					{language.current && t('secretReveal.copyFailed')}
+				</p>
+			{/if}
 			<p class="text-xs text-muted">
 				{language.current && t('createServiceAccount.tokenIdLabel')} <code class="font-mono">{revealed.tokenId}</code>
 				{#if revealed.expiresAt}
 					 {language.current && t('createServiceAccount.expiresOnLabel')} {new Date(revealed.expiresAt).toLocaleString()}
 				{/if}
 			</p>
+			<label class="inline-flex items-center gap-2 text-sm text-secondary cursor-pointer">
+				<input
+					type="checkbox"
+					class="accent-cyan"
+					bind:checked={saved}
+					data-testid="svc-saved-checkbox"
+				/>
+				{language.current && t('secretReveal.savedConfirm')}
+			</label>
 		</div>
 	{/if}
 
@@ -213,7 +235,7 @@
 			<Button
 				variant="primary"
 				size="sm"
-				disabled={!copied}
+				disabled={!copied && !saved}
 				onclick={handleClose}
 				data-testid="svc-close-button"
 			>

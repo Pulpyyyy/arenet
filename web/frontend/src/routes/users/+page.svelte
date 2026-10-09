@@ -41,12 +41,14 @@
 	import Badge from '$lib/components/Badge.svelte';
 	import Spinner from '$lib/components/Spinner.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import OIDCConfigSummary from '$lib/components/OIDCConfigSummary.svelte';
 	import UserAvatar from '$lib/components/UserAvatar.svelte';
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import CreateServiceAccountModal from '$lib/components/CreateServiceAccountModal.svelte';
 	import CreateUserModal from '$lib/components/CreateUserModal.svelte';
 	import { oidcProviderLabel, oidcProviderColors } from '$lib/utils/oidc-labels';
+	import { copyText } from '$lib/utils/clipboard';
 	import type { OIDCProviderKind } from '$lib/api/types';
 
 	let users = $state<AdminUser[]>([]);
@@ -70,6 +72,10 @@
 	let pendingRotate = $state<AdminUser | null>(null);
 	let revealedRotateToken = $state<string | null>(null);
 	let rotateCopied = $state(false);
+	let rotateSaved = $state(false);
+	let rotateCopyFailed = $state(false);
+	let rotating = $state(false);
+	let rotateTokenEl: HTMLElement | undefined = $state(undefined);
 
 	// Search + filter state — pure frontend filtering over the
 	// full users[] (admin volumes < 50 — no API surface needed).
@@ -271,12 +277,15 @@
 		pendingRotate = u;
 		revealedRotateToken = null;
 		rotateCopied = false;
+		rotateSaved = false;
+		rotateCopyFailed = false;
 		confirmRotateOpen = true;
 	}
 
 	async function confirmRotate(): Promise<void> {
-		if (!pendingRotate) return;
+		if (!pendingRotate || rotating) return;
 		const u = pendingRotate;
+		rotating = true;
 		try {
 			const result = await settingsApi.rotateServiceAccountToken(u.id);
 			revealedRotateToken = result.token;
@@ -286,17 +295,20 @@
 			pushToast(msg, 'danger');
 			confirmRotateOpen = false;
 			pendingRotate = null;
+		} finally {
+			rotating = false;
 		}
 	}
 
 	async function copyRotateToken(): Promise<void> {
 		if (!revealedRotateToken) return;
-		try {
-			await navigator.clipboard.writeText(revealedRotateToken);
+		if (await copyText(revealedRotateToken, rotateTokenEl)) {
 			rotateCopied = true;
+			rotateCopyFailed = false;
 			pushToast(t('users.toastTokenCopied'), 'success');
-		} catch {
-			pushToast(t('users.toastCopyFailed'), 'danger');
+		} else {
+			// Said inside the dialog, next to the text to copy by hand.
+			rotateCopyFailed = true;
 		}
 	}
 
@@ -305,6 +317,8 @@
 		pendingRotate = null;
 		revealedRotateToken = null;
 		rotateCopied = false;
+		rotateSaved = false;
+		rotateCopyFailed = false;
 	}
 
 	async function confirmDelete(): Promise<void> {
@@ -672,74 +686,79 @@
 	onCreated={load}
 />
 
-<!-- Phase 4 — Token rotation modal (custom because we need
-     the show-once token reveal flow, not a yes/no confirm). -->
-{#if confirmRotateOpen && pendingRotate}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center p-4"
-		style:background="var(--overlay-modal, rgba(0,0,0,0.8))"
-		role="presentation"
-		onclick={(e) => {
-			if (e.target === e.currentTarget && (revealedRotateToken === null || rotateCopied)) closeRotateModal();
-		}}
-		onkeydown={(e) => {
-			if (e.key === 'Escape' && (revealedRotateToken === null || rotateCopied)) closeRotateModal();
-		}}
-		data-testid="rotate-modal"
-	>
-		<div
-			class="bg-elevated border border-border-default rounded-lg shadow-lg w-full max-w-md"
-			role="dialog"
-			aria-modal="true"
-		>
-			<header class="px-5 py-4 border-b border-border-subtle">
-				<h2 class="text-lg font-semibold">
-					{language.current && (revealedRotateToken ? t('users.rotateNewTitle') : t('users.rotateConfirmTitle', { username: pendingRotate.username }))}
-				</h2>
-			</header>
-			<div class="px-5 py-4 text-sm flex flex-col gap-3">
-				{#if !revealedRotateToken}
-					<p>
-						{language.current && t('users.rotateModalIntro')}
-					</p>
-				{:else}
-					<p>
-						{language.current && t('users.rotateRevealedShownOnce')}
-					</p>
-					<pre
-						class="px-3 py-2 rounded-md bg-surface border border-border-default font-mono text-xs break-all whitespace-pre-wrap select-all"
-						data-testid="rotate-revealed-token">{revealedRotateToken}</pre>
-				{/if}
-			</div>
-			<footer class="px-5 py-3 border-t border-border-subtle flex justify-end gap-2">
-				{#if !revealedRotateToken}
-					<Button variant="ghost" size="sm" onclick={closeRotateModal}>{language.current && t('users.rotateBtnCancel')}</Button>
-					<Button variant="primary" size="sm" onclick={confirmRotate} data-testid="rotate-confirm-btn">
-						{language.current && t('users.rotateBtnConfirm')}
-					</Button>
-				{:else}
-					<Button
-						variant="secondary"
-						size="sm"
-						onclick={copyRotateToken}
-						data-testid="rotate-copy-btn"
-					>
-						{language.current && (rotateCopied ? t('users.rotateBtnCopied') : t('users.rotateBtnCopy'))}
-					</Button>
-					<Button
-						variant="primary"
-						size="sm"
-						disabled={!rotateCopied}
-						onclick={closeRotateModal}
-						data-testid="rotate-close-btn"
-					>
-						{language.current && t('users.rotateBtnClose')}
-					</Button>
-				{/if}
-			</footer>
-		</div>
+<!-- Phase 4 — Token rotation: a confirm step, then a show-once reveal,
+     so not a plain ConfirmDialog. Built on Modal for its labelling and
+     focus handling. Rotating revokes the current token at once, hence
+     the danger button; the reveal (and the request in flight) cannot be
+     dismissed, or the new token would be lost with the old one revoked. -->
+<Modal
+	open={confirmRotateOpen && pendingRotate !== null}
+	title={language.current &&
+		(revealedRotateToken
+			? t('users.rotateNewTitle')
+			: t('users.rotateConfirmTitle', { username: pendingRotate?.username ?? '' }))}
+	onClose={closeRotateModal}
+	dismissible={revealedRotateToken === null && !rotating}
+>
+	<div class="text-sm flex flex-col gap-3" data-testid="rotate-modal">
+		{#if !revealedRotateToken}
+			<p>
+				{language.current && t('users.rotateModalIntro')}
+			</p>
+		{:else}
+			<p>
+				{language.current && t('users.rotateRevealedShownOnce')}
+			</p>
+			<pre
+				bind:this={rotateTokenEl}
+				class="px-3 py-2 rounded-md bg-surface border border-border-default font-mono text-xs break-all whitespace-pre-wrap select-all"
+				data-testid="rotate-revealed-token">{revealedRotateToken}</pre>
+			{#if rotateCopyFailed}
+				<p role="alert" class="text-down" data-testid="rotate-copy-failed">
+					{language.current && t('secretReveal.copyFailed')}
+				</p>
+			{/if}
+			<label class="inline-flex items-center gap-2 text-secondary cursor-pointer">
+				<input
+					type="checkbox"
+					class="accent-cyan"
+					bind:checked={rotateSaved}
+					data-testid="rotate-saved-checkbox"
+				/>
+				{language.current && t('secretReveal.savedConfirm')}
+			</label>
+		{/if}
 	</div>
-{/if}
+	{#snippet footer()}
+		{#if !revealedRotateToken}
+			<Button variant="ghost" size="sm" disabled={rotating} onclick={closeRotateModal}
+				>{language.current && t('users.rotateBtnCancel')}</Button
+			>
+			<Button
+				variant="danger"
+				size="sm"
+				loading={rotating}
+				onclick={confirmRotate}
+				data-testid="rotate-confirm-btn"
+			>
+				{language.current && t('users.rotateBtnConfirm')}
+			</Button>
+		{:else}
+			<Button variant="secondary" size="sm" onclick={copyRotateToken} data-testid="rotate-copy-btn">
+				{language.current && (rotateCopied ? t('users.rotateBtnCopied') : t('users.rotateBtnCopy'))}
+			</Button>
+			<Button
+				variant="primary"
+				size="sm"
+				disabled={!rotateCopied && !rotateSaved}
+				onclick={closeRotateModal}
+				data-testid="rotate-close-btn"
+			>
+				{language.current && t('users.rotateBtnClose')}
+			</Button>
+		{/if}
+	{/snippet}
+</Modal>
 
 <style>
 	/* Phase 2 follow-up — provider-coloured pill rendered in the

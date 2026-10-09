@@ -5,15 +5,13 @@
 // Modal component tests (Step F Chunk 7.2, spec §11.3 — 4 tests).
 // Behavior-based per §11.2.
 //
-// Modal's shipped API is { open, title, onClose, children, footer }.
-// The spec §11.3 mentions a `closeOnOverlay={false}` prop variant —
-// this prop does NOT exist in the shipped component. Modal's overlay
-// click handler is always-on (the backdrop click triggers onClose
-// unconditionally). The fourth test therefore exercises a different
-// behavior: title is rendered with the proper aria-labelledby wiring.
+// Modal's API is { open, title, onClose, children, footer, width,
+// dismissible }. `dismissible={false}` is what the spec §11.3 called
+// `closeOnOverlay={false}`, extended to Escape: show-once secrets use
+// it so a stray key cannot throw the secret away.
 
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, fireEvent } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { createRawSnippet } from 'svelte';
 import Modal from './Modal.svelte';
@@ -125,5 +123,68 @@ describe('Modal', () => {
 		const dialog = screen.getByRole('dialog');
 		expect(dialog.className).toContain('max-w-2xl');
 		expect(dialog.className).not.toContain('max-w-md');
+	});
+
+	// A long form (alert channel, DNS provider) used to grow past the
+	// viewport inside the centred backdrop, clipping its Save footer
+	// with no way to scroll to it.
+	it('caps the dialog to the viewport and scrolls only the body', () => {
+		render(Modal, {
+			open: true,
+			title: 'Long form',
+			onClose: vi.fn(),
+			children: textSnippet('Body')
+		});
+		const dialog = screen.getByRole('dialog');
+		expect(dialog.className).toContain('max-h-[calc(100dvh-2rem)]');
+		expect(dialog.className).toContain('flex-col');
+		const body = screen.getByText('Body').closest('.overflow-y-auto');
+		expect(body).not.toBeNull();
+		expect(body?.className).toContain('min-h-0');
+	});
+
+	it('closes only the top-most of two stacked modals on Escape', async () => {
+		const lowerClose = vi.fn();
+		const upperClose = vi.fn();
+		render(Modal, {
+			open: true,
+			title: 'Form',
+			onClose: lowerClose,
+			children: textSnippet('Form body')
+		});
+		const upper = render(Modal, {
+			open: true,
+			title: 'Discard changes?',
+			onClose: upperClose,
+			children: textSnippet('Confirm body')
+		});
+
+		await fireEvent.keyDown(document, { key: 'Escape' });
+		expect(upperClose).toHaveBeenCalledTimes(1);
+		expect(lowerClose).not.toHaveBeenCalled();
+
+		// Once the upper one is gone, Escape reaches the one below.
+		await upper.rerender({ open: false });
+		await fireEvent.keyDown(document, { key: 'Escape' });
+		expect(lowerClose).toHaveBeenCalledTimes(1);
+		expect(upperClose).toHaveBeenCalledTimes(1);
+	});
+
+	it('ignores Escape and backdrop clicks when dismissible=false', async () => {
+		const onClose = vi.fn();
+		const { container } = render(Modal, {
+			open: true,
+			title: 'Secret',
+			onClose,
+			dismissible: false,
+			children: textSnippet('Body')
+		});
+
+		await fireEvent.keyDown(document, { key: 'Escape' });
+		const backdrop = container.querySelector('.modal-backdrop') as HTMLElement;
+		await fireEvent.click(backdrop);
+
+		expect(onClose).not.toHaveBeenCalled();
+		expect(screen.getByRole('dialog')).toBeInTheDocument();
 	});
 });
