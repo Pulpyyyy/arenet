@@ -179,6 +179,35 @@ describe('/utilisateurs — filters', () => {
 		expect(screen.queryByTestId('user-row-u2')).toBeNull();
 	});
 
+	it('role chips say which one is pressed', async () => {
+		settingsMock.listAdminUsers.mockResolvedValue([
+			user({ id: 'u1', role: 'admin' }),
+			user({ id: 'u2', role: 'viewer' })
+		]);
+		render(Page);
+		await tick();
+		await tick();
+		await tick();
+
+		const chips = Array.from(
+			screen.getByTestId('role-filter').querySelectorAll('button')
+		);
+		expect(chips.map((c) => c.getAttribute('aria-pressed'))).toEqual([
+			'true',
+			'false',
+			'false'
+		]);
+
+		await userEvent.click(chips[1]);
+		await tick();
+
+		expect(chips.map((c) => c.getAttribute('aria-pressed'))).toEqual([
+			'false',
+			'true',
+			'false'
+		]);
+	});
+
 	it('source chips narrow to local / oidc', async () => {
 		settingsMock.listAdminUsers.mockResolvedValue([
 			user({ id: 'u1', authSource: 'local' }),
@@ -362,6 +391,67 @@ describe('/utilisateurs — delete flow', () => {
 		expect(settingsMock.deleteAdminUser).toHaveBeenCalledWith('u1');
 		expect(screen.queryByTestId('user-row-u1')).toBeNull();
 		expect(screen.getByTestId('user-row-u2')).toBeTruthy();
+	});
+});
+
+// --- Role changes: never your own, never the last admin -----------
+//
+// Demoting yourself, or the last admin, locks the instance out of its
+// own administration; the page does not offer either.
+
+describe('/utilisateurs — role change guards', () => {
+	async function renderWith(list: AdminUser[]): Promise<void> {
+		settingsMock.listAdminUsers.mockResolvedValue(list);
+		render(Page);
+		await tick();
+		await tick();
+		await tick();
+	}
+
+	it('offers no role button on your own row, and says why', async () => {
+		await renderWith([
+			user({ id: 'self-id', username: 'me', role: 'admin', authSource: 'local' }),
+			user({ id: 'other-id', username: 'other', role: 'admin', authSource: 'local' })
+		]);
+
+		expect(screen.queryByTestId('role-btn-self-id')).toBeNull();
+		const hint = screen.getByTestId('role-self-hint-self-id');
+		expect(hint.getAttribute('title')).toMatch(/your own role/i);
+		// Two local admins: the other one can be demoted.
+		expect((screen.getByTestId('role-btn-other-id') as HTMLButtonElement).disabled).toBe(false);
+	});
+
+	it('disables Demote on the last admin, with the reason', async () => {
+		await renderWith([
+			user({ id: 'u1', username: 'alice', role: 'admin', authSource: 'local' }),
+			user({ id: 'u2', username: 'bob', role: 'viewer', authSource: 'local' }),
+			// A service admin cannot sign in here: it does not count.
+			user({ id: 'svc-1', username: 'ci', role: 'admin', authSource: 'service' })
+		]);
+
+		const demote = screen.getByTestId('role-btn-u1') as HTMLButtonElement;
+		expect(demote.disabled).toBe(true);
+		expect(demote.getAttribute('aria-describedby')).toBe('role-lock-u1');
+		expect(screen.getByTestId('role-lock-hint-u1').textContent).toMatch(/last admin/i);
+
+		await fireEvent.click(demote);
+		expect(screen.queryByRole('dialog')).toBeNull();
+		expect(settingsMock.updateUserRole).not.toHaveBeenCalled();
+
+		// Promoting a viewer stays possible.
+		expect((screen.getByTestId('role-btn-u2') as HTMLButtonElement).disabled).toBe(false);
+	});
+
+	it('disables Demote on the last local admin, not on an SSO admin', async () => {
+		await renderWith([
+			user({ id: 'u1', username: 'alice', role: 'admin', authSource: 'local' }),
+			user({ id: 'u2', username: 'bob', role: 'admin', authSource: 'oidc' })
+		]);
+
+		expect((screen.getByTestId('role-btn-u1') as HTMLButtonElement).disabled).toBe(true);
+		expect(screen.getByTestId('role-lock-hint-u1').textContent).toMatch(/last local admin/i);
+		expect((screen.getByTestId('role-btn-u2') as HTMLButtonElement).disabled).toBe(false);
+		expect(screen.queryByTestId('role-lock-hint-u2')).toBeNull();
 	});
 });
 

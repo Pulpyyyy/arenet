@@ -130,7 +130,12 @@
 		const localAdmins = users.filter(
 			(u) => u.authSource === 'local' && u.role === 'admin'
 		).length;
-		return { total, admins, viewers, oidc, local, localAdmins };
+		// Service accounts are machines: an admin token cannot sign
+		// in to this page, so it does not count as a way back in.
+		const humanAdmins = users.filter(
+			(u) => u.authSource !== 'service' && u.role === 'admin'
+		).length;
+		return { total, admins, viewers, oidc, local, localAdmins, humanAdmins };
 	});
 
 	const subtitle = $derived(
@@ -244,7 +249,30 @@
 		return u.role === 'admin' ? 'viewer' : 'admin';
 	}
 
+	// Why a demotion is not offered, or null when it is. The last
+	// admin would leave nobody able to administer the instance; the
+	// last LOCAL admin is the way back in when the SSO is down, and
+	// the backend refuses that one too (UserStore.UpdateRole). Counts
+	// run over every user, not the filtered list.
+	type RoleLock = 'lastAdmin' | 'lastLocalAdmin';
+	function roleLockFor(u: AdminUser): RoleLock | null {
+		if (u.role !== 'admin') return null;
+		if (counts.humanAdmins <= 1) return 'lastAdmin';
+		if (u.authSource === 'local' && counts.localAdmins <= 1) return 'lastLocalAdmin';
+		return null;
+	}
+
+	function roleLockHint(lock: RoleLock): string {
+		void language.current;
+		return lock === 'lastAdmin'
+			? t('users.roleLastAdminHint')
+			: t('users.roleLastLocalAdminHint');
+	}
+
 	function onRoleClick(u: AdminUser): void {
+		// The buttons are not offered in these cases; this keeps the
+		// rule in one place should another caller appear.
+		if (auth.user?.id === u.id || roleLockFor(u) !== null) return;
 		pendingRole = { user: u, nextRole: nextRoleFor(u) };
 		confirmRoleOpen = true;
 	}
@@ -434,6 +462,7 @@
 							type="button"
 							class:active={roleFilter === val}
 							class="filter-chip"
+							aria-pressed={roleFilter === val}
 							onclick={() => (roleFilter = val as RoleFilter)}
 						>
 							{label}
@@ -446,6 +475,7 @@
 							type="button"
 							class:active={sourceFilter === val}
 							class="filter-chip"
+							aria-pressed={sourceFilter === val}
 							onclick={() => (sourceFilter = val as SourceFilter)}
 						>
 							{label}
@@ -616,14 +646,41 @@
 													{language.current && t('users.actionDelete')}
 												</Button>
 											{/if}
-											<Button
-												variant="ghost"
-												size="sm"
-												onclick={() => onRoleClick(u)}
-												data-testid="role-btn-{u.id}"
-											>
-												{language.current && (u.role === 'admin' ? t('users.actionDemote') : t('users.actionPromote'))}
-											</Button>
+											{#if isSelf}
+												<!-- Your own role is changed by another admin,
+												     never by you: no button, and a word on why. -->
+												<span
+													class="px-2.5 py-1 text-xs text-muted"
+													title={language.current && t('users.roleSelfHint')}
+													data-testid="role-self-hint-{u.id}"
+												>
+													{language.current && t('users.roleSelfLabel')}
+													<span class="sr-only">{language.current && t('users.roleSelfHint')}</span>
+												</span>
+											{:else}
+												{@const lock = roleLockFor(u)}
+												<!-- Disabled for the last admin. A disabled
+												     button gets no hover in every browser, so
+												     the tooltip sits on a wrapper; the hidden
+												     text gives screen readers the same reason. -->
+												<span title={lock ? roleLockHint(lock) : undefined}>
+													<Button
+														variant="ghost"
+														size="sm"
+														disabled={lock !== null}
+														aria-describedby={lock ? `role-lock-${u.id}` : undefined}
+														onclick={() => onRoleClick(u)}
+														data-testid="role-btn-{u.id}"
+													>
+														{language.current && (u.role === 'admin' ? t('users.actionDemote') : t('users.actionPromote'))}
+													</Button>
+													{#if lock}
+														<span id="role-lock-{u.id}" class="sr-only" data-testid="role-lock-hint-{u.id}">
+															{roleLockHint(lock)}
+														</span>
+													{/if}
+												</span>
+											{/if}
 										{/if}
 									</div>
 								</td>
