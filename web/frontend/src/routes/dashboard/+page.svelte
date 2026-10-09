@@ -342,7 +342,7 @@
 </script>
 
 <svelte:head>
-	<title>Dashboard · Arenet</title>
+	<title>{language.current && t('dashboard.headTitle')}</title>
 </svelte:head>
 
 {#if loading}

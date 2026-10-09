@@ -24,10 +24,21 @@ AC #16 10 kB-gz dashboard budget with room to spare.
 Trailing in-progress bucket (backlog item #L.2-2): the parent
 page is responsible for dropping the last slot — the chart
 receives whatever points its caller chose to show.
+
+Zero is data. A window of zeros (no 5xx at all, say) draws a flat
+line along the baseline; only a window with no measured point at
+all shows the empty state.
+
+The tooltip follows any pointer (mouse, pen, finger) and the
+keyboard: the plot is focusable, Left/Right step through the
+points, Home/End jump to the ends, Escape hides it.
 -->
 
 <script lang="ts">
 	import type { TimeseriesPoint } from '$lib/api/types';
+	import { t } from '$lib/i18n';
+	import { chartKeyStep } from '$lib/utils/chart-keys';
+	import { chartClock, chartDayTime } from '$lib/utils/chart-time';
 
 	interface Props {
 		points: TimeseriesPoint[];
@@ -61,7 +72,7 @@ receives whatever points its caller chose to show.
 	const innerHeight = $derived(Math.max(40, height - PAD_T - PAD_B));
 
 	// Max value across all NON-NULL points. Fallback to 1 so the
-	// y axis is well-defined even on an all-null window.
+	// y axis is well-defined on an all-null or all-zero window.
 	const maxVal = $derived.by(() => {
 		let m = 0;
 		for (const p of points) {
@@ -70,7 +81,10 @@ receives whatever points its caller chose to show.
 		return m === 0 ? 1 : m;
 	});
 
-	const hasData = $derived(points.some((p) => p.value !== null && p.value > 0));
+	// A zero is a measurement ("no 5xx in this window" is good
+	// news), so any non-null point counts; only an all-null window
+	// is empty.
+	const hasData = $derived(points.some((p) => p.value !== null));
 
 	function xAt(i: number): number {
 		if (points.length <= 1) return PAD_L;
@@ -120,21 +134,15 @@ receives whatever points its caller chose to show.
 
 	// X axis: pick three timestamps to label — first / middle /
 	// last. Format depends on the spread: < 48h shows HH:MM,
-	// longer spreads show MM-DD HH:MM. Empty input → no labels.
+	// longer spreads add the day and month, ordered for the app
+	// language. Empty input → no labels.
 	const xTicks = $derived.by(() => {
 		if (points.length === 0) return [] as { x: number; label: string }[];
 		const firstTs = new Date(points[0].ts);
 		const lastTs = new Date(points[points.length - 1].ts);
 		const spanMs = lastTs.getTime() - firstTs.getTime();
 		const compact = spanMs < 48 * 3600 * 1000;
-		const fmtTs = (d: Date) => {
-			const hh = String(d.getHours()).padStart(2, '0');
-			const mm = String(d.getMinutes()).padStart(2, '0');
-			if (compact) return `${hh}:${mm}`;
-			const m = String(d.getMonth() + 1).padStart(2, '0');
-			const dd = String(d.getDate()).padStart(2, '0');
-			return `${m}-${dd} ${hh}:${mm}`;
-		};
+		const fmtTs = (d: Date) => (compact ? chartClock(d) : chartDayTime(d));
 		const midIdx = Math.floor(points.length / 2);
 		return [
 			{ x: xAt(0), label: fmtTs(firstTs) },
@@ -143,8 +151,10 @@ receives whatever points its caller chose to show.
 		];
 	});
 
-	// Hover: map mouse x → nearest data index.
-	function handleMove(e: MouseEvent): void {
+	// Hover: map pointer x → nearest data index. Pointer events
+	// cover mouse, pen and touch alike; pointerdown makes a tap show
+	// the tooltip even when the finger does not move.
+	function handleMove(e: PointerEvent): void {
 		if (!svgEl || points.length === 0) return;
 		const rect = svgEl.getBoundingClientRect();
 		const mx = ((e.clientX - rect.left) / rect.width) * wrapWidth;
@@ -156,39 +166,69 @@ receives whatever points its caller chose to show.
 		const idx = Math.round(ratio * (points.length - 1));
 		hoverIdx = Math.max(0, Math.min(points.length - 1, idx));
 	}
-	function handleLeave(): void {
+	function handleLeave(e: PointerEvent): void {
+		// A lifted finger fires pointerleave straight after pointerup;
+		// hiding there would erase what the tap just showed. A touch
+		// tooltip goes on blur (tapping elsewhere) or Escape instead.
+		if (e.pointerType === 'touch') return;
+		hoverIdx = null;
+	}
+	function handleKey(e: KeyboardEvent): void {
+		const next = chartKeyStep(e.key, tooltip ? hoverIdx : null, points.length);
+		if (next === undefined) return;
+		e.preventDefault();
+		hoverIdx = next;
+	}
+	function hideTooltip(): void {
 		hoverIdx = null;
 	}
 
-	// Tooltip data derived from hover index.
+	// Tooltip data derived from hover index. The bound check covers
+	// a poll that shortened the series under a held tooltip.
 	const tooltip = $derived.by(() => {
-		if (hoverIdx === null) return null;
+		if (hoverIdx === null || hoverIdx >= points.length) return null;
 		const p = points[hoverIdx];
-		const d = new Date(p.ts);
-		const hh = String(d.getHours()).padStart(2, '0');
-		const mm = String(d.getMinutes()).padStart(2, '0');
-		const m = String(d.getMonth() + 1).padStart(2, '0');
-		const dd = String(d.getDate()).padStart(2, '0');
 		return {
 			x: xAt(hoverIdx),
-			tsLabel: `${m}-${dd} ${hh}:${mm}`,
+			tsLabel: chartDayTime(new Date(p.ts)),
 			valueLabel: p.value === null ? '—' : fmt(p.value),
 			hasValue: p.value !== null
 		};
 	});
+
+	// What a screen reader hears for the focused plot: the point the
+	// tooltip shows, or how to reach one.
+	const valueText = $derived(
+		tooltip
+			? t('chartUi.pointValue', { time: tooltip.tsLabel, value: tooltip.valueLabel })
+			: t('chartUi.keyboardHint')
+	);
 </script>
 
 <div class="chart-wrap" bind:clientWidth={wrapWidth}>
+	<!-- role="slider": the focused plot selects one point in time,
+	     which is what the arrow keys move. aria-roledescription
+	     keeps it announced as a chart, aria-valuetext reads out the
+	     point the tooltip shows. -->
 	<svg
 		bind:this={svgEl}
-		role="img"
+		role="slider"
+		tabindex="0"
 		aria-label={label}
+		aria-roledescription={t('chartUi.roleDescription')}
+		aria-valuemin={0}
+		aria-valuemax={Math.max(0, points.length - 1)}
+		aria-valuenow={hoverIdx ?? 0}
+		aria-valuetext={valueText}
 		viewBox="0 0 {wrapWidth} {height}"
 		preserveAspectRatio="none"
 		width="100%"
 		{height}
-		onmousemove={handleMove}
-		onmouseleave={handleLeave}
+		onpointermove={handleMove}
+		onpointerdown={handleMove}
+		onpointerleave={handleLeave}
+		onkeydown={handleKey}
+		onblur={hideTooltip}
 	>
 		<title>{label}</title>
 
@@ -198,7 +238,8 @@ receives whatever points its caller chose to show.
 				y={PAD_T + innerHeight / 2}
 				class="empty-state-text"
 				text-anchor="middle"
-				dominant-baseline="middle">no data in this window</text
+				dominant-baseline="middle"
+				data-testid="chart-empty">{t('chartUi.noData')}</text
 			>
 		{/if}
 
@@ -262,7 +303,11 @@ receives whatever points its caller chose to show.
 					fill={color}
 				/>
 			{/if}
-			<g class="tooltip" transform="translate({Math.min(tooltip.x + 8, wrapWidth - PAD_R - 90)}, {PAD_T + 4})">
+			<g
+				class="tooltip"
+				transform="translate({Math.min(tooltip.x + 8, wrapWidth - PAD_R - 90)}, {PAD_T + 4})"
+				data-testid="chart-tooltip"
+			>
 				<rect width="86" height="32" rx="3" />
 				<text x="6" y="13" class="tooltip-ts">{tooltip.tsLabel}</text>
 				<text x="6" y="26" class="tooltip-val">{tooltip.valueLabel}</text>
@@ -274,6 +319,12 @@ receives whatever points its caller chose to show.
 <style>
 	.chart-wrap {
 		width: 100%;
+	}
+	/* A sideways drag reads the points; a vertical one still
+	   scrolls the page. Without it the browser claims every touch
+	   for panning and cancels the pointer after the first move. */
+	svg {
+		touch-action: pan-y;
 	}
 	.grid {
 		stroke: var(--text-muted);

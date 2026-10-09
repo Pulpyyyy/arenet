@@ -12,8 +12,9 @@
 // math is tested via direct fireEvent.mouseMove with a
 // known clientX.
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
+import { language } from '$lib/stores/language.svelte';
 import Chart from './MultiSeriesTimelineChart.svelte';
 
 const sampleData = [
@@ -87,6 +88,17 @@ describe('MultiSeriesTimelineChart', () => {
 		const zeros = sampleData.map((d) => ({ ...d, issued: 0, renewed: 0, failed: 0 }));
 		render(Chart, { props: { data: zeros, series: certSeries, label: 'Cert events' } });
 		expect(screen.getByText('No events in this period')).toBeTruthy();
+	});
+
+	it('says the empty state in the app language', () => {
+		language.applyLocally('fr');
+		try {
+			const zeros = sampleData.map((d) => ({ ...d, issued: 0, renewed: 0, failed: 0 }));
+			render(Chart, { props: { data: zeros, series: certSeries, label: 'Cert events' } });
+			expect(screen.getByText('Aucun événement sur cette période')).toBeTruthy();
+		} finally {
+			language.applyLocally('en');
+		}
 	});
 
 	it('does NOT render tooltip when hover is outside chart bounds', () => {
@@ -239,5 +251,68 @@ describe('MultiSeriesTimelineChart — nullAsGap', () => {
 		const path = screen.queryByTestId('series-path-ttfb');
 		const d = path?.getAttribute('d') ?? '';
 		expect(d).toBe('');
+	});
+});
+
+// --- axis dates ------------------------------------------------------------
+//
+// The axis used a hand-rolled "MM-DD", month-first in every language.
+// Buckets are built from local dates so the labels hold in any zone.
+
+describe('MultiSeriesTimelineChart — axis dates', () => {
+	const octData = [5, 6, 7].map((day) => ({
+		bucketStart: new Date(2026, 9, day).toISOString(),
+		issued: day,
+		renewed: 0,
+		failed: 0
+	}));
+
+	afterEach(() => {
+		language.applyLocally('en');
+	});
+
+	it('labels the x axis day-first in French', () => {
+		language.applyLocally('fr');
+		render(Chart, { props: { data: octData, series: certSeries, label: 'Cert events' } });
+		expect(screen.getByText('05/10')).toBeTruthy();
+		expect(screen.getByText('07/10')).toBeTruthy();
+		expect(screen.queryByText('10-05')).toBeNull();
+	});
+
+	it('labels the x axis month-first in English', () => {
+		render(Chart, { props: { data: octData, series: certSeries, label: 'Cert events' } });
+		expect(screen.getByText('10/05')).toBeTruthy();
+	});
+});
+
+// --- keyboard --------------------------------------------------------------
+//
+// The tooltip was mouse-only. The plot is now focusable and the arrow
+// keys step the shown bucket; the screen-reader text follows it.
+
+describe('MultiSeriesTimelineChart — keyboard', () => {
+	it('is a focusable slider named after the chart', () => {
+		render(Chart, { props: { data: sampleData, series: certSeries, label: 'Cert events' } });
+		const plot = screen.getByRole('slider', { name: 'Cert events' });
+		expect(plot.getAttribute('tabindex')).toBe('0');
+		expect(plot.getAttribute('aria-roledescription')).toBe('chart');
+	});
+
+	it('steps the tooltip with the arrow keys and hides it with Escape', async () => {
+		render(Chart, { props: { data: sampleData, series: certSeries, label: 'Cert events' } });
+		const plot = screen.getByRole('slider', { name: 'Cert events' });
+
+		// Left from nothing lands on the most recent bucket.
+		await fireEvent.keyDown(plot, { key: 'ArrowLeft' });
+		expect(screen.getByTestId('chart-tooltip')).toBeTruthy();
+		expect(plot.getAttribute('aria-valuenow')).toBe('2');
+		expect(plot.getAttribute('aria-valuetext')).toContain('Issued 1, Renewed 2, Failed 0');
+
+		await fireEvent.keyDown(plot, { key: 'ArrowLeft' });
+		expect(plot.getAttribute('aria-valuenow')).toBe('1');
+		expect(plot.getAttribute('aria-valuetext')).toContain('Issued 0, Renewed 0, Failed 0');
+
+		await fireEvent.keyDown(plot, { key: 'Escape' });
+		expect(screen.queryByTestId('chart-tooltip')).toBeNull();
 	});
 });

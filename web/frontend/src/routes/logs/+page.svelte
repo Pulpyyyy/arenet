@@ -829,7 +829,7 @@
 </script>
 
 <svelte:head>
-	<title>Logs · Arenet</title>
+	<title>{language.current && t('logs.headTitle')}</title>
 </svelte:head>
 
 <!--

@@ -15,13 +15,15 @@
 	import '../../app.css';
 	import favicon from '$lib/assets/arenet-logo.png';
 	import ToastContainer from '$lib/components/ToastContainer.svelte';
+	import { t } from '$lib/i18n';
+	import { language } from '$lib/stores/language.svelte';
 
 	let { children } = $props();
 </script>
 
 <svelte:head>
 	<link rel="icon" type="image/png" href={favicon} />
-	<title>Sign in — Arenet</title>
+	<title>{language.current && t('auth.signInHeadTitle')}</title>
 </svelte:head>
 
 {@render children?.()}

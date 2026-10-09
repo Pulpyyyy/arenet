@@ -11,7 +11,7 @@ Reused by /security (limit=20, no filter) AND
 /security/[routeId] (limit=20, route-scoped, M.4).
 
 Columns:
-  - ts           (relative: "12s ago" / "3m ago" / absolute past 1h)
+  - ts           (relative: "12 sec. ago" / "3 min. ago" / absolute past 1h)
   - route        (link to /security/<routeId>; falls back to UUID
                   if the host isn't supplied in props)
   - category     (coloured badge, same palette as CategoryDistribution)
@@ -37,6 +37,7 @@ selected route.
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
 	import { isExcludableRule } from '$lib/utils/waf-exclusion';
+	import { recentTime } from '$lib/utils/relative-time';
 
 	interface Props {
 		events: WafEvent[];
@@ -76,21 +77,9 @@ selected route.
 	// WafEventList + MixedEventList + /waf + /security/[routeId]).
 	import { categoryMeta } from '$lib/utils/waf-category';
 
-	// Relative time formatting: "Ns ago" up to a minute, "Nm
-	// ago" up to an hour, then HH:MM. Pure function — no
-	// re-renders on tick (caller controls refresh cadence).
-	function relativeTs(iso: string): string {
-		const then = new Date(iso).getTime();
-		const now = Date.now();
-		const secs = Math.max(0, Math.floor((now - then) / 1000));
-		if (secs < 60) return `${secs}s ago`;
-		const mins = Math.floor(secs / 60);
-		if (mins < 60) return `${mins}m ago`;
-		const d = new Date(iso);
-		const hh = String(d.getHours()).padStart(2, '0');
-		const mm = String(d.getMinutes()).padStart(2, '0');
-		return `${hh}:${mm}`;
-	}
+	// Short relative time up to an hour, then HH:MM, in the app
+	// language. No re-renders on tick (caller controls refresh cadence).
+	const relativeTs = (iso: string): string => recentTime(iso);
 
 	// Short host display: prefer the friendly host from the
 	// caller, fall back to a UUID prefix. The cell always

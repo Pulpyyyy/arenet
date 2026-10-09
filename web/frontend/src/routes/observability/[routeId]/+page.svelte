@@ -210,6 +210,10 @@ Viewer-accessible — relies on the API gate (AC #17).
 	const fmtMs = (v: number) => `${Math.round(v)} ms`;
 </script>
 
+<svelte:head>
+	<title>{language.current && t('observability.headTitle')}</title>
+</svelte:head>
+
 <PageHeader title={language.current && t('pageTitles.observability')} subtitle={route?.host ?? routeId} />
 
 <div class="back-link">

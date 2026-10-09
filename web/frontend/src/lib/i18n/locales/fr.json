@@ -19,7 +19,9 @@
 			"down": "en panne",
 			"info": "info",
 			"idle": "inactif"
-		}
+		},
+		"redirectingHeadTitle": "Redirection · Arenet",
+		"redirectingTo": "Redirection vers"
 	},
 	"auth": {
 		"loginButton": "Se connecter",
@@ -64,7 +66,8 @@
 			"oidcInternal": "Une erreur inattendue est survenue pendant la connexion SSO. Réessaie, ou utilise un compte local.",
 			"rateLimited": "Trop de tentatives de connexion échouées depuis cette adresse. La connexion est suspendue jusqu'à la fin du décompte sur le bouton.",
 			"rateLimitedLater": "Trop de tentatives de connexion échouées depuis cette adresse. Réessaie plus tard."
-		}
+		},
+		"signInHeadTitle": "Connexion — Arenet"
 	},
 	"errors": {
 		"server": {
@@ -1224,7 +1227,8 @@
 		"licenseMap": "Carte :",
 		"worldMapUnavailable": "Carte indisponible : {error}",
 		"worldMapAria": "Carte du monde",
-		"worldMapAriaCentred": "Carte du monde centrée sur {place}"
+		"worldMapAriaCentred": "Carte du monde centrée sur {place}",
+		"headTitle": "Carte · Arenet"
 	},
 	"pageTitles": {
 		"apiDocs": "Documentation de l'API",
@@ -1307,7 +1311,8 @@
 		"upstreamsMetaTruncated": "{shown} sur {total} distincts",
 		"upstreamsSeeAll": "Tous dans Routes →",
 		"upstreamsRouteSuffix": "{count} route{plural}",
-		"upstreamsEmpty": "Aucun upstream configuré."
+		"upstreamsEmpty": "Aucun upstream configuré.",
+		"headTitle": "Tableau de bord · Arenet"
 	},
 	"users": {
 		"loadFailed": "Échec du chargement des utilisateurs : {err}",
@@ -1744,7 +1749,8 @@
 		"ariaHidePassword": "Masquer le mot de passe",
 		"errInvalidToken": "Jeton de setup invalide ou expiré.",
 		"errAdminExists": "Setup indisponible : un compte administrateur existe déjà.",
-		"errUnexpected": "Erreur inattendue."
+		"errUnexpected": "Erreur inattendue.",
+		"headTitle": "Configuration initiale — Arenet"
 	},
 	"errorPages": {
 		"discardTitle": "Abandonner tes modifications ?",
@@ -2160,7 +2166,8 @@
 	},
 	"crowdsecDecisions": {
 		"copyToast": "Copié ✓",
-		"copyUnavailable": "Copie indisponible",
+		"copyFailed": "Copie impossible — sélectionne la commande et fais Ctrl+C",
+		"expiredAgo": "expirée {when}",
 		"panelSubtitle": "Snapshot Arenet-side des decisions reçues du LAPI.",
 		"mirrorNotConfiguredTitle": "CrowdSec mirror non configuré",
 		"mirrorNotConfiguredBody": "Le bouncer CrowdSec côté Caddy et le consommateur StreamBouncer côté Arenet partagent la même clé LAPI.",
@@ -3020,7 +3027,8 @@
 		"detailRenewal": "renouvellement",
 		"detailOcspRevoked": "révocation OCSP",
 		"countryNotAllowed": "pays non autorisé",
-		"countryDenied": "pays interdit"
+		"countryDenied": "pays interdit",
+		"headTitle": "Journaux · Arenet"
 	},
 	"system": {
 		"title": "Hôte",
@@ -3131,7 +3139,18 @@
 		"notFoundOr": "ou à la liste des",
 		"notFoundRoutesLink": "routes",
 		"disabledTitle": "Métriques indisponibles",
-		"disabledBody": "Le sous-système d'observabilité n'a pas pu démarrer. Le proxy continue de fonctionner ; seul l'historique des métriques est manquant."
+		"disabledBody": "Le sous-système d'observabilité n'a pas pu démarrer. Le proxy continue de fonctionner ; seul l'historique des métriques est manquant.",
+		"headTitle": "Observabilité · Arenet"
+	},
+	"chartUi": {
+		"roleDescription": "graphique",
+		"keyboardHint": "Utilise les flèches gauche et droite pour lire chaque point",
+		"pointValue": "{time} : {value}",
+		"seriesValue": "{label} {value}",
+		"noData": "aucune donnée sur cette période",
+		"noEvents": "Aucun événement sur cette période",
+		"legend": "Légende : {label}",
+		"now": "maintenant"
 	},
 	"charts": {
 		"emptyPeriod": "Aucun événement sur cette période"

@@ -19,7 +19,9 @@
 			"down": "down",
 			"info": "info",
 			"idle": "idle"
-		}
+		},
+		"redirectingHeadTitle": "Redirecting · Arenet",
+		"redirectingTo": "Redirecting to"
 	},
 	"auth": {
 		"loginButton": "Sign in",
@@ -64,7 +66,8 @@
 			"oidcInternal": "An unexpected error occurred during SSO sign-in. Try again, or use a local account.",
 			"rateLimited": "Too many failed sign-in attempts from this address. Sign-in is paused until the countdown on the button ends.",
 			"rateLimitedLater": "Too many failed sign-in attempts from this address. Try again later."
-		}
+		},
+		"signInHeadTitle": "Sign in — Arenet"
 	},
 	"errors": {
 		"server": {
@@ -1224,7 +1227,8 @@
 		"licenseMap": "Map:",
 		"worldMapUnavailable": "Map unavailable: {error}",
 		"worldMapAria": "World map",
-		"worldMapAriaCentred": "World map centred on {place}"
+		"worldMapAriaCentred": "World map centred on {place}",
+		"headTitle": "Map · Arenet"
 	},
 	"pageTitles": {
 		"apiDocs": "API documentation",
@@ -1307,7 +1311,8 @@
 		"upstreamsMetaTruncated": "{shown} of {total} distinct",
 		"upstreamsSeeAll": "All in Routes →",
 		"upstreamsRouteSuffix": "{count} route{plural}",
-		"upstreamsEmpty": "No upstreams configured."
+		"upstreamsEmpty": "No upstreams configured.",
+		"headTitle": "Dashboard · Arenet"
 	},
 	"users": {
 		"loadFailed": "Failed to load users: {err}",
@@ -1744,7 +1749,8 @@
 		"ariaHidePassword": "Hide password",
 		"errInvalidToken": "Invalid or expired setup token.",
 		"errAdminExists": "Setup unavailable: an administrator account already exists.",
-		"errUnexpected": "Unexpected error."
+		"errUnexpected": "Unexpected error.",
+		"headTitle": "Initial setup — Arenet"
 	},
 	"errorPages": {
 		"discardTitle": "Discard your changes?",
@@ -2160,7 +2166,8 @@
 	},
 	"crowdsecDecisions": {
 		"copyToast": "Copied ✓",
-		"copyUnavailable": "Copy unavailable",
+		"copyFailed": "Couldn't copy — select the command and press Ctrl+C",
+		"expiredAgo": "expired {when}",
 		"panelSubtitle": "Arenet-side snapshot of the decisions received from LAPI.",
 		"mirrorNotConfiguredTitle": "CrowdSec mirror not configured",
 		"mirrorNotConfiguredBody": "The CrowdSec bouncer on the Caddy side and the StreamBouncer consumer on the Arenet side share the same LAPI key.",
@@ -3020,7 +3027,8 @@
 		"detailRenewal": "renewal",
 		"detailOcspRevoked": "OCSP revocation",
 		"countryNotAllowed": "country not allowed",
-		"countryDenied": "country denied"
+		"countryDenied": "country denied",
+		"headTitle": "Logs · Arenet"
 	},
 	"system": {
 		"title": "Host",
@@ -3131,7 +3139,18 @@
 		"notFoundOr": "or to the list of",
 		"notFoundRoutesLink": "routes",
 		"disabledTitle": "Metrics unavailable",
-		"disabledBody": "The observability subsystem could not start. The proxy keeps running; only the metrics history is missing."
+		"disabledBody": "The observability subsystem could not start. The proxy keeps running; only the metrics history is missing.",
+		"headTitle": "Observability · Arenet"
+	},
+	"chartUi": {
+		"roleDescription": "chart",
+		"keyboardHint": "Use the left and right arrow keys to read each point",
+		"pointValue": "{time}: {value}",
+		"seriesValue": "{label} {value}",
+		"noData": "no data in this window",
+		"noEvents": "No events in this period",
+		"legend": "{label} legend",
+		"now": "now"
 	},
 	"charts": {
 		"emptyPeriod": "No events in this period"

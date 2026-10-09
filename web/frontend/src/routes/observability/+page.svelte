@@ -20,6 +20,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { t } from '$lib/i18n';
+	import { language } from '$lib/stores/language.svelte';
 
 	onMount(() => {
 		void goto('/dashboard', { replaceState: true });
@@ -27,10 +29,10 @@
 </script>
 
 <svelte:head>
-	<title>Redirecting · Arenet</title>
+	<title>{language.current && t('common.redirectingHeadTitle')}</title>
 </svelte:head>
 
-<p class="redirect">Redirecting to <a href="/dashboard">/dashboard</a>…</p>
+<p class="redirect">{language.current && t('common.redirectingTo')} <a href="/dashboard">/dashboard</a>…</p>
 
 <style>
 	.redirect {
