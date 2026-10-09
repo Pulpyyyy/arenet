@@ -81,13 +81,24 @@ describe('MultiSeriesTimelineChart', () => {
 		await fireEvent.click(screen.getByTestId('legend-toggle-renewed'));
 		await fireEvent.click(screen.getByTestId('legend-toggle-failed'));
 
-		expect(screen.getByText('Aucun événement sur cette période')).toBeTruthy();
+		expect(screen.getByText('No events in this period')).toBeTruthy();
 	});
 
 	it('renders empty-state text when data is all zeros', () => {
 		const zeros = sampleData.map((d) => ({ ...d, issued: 0, renewed: 0, failed: 0 }));
 		render(Chart, { props: { data: zeros, series: certSeries, label: 'Cert events' } });
-		expect(screen.getByText('Aucun événement sur cette période')).toBeTruthy();
+		expect(screen.getByText('No events in this period')).toBeTruthy();
+	});
+
+	it('says the empty state in the app language', () => {
+		language.applyLocally('fr');
+		try {
+			const zeros = sampleData.map((d) => ({ ...d, issued: 0, renewed: 0, failed: 0 }));
+			render(Chart, { props: { data: zeros, series: certSeries, label: 'Cert events' } });
+			expect(screen.getByText('Aucun événement sur cette période')).toBeTruthy();
+		} finally {
+			language.applyLocally('en');
+		}
 	});
 
 	it('does NOT render tooltip when hover is outside chart bounds', () => {
@@ -271,5 +282,37 @@ describe('MultiSeriesTimelineChart — axis dates', () => {
 	it('labels the x axis month-first in English', () => {
 		render(Chart, { props: { data: octData, series: certSeries, label: 'Cert events' } });
 		expect(screen.getByText('10/05')).toBeTruthy();
+	});
+});
+
+// --- keyboard --------------------------------------------------------------
+//
+// The tooltip was mouse-only. The plot is now focusable and the arrow
+// keys step the shown bucket; the screen-reader text follows it.
+
+describe('MultiSeriesTimelineChart — keyboard', () => {
+	it('is a focusable slider named after the chart', () => {
+		render(Chart, { props: { data: sampleData, series: certSeries, label: 'Cert events' } });
+		const plot = screen.getByRole('slider', { name: 'Cert events' });
+		expect(plot.getAttribute('tabindex')).toBe('0');
+		expect(plot.getAttribute('aria-roledescription')).toBe('chart');
+	});
+
+	it('steps the tooltip with the arrow keys and hides it with Escape', async () => {
+		render(Chart, { props: { data: sampleData, series: certSeries, label: 'Cert events' } });
+		const plot = screen.getByRole('slider', { name: 'Cert events' });
+
+		// Left from nothing lands on the most recent bucket.
+		await fireEvent.keyDown(plot, { key: 'ArrowLeft' });
+		expect(screen.getByTestId('chart-tooltip')).toBeTruthy();
+		expect(plot.getAttribute('aria-valuenow')).toBe('2');
+		expect(plot.getAttribute('aria-valuetext')).toContain('Issued 1, Renewed 2, Failed 0');
+
+		await fireEvent.keyDown(plot, { key: 'ArrowLeft' });
+		expect(plot.getAttribute('aria-valuenow')).toBe('1');
+		expect(plot.getAttribute('aria-valuetext')).toContain('Issued 0, Renewed 0, Failed 0');
+
+		await fireEvent.keyDown(plot, { key: 'Escape' });
+		expect(screen.queryByTestId('chart-tooltip')).toBeNull();
 	});
 });

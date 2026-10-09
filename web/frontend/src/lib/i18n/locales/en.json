@@ -2586,5 +2586,15 @@
 		"latencyAria": "Server time and total time, in milliseconds",
 		"latencyHint": "The gap between the two lines is the response transfer: the server had finished, the visitor was still downloading. A gap in a line means that bucket held too few requests for the chosen quantile.",
 		"quantileAria": "Which quantile the latency lines report"
+	},
+	"chartUi": {
+		"roleDescription": "chart",
+		"keyboardHint": "Use the left and right arrow keys to read each point",
+		"pointValue": "{time}: {value}",
+		"seriesValue": "{label} {value}",
+		"noData": "no data in this window",
+		"noEvents": "No events in this period",
+		"legend": "{label} legend",
+		"now": "now"
 	}
 }

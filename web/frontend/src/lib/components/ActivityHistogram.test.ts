@@ -9,7 +9,7 @@
 // worth the test weight at V1.
 
 import { describe, it, expect } from 'vitest';
-import { render } from '@testing-library/svelte';
+import { render, screen, fireEvent } from '@testing-library/svelte';
 import ActivityHistogram from './ActivityHistogram.svelte';
 
 // Anchor inside each test via a helper to avoid the
@@ -175,5 +175,74 @@ describe('ActivityHistogram', () => {
 		// future regression where the wire-up drops the
 		// boolean surface as a class-missing assertion.
 		expect(wrap?.classList.contains('fill')).toBe(true);
+	});
+});
+
+// The tooltip was mouse-only (mouseenter). It now follows pointer
+// events, which a finger fires too, and the keyboard.
+describe('ActivityHistogram — tooltip', () => {
+	// An hour apart, so the two land in different 5-minute buckets:
+	// the older one holds AUTH, the newer one two WAF events.
+	function twoBuckets() {
+		return [
+			{ ts: isoOffset(3600), source: 'auth' },
+			{ ts: isoOffset(60), source: 'waf' },
+			{ ts: isoOffset(60), source: 'waf' }
+		];
+	}
+
+	/** A pointer event; jsdom may lack PointerEvent, so a MouseEvent
+	 *  with pointerType attached stands in for it. */
+	function pointer(type: string, pointerType: string): Event {
+		const ev = new MouseEvent(type, { bubbles: false, clientX: 100, clientY: 20 });
+		Object.defineProperty(ev, 'pointerType', { value: pointerType });
+		return ev;
+	}
+
+	it('shows on pointerenter and hides on a mouse pointerleave', async () => {
+		const { container } = render(ActivityHistogram, {
+			cells: twoBuckets(),
+			series: SERIES,
+			label: 'Pointer'
+		});
+		const bars = container.querySelectorAll('[data-testid="histogram-bucket"]');
+		expect(bars.length).toBe(2);
+
+		await fireEvent(bars[1], pointer('pointerenter', 'mouse'));
+		const tip = screen.getByTestId('histogram-tooltip');
+		expect(tip.textContent).toContain('WAF · 2');
+
+		await fireEvent(bars[1], pointer('pointerleave', 'mouse'));
+		expect(screen.queryByTestId('histogram-tooltip')).toBeNull();
+	});
+
+	it('keeps a tapped tooltip after the finger lifts', async () => {
+		const { container } = render(ActivityHistogram, {
+			cells: twoBuckets(),
+			series: SERIES,
+			label: 'Touch'
+		});
+		const bars = container.querySelectorAll('[data-testid="histogram-bucket"]');
+		await fireEvent(bars[0], pointer('pointerenter', 'touch'));
+		await fireEvent(bars[0], pointer('pointerleave', 'touch'));
+		expect(screen.getByTestId('histogram-tooltip').textContent).toContain('AUTH · 1');
+	});
+
+	it('steps through the buckets that hold events with the arrow keys', async () => {
+		render(ActivityHistogram, { cells: twoBuckets(), series: SERIES, label: 'Keys' });
+		const plot = screen.getByRole('slider', { name: 'Keys' });
+		expect(plot.getAttribute('tabindex')).toBe('0');
+		expect(plot.getAttribute('aria-valuemax')).toBe('1');
+
+		await fireEvent.keyDown(plot, { key: 'ArrowRight' });
+		expect(screen.getByTestId('histogram-tooltip').textContent).toContain('AUTH · 1');
+		expect(plot.getAttribute('aria-valuetext')).toContain('AUTH 1');
+
+		await fireEvent.keyDown(plot, { key: 'ArrowRight' });
+		expect(screen.getByTestId('histogram-tooltip').textContent).toContain('WAF · 2');
+		expect(plot.getAttribute('aria-valuenow')).toBe('1');
+
+		await fireEvent.keyDown(plot, { key: 'Escape' });
+		expect(screen.queryByTestId('histogram-tooltip')).toBeNull();
 	});
 });

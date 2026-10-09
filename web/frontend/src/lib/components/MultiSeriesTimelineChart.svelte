@@ -30,9 +30,15 @@ each with a `bucketStart` ISO timestamp + one numeric value
 per series key. Empty buckets ARE expected (server emits a
 continuous timeline); zero-value buckets render flat at the
 baseline.
+
+The tooltip follows any pointer (mouse, pen, finger) and the
+keyboard: the plot is focusable, Left/Right step through the
+buckets, Home/End jump to the ends, Escape hides it.
 -->
 
 <script lang="ts">
+	import { t } from '$lib/i18n';
+	import { chartKeyStep } from '$lib/utils/chart-keys';
 	import { chartDay, chartDayTime } from '$lib/utils/chart-time';
 
 	// Phase 5 — the generic constraint we'd like to express is
@@ -211,7 +217,9 @@ baseline.
 		];
 	});
 
-	function handleMove(e: MouseEvent): void {
+	// Pointer events cover mouse, pen and touch alike; pointerdown
+	// makes a tap show the tooltip even when the finger does not move.
+	function handleMove(e: PointerEvent): void {
 		if (!svgEl || data.length === 0) return;
 		const rect = svgEl.getBoundingClientRect();
 		const mx = ((e.clientX - rect.left) / rect.width) * wrapWidth;
@@ -224,12 +232,29 @@ baseline.
 		hoverIdx = Math.max(0, Math.min(data.length - 1, idx));
 	}
 
-	function handleLeave(): void {
+	function handleLeave(e: PointerEvent): void {
+		// A lifted finger fires pointerleave straight after pointerup;
+		// hiding there would erase what the tap just showed. A touch
+		// tooltip goes on blur (tapping elsewhere) or Escape instead.
+		if (e.pointerType === 'touch') return;
+		hoverIdx = null;
+	}
+
+	function handleKey(e: KeyboardEvent): void {
+		const next = chartKeyStep(e.key, tooltip ? hoverIdx : null, data.length);
+		if (next === undefined) return;
+		e.preventDefault();
+		hoverIdx = next;
+	}
+
+	function hideTooltip(): void {
 		hoverIdx = null;
 	}
 
 	const tooltip = $derived.by(() => {
-		if (hoverIdx === null) return null;
+		// The bound check covers a poll that shortened the data
+		// under a held tooltip.
+		if (hoverIdx === null || hoverIdx >= data.length) return null;
 		const row = data[hoverIdx];
 		const d = new Date(row.bucketStart);
 		// Tooltip shows date only if every bucket starts at
@@ -256,6 +281,19 @@ baseline.
 		});
 		return { x: xAt(hoverIdx), tsLabel, rows };
 	});
+
+	// What a screen reader hears for the focused plot: the bucket the
+	// tooltip shows with every visible series, or how to reach one.
+	const valueText = $derived(
+		tooltip
+			? t('chartUi.pointValue', {
+					time: tooltip.tsLabel,
+					value: tooltip.rows
+						.map((r) => t('chartUi.seriesValue', { label: r.label, value: r.value }))
+						.join(', ')
+				})
+			: t('chartUi.keyboardHint')
+	);
 </script>
 
 <div class="chart-card">
@@ -264,7 +302,7 @@ baseline.
 	     role=group wrapping signals "related controls" without
 	     forcing the listitem role onto each <button> (which
 	     loses native button semantics). -->
-	<div class="legend" role="group" aria-label="{label} legend">
+	<div class="legend" role="group" aria-label={t('chartUi.legend', { label })}>
 		{#each series as s (s.key)}
 			{@const isHidden = hidden.has(s.key)}
 			<button
@@ -282,16 +320,29 @@ baseline.
 	</div>
 
 	<div class="chart-wrap" bind:clientWidth={wrapWidth}>
+		<!-- role="slider": the focused plot selects one bucket, which
+		     is what the arrow keys move. aria-roledescription keeps it
+		     announced as a chart, aria-valuetext reads out the bucket
+		     the tooltip shows. -->
 		<svg
 			bind:this={svgEl}
-			role="img"
+			role="slider"
+			tabindex="0"
 			aria-label={label}
+			aria-roledescription={t('chartUi.roleDescription')}
+			aria-valuemin={0}
+			aria-valuemax={Math.max(0, data.length - 1)}
+			aria-valuenow={hoverIdx ?? 0}
+			aria-valuetext={valueText}
 			viewBox="0 0 {wrapWidth} {height}"
 			preserveAspectRatio="none"
 			width="100%"
 			{height}
-			onmousemove={handleMove}
-			onmouseleave={handleLeave}
+			onpointermove={handleMove}
+			onpointerdown={handleMove}
+			onpointerleave={handleLeave}
+			onkeydown={handleKey}
+			onblur={hideTooltip}
 		>
 			<title>{label}</title>
 
@@ -301,7 +352,7 @@ baseline.
 					y={PAD_T + innerHeight / 2}
 					class="empty-state-text"
 					text-anchor="middle"
-					dominant-baseline="middle">Aucun événement sur cette période</text
+					dominant-baseline="middle">{t('chartUi.noEvents')}</text
 				>
 			{/if}
 
@@ -426,6 +477,12 @@ baseline.
 	}
 	.chart-wrap {
 		width: 100%;
+	}
+	/* A sideways drag reads the buckets; a vertical one still
+	   scrolls the page. Without it the browser claims every touch
+	   for panning and cancels the pointer after the first move. */
+	svg {
+		touch-action: pan-y;
 	}
 	.grid {
 		stroke: var(--text-muted);

@@ -27,9 +27,17 @@
   a screen-reader user gets the same data via the
   aria-label fallback (TODO V2 : table fallback for full
   a11y parity).
+
+  The tooltip follows any pointer (mouse, pen, finger) and the
+  keyboard : the plot is focusable, Left/Right step through the
+  buckets that hold events, Home/End jump to the ends, Escape
+  hides it.
 -->
 
 <script lang="ts">
+	import { t } from '$lib/i18n';
+	import { chartKeyStep } from '$lib/utils/chart-keys';
+
 	interface Cell {
 		/** RFC 3339 timestamp of the event. */
 		ts: string;
@@ -191,7 +199,9 @@
 	}
 	let tooltip = $state<TooltipState | null>(null);
 
-	function onBucketHover(idx: number, ev: MouseEvent): void {
+	// Pointer events cover mouse, pen and touch alike: a tap fires
+	// pointerenter on the bar it lands on.
+	function onBucketHover(idx: number, ev: PointerEvent): void {
 		const bucketTs = buckets.windowStart + idx * bucketMs;
 		const rect = svgEl?.getBoundingClientRect();
 		if (!rect) return;
@@ -202,7 +212,56 @@
 			ts: bucketTs
 		};
 	}
-	function onBucketLeave(): void {
+	function onBucketLeave(ev: PointerEvent): void {
+		// A lifted finger fires pointerleave straight after pointerup;
+		// hiding there would erase what the tap just showed. A touch
+		// tooltip goes on blur (tapping elsewhere) or Escape instead.
+		if (ev.pointerType === 'touch') return;
+		tooltip = null;
+	}
+
+	// Buckets the keyboard steps through: only those holding events,
+	// the same bars a pointer can hover. Stepping over the empty ones
+	// would take hundreds of key presses across a quiet day.
+	const activeBuckets = $derived(
+		buckets.grid.flatMap((m, i) =>
+			series.some((s) => (m.get(s.key) ?? 0) > 0) ? [i] : []
+		)
+	);
+
+	// Position of the shown bucket in activeBuckets, null when none
+	// is shown (or a poll emptied it).
+	const activePos = $derived.by(() => {
+		if (!tooltip) return null;
+		const pos = activeBuckets.indexOf(tooltip.bucketIndex);
+		return pos < 0 ? null : pos;
+	});
+
+	// Keyboard placement: centred on the bar, anchored on its top,
+	// where a pointer resting on the bar would put it.
+	function showBucket(idx: number): void {
+		let total = 0;
+		for (const v of buckets.grid[idx].values()) total += v;
+		tooltip = {
+			x: PAD_L + (idx + 0.5) * barWidth,
+			y: PAD_T + innerHeight - (total / yMax) * innerHeight,
+			bucketIndex: idx,
+			ts: buckets.windowStart + idx * bucketMs
+		};
+	}
+
+	function onKey(ev: KeyboardEvent): void {
+		const next = chartKeyStep(ev.key, activePos, activeBuckets.length);
+		if (next === undefined) return;
+		ev.preventDefault();
+		if (next === null) {
+			tooltip = null;
+		} else {
+			showBucket(activeBuckets[next]);
+		}
+	}
+
+	function hideTooltip(): void {
 		tooltip = null;
 	}
 
@@ -224,6 +283,19 @@
 		}
 		return out;
 	}
+
+	// What a screen reader hears for the focused plot: the bucket the
+	// tooltip shows with its per-source counts, or how to reach one.
+	const valueText = $derived(
+		tooltip
+			? t('chartUi.pointValue', {
+					time: formatBucketTime(tooltip.ts),
+					value: tooltipRows(tooltip.bucketIndex)
+						.map((r) => t('chartUi.seriesValue', { label: r.label, value: r.count }))
+						.join(', ')
+				})
+			: t('chartUi.keyboardHint')
+	);
 </script>
 
 <div
@@ -237,13 +309,27 @@
 	  flex slot. Numeric callers get the pre-Z.5.6 fixed-
 	  pixel shape unchanged.
 	-->
+	<!--
+	  role="slider" : the focused plot selects one bucket, which is
+	  what the arrow keys move. aria-roledescription keeps it
+	  announced as a chart, aria-valuetext reads out the bucket the
+	  tooltip shows.
+	-->
 	<svg
 		bind:this={svgEl}
-		role="img"
+		role="slider"
+		tabindex="0"
 		aria-label={label}
+		aria-roledescription={t('chartUi.roleDescription')}
+		aria-valuemin={0}
+		aria-valuemax={Math.max(0, activeBuckets.length - 1)}
+		aria-valuenow={activePos ?? 0}
+		aria-valuetext={valueText}
 		width="100%"
 		height={height === 'fill' ? '100%' : height}
 		preserveAspectRatio="none"
+		onkeydown={onKey}
+		onblur={hideTooltip}
 	>
 		<!-- Y axis baseline -->
 		<line
@@ -262,7 +348,13 @@
 				.map((s) => ({ s, count: bucket.get(s.key) ?? 0 }))
 				.filter((seg) => seg.count > 0)}
 			{#if segments.length > 0}
-				<g class="bucket" onmouseenter={(ev) => onBucketHover(i, ev)} onmouseleave={onBucketLeave} role="presentation">
+				<g
+					class="bucket"
+					onpointerenter={(ev) => onBucketHover(i, ev)}
+					onpointerleave={onBucketLeave}
+					role="presentation"
+					data-testid="histogram-bucket"
+				>
 					{#each segments as seg, segIdx (seg.s.key)}
 						{@const segHeight = (seg.count / yMax) * innerHeight}
 						{@const yOffset = segments
@@ -296,14 +388,14 @@
 			{formatBucketTime(buckets.windowStart + windowMs / 2)}
 		</text>
 		<text x={PAD_L + innerWidth} y={effectiveHeight - 4} text-anchor="end" class="axis-label">
-			now
+			{t('chartUi.now')}
 		</text>
 
 		{#if tooltip}
 			{@const rows = tooltipRows(tooltip.bucketIndex)}
 			{@const tx = Math.min(tooltip.x + 8, PAD_L + innerWidth - 130)}
 			{@const ty = Math.max(tooltip.y - 8, PAD_T + 14 + rows.length * 12)}
-			<g class="tooltip" pointer-events="none">
+			<g class="tooltip" pointer-events="none" data-testid="histogram-tooltip">
 				<rect
 					x={tx}
 					y={ty - 14 - rows.length * 12}
@@ -357,6 +449,11 @@
 	.activity-histogram.fill svg {
 		flex: 1;
 		min-height: 0;
+	}
+	/* A sideways drag across the bars stays with the chart; a
+	   vertical one still scrolls the page. */
+	svg {
+		touch-action: pan-y;
 	}
 	.bucket .bar-seg {
 		transition: opacity 0.1s;

@@ -2586,5 +2586,15 @@
 		"latencyAria": "Temps serveur et temps total, en millisecondes",
 		"latencyHint": "L’écart entre les deux courbes est le transfert de la réponse : le serveur avait fini, le visiteur téléchargeait encore. Une coupure dans une courbe signifie que ce point portait trop peu de requêtes pour le quantile choisi.",
 		"quantileAria": "Quantile rapporté par les courbes de latence"
+	},
+	"chartUi": {
+		"roleDescription": "graphique",
+		"keyboardHint": "Utilise les flèches gauche et droite pour lire chaque point",
+		"pointValue": "{time} : {value}",
+		"seriesValue": "{label} {value}",
+		"noData": "aucune donnée sur cette période",
+		"noEvents": "Aucun événement sur cette période",
+		"legend": "Légende : {label}",
+		"now": "maintenant"
 	}
 }
