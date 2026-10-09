@@ -341,7 +341,9 @@ describe('/tcp-services — saving', () => {
 		await tick();
 		expect(screen.getByTestId('tcp-hidden-kept').textContent).not.toMatch(/deny filter/);
 
+		// Restrict is an unsaved edit: leaving the row asks first.
 		await userEvent.click(screen.getByTestId('tcp-row-svc2'));
+		await userEvent.click(await screen.findByText('Discard changes'));
 		await tick();
 		expect(screen.queryByTestId('tcp-hidden-kept')).toBeNull();
 	});
