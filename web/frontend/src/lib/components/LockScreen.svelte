@@ -33,6 +33,15 @@
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { ApiError } from '$lib/api/types';
+	import { t } from '$lib/i18n';
+	import { language } from '$lib/stores/language.svelte';
+
+	// Reading language.current makes every label re-render on a
+	// language switch — same helper as the routes page.
+	function tl(key: string, params?: Record<string, string | number>): string {
+		void language.current;
+		return t(key, params);
+	}
 
 	let password = $state('');
 	let showPassword = $state(false);
@@ -161,8 +170,9 @@
 						type="button"
 						class="lockscreen-pw-toggle"
 						onclick={togglePassword}
-						tabindex={-1}
-						aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+						aria-pressed={showPassword ? 'true' : 'false'}
+						aria-controls="lockscreen-password"
+						aria-label={tl('auth.showPassword')}
 					>
 						{#if showPassword}
 							<svg
@@ -403,6 +413,10 @@
 	.lockscreen-pw-toggle:hover {
 		color: var(--fg-muted);
 		background: var(--surface-2);
+	}
+	.lockscreen-pw-toggle:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
 	}
 	.lockscreen-pw-toggle :global(svg) {
 		width: 16px;

@@ -376,9 +376,10 @@
 						type="button"
 						class="login-pw-toggle"
 						onclick={togglePassword}
-						tabindex={-1}
-						aria-label={language.current &&
-							(showPassword ? t('auth.hidePassword') : t('auth.showPassword'))}
+						aria-pressed={showPassword ? 'true' : 'false'}
+						aria-controls="login-password"
+						aria-label={language.current && t('auth.showPassword')}
+						data-testid="login-password-toggle"
 					>
 						{#if showPassword}
 							<svg
@@ -719,6 +720,10 @@
 	.login-pw-toggle:hover {
 		color: var(--fg-muted);
 		background: var(--surface-2);
+	}
+	.login-pw-toggle:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
 	}
 	.login-pw-toggle :global(svg) {
 		width: 16px;

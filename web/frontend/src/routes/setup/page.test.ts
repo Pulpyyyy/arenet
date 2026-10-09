@@ -10,9 +10,14 @@
 //   - the form renders an email input
 //   - a supplied email is forwarded to authApi.setup
 //   - setup still works when email is left blank
+//   - the show-password toggle is in the tab order, is a toggle button
+//     (aria-pressed, aria-controls) and Enter on it does not submit
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, fireEvent, waitFor } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
+import { flushSync } from 'svelte';
+import { t } from '$lib/i18n';
 
 const { authMock, authStoreMock, pageMock, gotoMock } = vi.hoisted(() => ({
 	authMock: { setup: vi.fn() },
@@ -116,5 +121,49 @@ describe('/setup — where it lands', () => {
 		pageMock.url = new URL('http://localhost/setup?next=%2F%2Fevil.example');
 		await completeSetup();
 		expect(gotoMock).toHaveBeenCalledWith('/routes');
+	});
+});
+
+describe('/setup — show-password toggle', () => {
+	it('is reachable by Tab from the password field', async () => {
+		const user = userEvent.setup();
+		const { container, getByTestId } = render(Page);
+		await user.click(byId(container, 'setup-password'));
+		await user.tab();
+		const toggle = getByTestId('setup-password-toggle');
+		expect(toggle).toHaveFocus();
+		expect(toggle.getAttribute('aria-controls')).toBe('setup-password');
+		expect(toggle.getAttribute('aria-label')).toBe(t('setup.ariaShowPassword'));
+	});
+
+	it('flips the field type and aria-pressed, and Enter on it does not submit', async () => {
+		const user = userEvent.setup();
+		const { container, getByTestId } = render(Page);
+		const form = getByTestId('setup-form');
+		const onSubmit = vi.fn((e: Event) => e.preventDefault());
+		form.addEventListener('submit', onSubmit);
+		// Every required field filled, so a submit WOULD reach authApi.setup.
+		await fillCommon(container);
+
+		const password = byId(container, 'setup-password');
+		const toggle = getByTestId('setup-password-toggle');
+		expect(password.type).toBe('password');
+		expect(toggle.getAttribute('aria-pressed')).toBe('false');
+
+		await user.click(password);
+		await user.tab();
+		await user.keyboard('{Enter}');
+		flushSync();
+		expect(password.type).toBe('text');
+		expect(toggle.getAttribute('aria-pressed')).toBe('true');
+
+		await user.keyboard('{Enter}');
+		flushSync();
+		expect(password.type).toBe('password');
+		expect(toggle.getAttribute('aria-pressed')).toBe('false');
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(onSubmit).not.toHaveBeenCalled();
+		expect(authMock.setup).not.toHaveBeenCalled();
 	});
 });

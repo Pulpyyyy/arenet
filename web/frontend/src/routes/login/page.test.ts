@@ -8,9 +8,12 @@
 //   - ?reason= maps known codes to an information banner, ignores others
 //   - a 429 disables the submit button with a Retry-After countdown and
 //     a translated message instead of the raw backend one
+//   - the show-password toggle is in the tab order, is a toggle button
+//     (aria-pressed, aria-controls) and Enter on it does not submit
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, waitFor } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
 import { flushSync } from 'svelte';
 import { ApiError } from '$lib/api/types';
 import { t } from '$lib/i18n';
@@ -203,5 +206,50 @@ describe('/login — 429 rate limit', () => {
 		const button = getByTestId('login-submit') as HTMLButtonElement;
 		expect(button.disabled).toBe(false);
 		expect(button.textContent).toContain(t('auth.loginButton'));
+	});
+});
+
+describe('/login — show-password toggle', () => {
+	it('is reachable by Tab from the password field', async () => {
+		const user = userEvent.setup();
+		const { container, getByTestId } = render(Page);
+		await user.click(byId(container, 'login-password'));
+		await user.tab();
+		const toggle = getByTestId('login-password-toggle');
+		expect(toggle).toHaveFocus();
+		expect(toggle.getAttribute('aria-controls')).toBe('login-password');
+		expect(toggle.getAttribute('aria-label')).toBe(t('auth.showPassword'));
+	});
+
+	it('flips the field type and aria-pressed, and Enter on it does not submit', async () => {
+		const user = userEvent.setup();
+		const { container, getByTestId } = render(Page);
+		const form = getByTestId('login-form');
+		const onSubmit = vi.fn((e: Event) => e.preventDefault());
+		form.addEventListener('submit', onSubmit);
+		// Both fields filled, so a submit WOULD reach auth.login.
+		await fireEvent.input(byId(container, 'login-username'), { target: { value: 'admin' } });
+		await fireEvent.input(byId(container, 'login-password'), { target: { value: 'hunter2' } });
+
+		const password = byId(container, 'login-password');
+		const toggle = getByTestId('login-password-toggle');
+		expect(password.type).toBe('password');
+		expect(toggle.getAttribute('aria-pressed')).toBe('false');
+
+		await user.click(password);
+		await user.tab();
+		await user.keyboard('{Enter}');
+		flushSync();
+		expect(password.type).toBe('text');
+		expect(toggle.getAttribute('aria-pressed')).toBe('true');
+
+		await user.keyboard('{Enter}');
+		flushSync();
+		expect(password.type).toBe('password');
+		expect(toggle.getAttribute('aria-pressed')).toBe('false');
+
+		await settle();
+		expect(onSubmit).not.toHaveBeenCalled();
+		expect(authStoreMock.login).not.toHaveBeenCalled();
 	});
 });

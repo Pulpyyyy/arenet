@@ -33,10 +33,14 @@
 			type="checkbox"
 			bind:checked
 			{disabled}
-			class="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
+			class="peer absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
 		/>
+		<!-- The real input is invisible, so the painted box shows its
+		     keyboard focus. An outline rather than a ring: its offset gap
+		     is transparent, so it reads on any surface the box sits on,
+		     and it stays distinct from the cyan fill of a checked box. -->
 		<span
-			class="absolute inset-0 rounded border transition-all duration-100"
+			class="absolute inset-0 rounded border transition-all duration-100 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-cyan"
 			class:bg-cyan={checked}
 			class:border-cyan={checked}
 			class:bg-transparent={!checked}
