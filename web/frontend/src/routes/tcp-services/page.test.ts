@@ -501,3 +501,40 @@ describe('/tcp-services — the split only opens on demand', () => {
 		expect(split?.classList.contains('split-open')).toBe(true);
 	});
 });
+
+// Cancel, another row, Add and leaving the page all dropped an edit
+// unasked. They now go through one discard question.
+describe('/tcp-services — unsaved changes', () => {
+	async function openService() {
+		api.listTCPServices.mockResolvedValue([service()]);
+		render(Page);
+		await userEvent.click(await screen.findByTestId('tcp-row-svc1'));
+		await tick();
+	}
+	const nameInput = () => document.getElementById('tcp-name') as HTMLInputElement | null;
+
+	it('closes without asking when nothing changed', async () => {
+		await openService();
+		await userEvent.click(screen.getByText('Cancel'));
+		await tick();
+		expect(screen.queryByText('Discard your changes?')).toBeNull();
+		expect(nameInput()).toBeNull();
+	});
+
+	it('asks before Cancel drops an edit, and keeps it on "Keep editing"', async () => {
+		await openService();
+		await userEvent.type(nameInput()!, '-2');
+		await userEvent.click(screen.getByText('Cancel'));
+		await tick();
+		expect(await screen.findByText('Discard your changes?')).toBeInTheDocument();
+
+		await userEvent.click(screen.getByText('Keep editing'));
+		await tick();
+		expect(nameInput()?.value).toBe('stalwart-imaps-2');
+
+		await userEvent.click(screen.getByText('Cancel'));
+		await userEvent.click(await screen.findByText('Discard changes'));
+		await waitFor(() => expect(nameInput()).toBeNull());
+	});
+});
+

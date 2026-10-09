@@ -21,7 +21,8 @@ export function sectionForErrorKey(key: string): RouteFormSection | null {
 	if (key === 'host' || key === 'lbPolicy' || key.startsWith('upstreams')) return 'essentials';
 	if (key.startsWith('healthCheck.')) return 'healthCheck';
 	if (key.startsWith('pathRules.')) return 'pathsHeaders';
-	if (key === 'wafExcludeRules' || key === 'wafExcludeTags') return 'waf';
+	if (key === 'wafExcludeRules' || key === 'wafExcludeTags' || key === 'wafCustomRules')
+		return 'waf';
 	return null;
 }
 

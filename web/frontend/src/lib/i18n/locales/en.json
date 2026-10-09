@@ -479,6 +479,7 @@
 			"wafExcludeRulesSecurityPage": "Security",
 			"wafExcludeRulesCRSDisabledWarning": "⚠️ The CRS is disabled via the toggle above — exclusions are silent until re-enabled.",
 			"sectionEssentials": "Essentiel",
+			"wafRuleDraftOpen": "Finish the WAF rule you are editing (OK) or cancel it before saving the route.",
 			"sectionInvalid": "needs fixing",
 			"sectionTLS": "TLS",
 			"sectionAuth": "Authentication",
@@ -928,6 +929,12 @@
 		"badgeIPAllow": "ip: {count} range(s)",
 		"badgeIPDeny": "ip: {count} blocked",
 		"badgeDisabled": "disabled",
+		"discardDialog": {
+			"title": "Discard your changes?",
+			"message": "This TCP service has unsaved changes. Leaving now drops them.",
+			"confirmLabel": "Discard changes",
+			"cancelLabel": "Keep editing"
+		},
 		"form": {
 			"titleNew": "New service",
 			"titleEdit": "Edit service",

@@ -479,6 +479,7 @@
 			"wafExcludeRulesSecurityPage": "Sécurité",
 			"wafExcludeRulesCRSDisabledWarning": "⚠️ Le CRS est désactivé via le toggle ci-dessus — les exclusions sont silencieuses jusqu'à réactivation.",
 			"sectionEssentials": "Essentiel",
+			"wafRuleDraftOpen": "Termine la règle WAF en cours (OK) ou annule-la avant d'enregistrer la route.",
 			"sectionInvalid": "à corriger",
 			"sectionTLS": "TLS",
 			"sectionAuth": "Authentification",
@@ -928,6 +929,12 @@
 		"badgeIPAllow": "ip : {count} plage(s)",
 		"badgeIPDeny": "ip : {count} bloquée(s)",
 		"badgeDisabled": "désactivé",
+		"discardDialog": {
+			"title": "Abandonner tes modifications ?",
+			"message": "Ce service TCP a des modifications non enregistrées. Partir maintenant les perd.",
+			"confirmLabel": "Abandonner",
+			"cancelLabel": "Continuer à modifier"
+		},
 		"form": {
 			"titleNew": "Nouveau service",
 			"titleEdit": "Modifier le service",
