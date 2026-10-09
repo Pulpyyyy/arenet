@@ -36,6 +36,7 @@
 -->
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { afterNavigate } from '$app/navigation';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
@@ -165,8 +166,12 @@
 	// defaults and wipe the incoming params. A value the page doesn't
 	// know falls back to its default instead of silently hiding every row.
 	const LEVEL_FILTERS: ReadonlyArray<'all' | LevelTag> = ['all', 'block', 'detect', 'warn', 'info'];
+	// The query string the filters were last read from or written to.
+	// Plain variable, not $state: the write-back effect must not track it.
+	let syncedSearch = '';
 	function readFiltersFromURL(): void {
 		if (typeof window === 'undefined') return;
+		syncedSearch = window.location.search;
 		const params = new URLSearchParams(window.location.search);
 		search = params.get('q') ?? '';
 		// Not checked against routeMap: it isn't loaded yet, and a deleted
@@ -179,18 +184,35 @@
 	}
 	readFiltersFromURL();
 
+	// /logs → /logs (sidebar link, a "view in logs" link, back/forward)
+	// reuses this component, so the init read above doesn't run again.
+	// SvelteKit has already put the new URL in place when this fires.
+	// 'enter' is the first mount, which init already covered; our own
+	// history.replaceState below is not a SvelteKit navigation and never
+	// lands here.
+	afterNavigate(({ type }) => {
+		if (type === 'enter') return;
+		readFiltersFromURL();
+	});
+
 	// replaceState, not pushState (same as /security's ?tab): refining a
 	// filter shouldn't fill the back button. Defaults are omitted so the
 	// plain /logs stays plain, and SvelteKit's own history.state is kept
 	// so its back/forward bookkeeping survives.
 	$effect(() => {
-		const url = new URL(window.location.href);
+		// Read the filters first so the effect keeps tracking them even
+		// when it returns early below.
 		const next: Record<string, string> = {
 			q: search.trim(),
 			route: routeFilter,
 			code: codeFilter,
 			level: levelFilter === 'all' ? '' : levelFilter
 		};
+		const url = new URL(window.location.href);
+		// A navigation changed the query since our last sync. Its filters
+		// win and afterNavigate is about to read them; writing now would
+		// put the old ones back.
+		if (url.search !== syncedSearch) return;
 		for (const [key, value] of Object.entries(next)) {
 			if (value) url.searchParams.set(key, value);
 			else url.searchParams.delete(key);
@@ -198,6 +220,7 @@
 		if (url.href !== window.location.href) {
 			window.history.replaceState(window.history.state, '', url);
 		}
+		syncedSearch = url.search;
 	});
 
 	let paused = $state(false);

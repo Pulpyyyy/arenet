@@ -17,6 +17,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
+import type { AfterNavigate } from '@sveltejs/kit';
+import { afterNavigate } from '$app/navigation';
 import type {
 	AuthFailureRecentEvent,
 	CertEvent,
@@ -1457,6 +1459,62 @@ describe('/logs — filters live in the URL', () => {
 			expect(params.has('level')).toBe(false);
 			expect(params.get('code')).toBe('429');
 		});
+	});
+
+	// An in-app navigation from /logs to /logs keeps the component, so
+	// the page has to pick the new URL's filters up from afterNavigate.
+	// SvelteKit moves the URL first, then calls back: the tests do the same.
+	function navigateTo(path: string): void {
+		window.history.pushState(window.history.state, '', path);
+		const calls = vi.mocked(afterNavigate).mock.calls;
+		const callback = calls[calls.length - 1]?.[0];
+		if (!callback) throw new Error('the page registered no afterNavigate callback');
+		callback({ type: 'link' } as AfterNavigate);
+	}
+
+	it('clears the filters on a navigation to the plain /logs', async () => {
+		securityMock.fetchEvents.mockResolvedValue({
+			events: [
+				wafEvent({ id: 1, requestPath: '/keep' }),
+				wafEvent({ id: 2, ts: isoOffset(-60), requestPath: '/drop' })
+			]
+		});
+		window.history.replaceState(null, '', '/logs?q=keep');
+		render(Page);
+		await screen.findByText('/keep');
+		expect(screen.queryByText('/drop')).not.toBeInTheDocument();
+
+		navigateTo('/logs');
+		await waitFor(() => expect(screen.getByLabelText('Filter events')).toHaveValue(''));
+		expect(await screen.findByText('/drop')).toBeInTheDocument();
+		expect(screen.getByText('/keep')).toBeInTheDocument();
+		// The old filter isn't written back over the new URL.
+		expect(window.location.search).toBe('');
+	});
+
+	it('switches the route filter on a navigation from ?route=a to ?route=b', async () => {
+		clientMock.listRoutes.mockResolvedValue([
+			{ id: 'route-a', host: 'a.test' },
+			{ id: 'route-b', host: 'b.test' }
+		]);
+		securityMock.fetchEvents.mockResolvedValue({
+			events: [
+				wafEvent({ id: 1, routeId: 'route-a', requestPath: '/on-a' }),
+				wafEvent({ id: 2, ts: isoOffset(-60), routeId: 'route-b', requestPath: '/on-b' })
+			]
+		});
+		window.history.replaceState(null, '', '/logs?route=route-a');
+		render(Page);
+		await screen.findByText('/on-a');
+		expect(screen.queryByText('/on-b')).not.toBeInTheDocument();
+
+		navigateTo('/logs?route=route-b');
+		expect(await screen.findByText('/on-b')).toBeInTheDocument();
+		expect(screen.queryByText('/on-a')).not.toBeInTheDocument();
+		await waitFor(() =>
+			expect(screen.getByLabelText('Filter by route')).toHaveValue('route-b')
+		);
+		expect(new URLSearchParams(window.location.search).get('route')).toBe('route-b');
 	});
 });
 
