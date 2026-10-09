@@ -1588,11 +1588,11 @@ describe('Routes page — W.5 country-block form section', () => {
 		expect(chips).toHaveLength(1);
 		// v2.22.0 — the raw ISO code was replaced by a flag
 		// (Flag.svelte). The code now lives in the flag's
-		// `fi-fr` class; the resolved French name still renders
-		// in .cb-chip__name.
+		// `fi-fr` class; the name resolved in the app language
+		// still renders in .cb-chip__name.
 		expect(chips[0].querySelector('.fi-fr')).not.toBeNull();
-		// "France" comes from Intl.DisplayNames(fr) which
-		// jsdom + Node ICU both ship.
+		// "France" comes from Intl.DisplayNames in the app
+		// language (en in tests), which jsdom + Node ICU ship.
 		expect(chips[0].textContent).toContain('France');
 	});
 
@@ -1702,7 +1702,7 @@ describe('Routes page — W.7 country-block polish', () => {
 		expect(hasRU).toBe(true);
 	});
 
-	it('typing a French name prefix matches the country (russie → RU)', async () => {
+	it('typing a country name prefix matches the country (russ → RU)', async () => {
 		render(Page);
 		await openCreateForm();
 		await userEvent.click(screen.getByTestId('country-block-mode-deny'));
@@ -1715,7 +1715,7 @@ describe('Routes page — W.7 country-block polish', () => {
 		expect(hasRU).toBe(true);
 	});
 
-	it('clicking a suggestion adds it as a chip with the French name', async () => {
+	it('clicking a suggestion adds it as a chip with the country name', async () => {
 		render(Page);
 		await openCreateForm();
 		await userEvent.click(screen.getByTestId('country-block-mode-deny'));

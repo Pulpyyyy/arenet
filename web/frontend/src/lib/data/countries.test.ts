@@ -4,7 +4,8 @@
 
 // W.7 — unit tests for the country dataset + lookup.
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
+import { language } from '$lib/stores/language.svelte';
 import { ALPHA2_CODES, countryName, matchCountries } from './countries';
 
 describe('ALPHA2_CODES', () => {
@@ -44,17 +45,40 @@ describe('ALPHA2_CODES', () => {
 });
 
 describe('countryName', () => {
-	it('resolves canonical codes to their French names', () => {
+	afterEach(() => {
+		language.applyLocally('en');
+	});
+
+	it('resolves canonical codes to their English names by default', () => {
+		// Tests run with the app language at its 'en' default.
 		// Intl.DisplayNames is available in jsdom + Node ≥ 16,
-		// which vitest runs under. The assertions below are
-		// stable across ICU revisions — the names listed are
-		// the canonical French ICU "region" labels.
+		// which vitest runs under; the names listed are the
+		// canonical ICU "region" labels.
 		expect(countryName('FR')).toBe('France');
+		expect(countryName('RU')).toBe('Russia');
+		expect(countryName('DE')).toBe('Germany');
+		expect(countryName('US')).toBe('United States');
+		expect(countryName('CN')).toBe('China');
+		expect(countryName('JP')).toBe('Japan');
+	});
+
+	it('follows the app language when it switches to French', () => {
+		language.applyLocally('fr');
 		expect(countryName('RU')).toBe('Russie');
 		expect(countryName('DE')).toBe('Allemagne');
-		expect(countryName('US')).toBe('États-Unis');
-		expect(countryName('CN')).toBe('Chine');
-		expect(countryName('JP')).toBe('Japon');
+		// Switching back must not serve the cached French
+		// instance (the cache is per locale).
+		language.applyLocally('en');
+		expect(countryName('DE')).toBe('Germany');
+	});
+
+	it('resolves canonical codes to their French names with an explicit locale', () => {
+		expect(countryName('FR', 'fr')).toBe('France');
+		expect(countryName('RU', 'fr')).toBe('Russie');
+		expect(countryName('DE', 'fr')).toBe('Allemagne');
+		expect(countryName('US', 'fr')).toBe('États-Unis');
+		expect(countryName('CN', 'fr')).toBe('Chine');
+		expect(countryName('JP', 'fr')).toBe('Japon');
 	});
 
 	it('uppercases lowercase input before lookup', () => {
@@ -97,15 +121,26 @@ describe('matchCountries', () => {
 		expect(codes[0]).toBe('FR');
 	});
 
-	it('matches by French-name prefix', () => {
+	it('matches by name prefix in the app language', () => {
 		const results = matchCountries('russ');
 		const codes = results.map((m) => m.code);
 		expect(codes).toContain('RU');
+		expect(matchCountries('germ').map((m) => m.code)).toContain('DE');
+	});
+
+	it('matches French names when the app language is French', () => {
+		language.applyLocally('fr');
+		try {
+			expect(matchCountries('allem').map((m) => m.code)).toContain('DE');
+			expect(matchCountries('RUSSIE').map((m) => m.code)).toContain('RU');
+		} finally {
+			language.applyLocally('en');
+		}
 	});
 
 	it('returns code-prefix matches before name-prefix matches', () => {
 		// Typing "fr" should match the code "FR" before the
-		// French name prefix match for "France" (which is
+		// name prefix match for "France" (which is
 		// also "FR"). Either way the canonical short form
 		// should surface first.
 		const results = matchCountries('fr');
@@ -143,7 +178,7 @@ describe('matchCountries', () => {
 	it('matches case-insensitively across both axes', () => {
 		// Operators may type "RU", "ru", "Russ", "RUSS" — all
 		// should surface RU.
-		for (const query of ['RU', 'ru', 'Russ', 'RUSSIE']) {
+		for (const query of ['RU', 'ru', 'Russ', 'RUSSIA']) {
 			const codes = matchCountries(query).map((m) => m.code);
 			expect(codes).toContain('RU');
 		}

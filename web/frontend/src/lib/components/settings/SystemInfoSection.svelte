@@ -32,6 +32,7 @@
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
 	import { getSystemInfo, type SystemInfo } from '$lib/api/system';
+	import { formatBytes } from '$lib/utils/format';
 
 	function tl(key: string, params?: Record<string, string | number>): string {
 		void language.current;
@@ -76,17 +77,9 @@
 		if (pollId !== null) clearInterval(pollId);
 	});
 
-	function formatBytes(n?: number): string {
-		if (!n) return '—';
-		if (n < 1024) return `${n} B`;
-		const units = ['kB', 'MB', 'GB', 'TB'];
-		let value = n / 1024;
-		let unit = 0;
-		while (value >= 1024 && unit < units.length - 1) {
-			value /= 1024;
-			unit++;
-		}
-		return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+	// A missing or zero reading is "not reported", not an empty host.
+	function sizeOrDash(n?: number): string {
+		return n ? formatBytes(n) : '—';
 	}
 
 	function formatUptime(seconds?: number): string {
@@ -188,8 +181,8 @@
 				</div>
 				<div class="text-xs text-muted" data-testid="system-memory-detail">
 					{tl('system.usedOfTotal', {
-						used: formatBytes(info.memory.usedBytes),
-						total: formatBytes(info.memory.totalBytes)
+						used: sizeOrDash(info.memory.usedBytes),
+						total: sizeOrDash(info.memory.totalBytes)
 					})}
 				</div>
 				<!-- Which ceiling this is: the container's, or the
@@ -214,8 +207,8 @@
 				</div>
 				<div class="text-xs text-muted">
 					{tl('system.freeOfTotal', {
-						free: formatBytes(info.disk.availableBytes),
-						total: formatBytes(info.disk.totalBytes)
+						free: sizeOrDash(info.disk.availableBytes),
+						total: sizeOrDash(info.disk.totalBytes)
 					})}
 				</div>
 				<!-- The data directory, not "/": the database, the
@@ -244,7 +237,7 @@
 			</dd>
 			<dt class="text-secondary">{tl('system.arenetMemory')}</dt>
 			<dd class="text-primary font-mono" data-testid="system-process-memory">
-				{formatBytes(info.process.residentBytes || info.process.heapBytes)}
+				{sizeOrDash(info.process.residentBytes || info.process.heapBytes)}
 			</dd>
 			<dt class="text-secondary">{tl('system.goroutines')}</dt>
 			<dd class="text-primary font-mono">{info.process.goroutines ?? '—'}</dd>
