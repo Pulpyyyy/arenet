@@ -212,7 +212,11 @@
 					<span>Mode <b>lecture seule</b> — votre compte a le rôle <b>viewer</b>. Contactez un administrateur pour obtenir les droits d'écriture.</span>
 				</div>
 			{/if}
-			<main id="main" tabindex="-1" class="app-main focus:outline-none" aria-busy={$loading} aria-live="polite">
+			<!-- No aria-live here: it made the whole page a live region, so
+			     every 1 s metrics push and re-render was read out. Route
+			     changes are already announced by SvelteKit's own announcer
+			     (it reads document.title after each navigation). -->
+			<main id="main" tabindex="-1" class="app-main focus:outline-none" aria-busy={$loading}>
 				{#if $loading}
 					<div class="loading-bar">
 						<div class="loading-shimmer"></div>
@@ -282,7 +286,7 @@
 		font-size: 12.5px;
 	}
 	.ro-banner svg { flex: none; }
-	.ro-banner b { color: oklch(86% 0.14 85); font-weight: 500; }
+	.ro-banner b { color: var(--status-warn-fg); font-weight: 500; }
 
 	.loading-bar {
 		position: absolute;

@@ -454,7 +454,7 @@
 	}
 	.nav-item.active {
 		background: var(--accent-soft);
-		color: oklch(82% 0.16 255);
+		color: var(--accent-fg);
 		box-shadow: inset 2px 0 0 var(--accent);
 	}
 	.nav-item .ic {

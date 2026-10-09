@@ -35,6 +35,8 @@
 //     trigger a real (and here, unmockable-URL) fetch.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 // Mutable so the active-item tests can set the path before render.
 // Hoisted because vi.mock factories run before top-level consts.
@@ -358,5 +360,43 @@ describe('Sidebar', () => {
 		await waitFor(() => {
 			expect(screen.queryByTestId('brand-version')).toBeNull();
 		});
+	});
+});
+
+// Source-level guard: jsdom resolves no custom properties and does no
+// cascade, so a rendering test cannot see which colour the active item
+// gets. The active item used to hardcode oklch(82% 0.16 255) — fine on
+// the dark sidebar, ~1.4:1 on the light one. It must read a token that
+// each theme defines for itself.
+describe('Sidebar active item colour', () => {
+	const sidebarSource = readFileSync(
+		resolve(process.cwd(), 'src/lib/components/Sidebar.svelte'),
+		'utf8'
+	);
+	const tokensSource = readFileSync(
+		resolve(process.cwd(), 'src/lib/styles/tokens.css'),
+		'utf8'
+	);
+
+	it('takes its text colour from --accent-fg, not a literal', () => {
+		const rule = sidebarSource.match(/\.nav-item\.active\s*\{([^}]*)\}/);
+		expect(rule).not.toBeNull();
+		const body = rule![1];
+		expect(body).toMatch(/(^|[\s;])color:\s*var\(--accent-fg\)/);
+		expect(body).not.toMatch(/(^|[\s;])color:\s*oklch\(/);
+	});
+
+	it('has --accent-fg defined separately for the dark and light themes', () => {
+		const block = (selector: RegExp) => {
+			const m = tokensSource.match(selector);
+			return m ? m[1] : '';
+		};
+		const dark = block(/:root,\s*\[data-theme='dark'\]\s*\{([^}]*)\}/);
+		const light = block(/\[data-theme='light'\]\s*\{([^}]*)\}/);
+		const value = (b: string) => b.match(/--accent-fg:\s*([^;]+);/)?.[1].trim();
+		expect(value(dark)).toBeTruthy();
+		expect(value(light)).toBeTruthy();
+		// One value for both themes would be the old bug with extra steps.
+		expect(value(light)).not.toBe(value(dark));
 	});
 });
