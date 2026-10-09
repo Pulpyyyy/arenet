@@ -175,15 +175,15 @@
 			role="alert"
 		>
 			<div>
-				<strong>Your password has been found in a known data breach.</strong>
-				Change it immediately to secure your account.
+				<strong>{language.current && t('passwordBreach.title')}</strong>
+				{language.current && t('passwordBreach.body')}
 			</div>
 			<Button
 				variant="danger"
 				size="sm"
 				onclick={() => (changePasswordModalOpen = true)}
 			>
-				{#snippet children()}Change password{/snippet}
+				{#snippet children()}{language.current && t('passwordBreach.action')}{/snippet}
 			</Button>
 		</div>
 	{/if}

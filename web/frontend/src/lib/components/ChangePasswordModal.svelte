@@ -22,6 +22,8 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { pushToast } from '$lib/stores/toast';
 	import { ApiError } from '$lib/api/types';
+	import { t } from '$lib/i18n';
+	import { language } from '$lib/stores/language.svelte';
 	import Modal from './Modal.svelte';
 	import Input from './Input.svelte';
 	import Button from './Button.svelte';
@@ -31,6 +33,9 @@
 	}
 
 	let { open = $bindable() }: Props = $props();
+
+	// Mirrors the server-side minimum (length 15..128, see header).
+	const MIN_PASSWORD_LENGTH = 15;
 
 	let currentPassword = $state('');
 	let newPassword = $state('');
@@ -53,24 +58,21 @@
 		if (submitting) return;
 		errors = {};
 		if (!currentPassword) {
-			errors = { current: 'Required' };
+			errors = { current: t('changePasswordModal.errRequired') };
 			return;
 		}
-		if (newPassword.length < 15) {
-			errors = { new: 'Must be at least 15 characters' };
+		if (newPassword.length < MIN_PASSWORD_LENGTH) {
+			errors = { new: t('changePasswordModal.errTooShort', { min: MIN_PASSWORD_LENGTH }) };
 			return;
 		}
 		if (newPassword !== confirmPassword) {
-			errors = { confirm: 'Passwords do not match' };
+			errors = { confirm: t('changePasswordModal.errMismatch') };
 			return;
 		}
 		submitting = true;
 		try {
 			await authApi.changePassword(currentPassword, newPassword);
-			pushToast(
-				'Password changed successfully. Other sessions have been signed out.',
-				'success'
-			);
+			pushToast(t('changePasswordModal.toastChanged'), 'success');
 			// Server cleared passwordCompromised and revoked other sessions.
 			// Re-bootstrap to refresh local user fields; the banner unmounts
 			// reactively when passwordCompromised flips to false.
@@ -80,14 +82,14 @@
 		} catch (err) {
 			if (err instanceof ApiError) {
 				if (err.status === 401) {
-					errors = { current: 'Incorrect current password' };
+					errors = { current: t('changePasswordModal.errIncorrectCurrent') };
 				} else if (err.status === 400) {
 					errors = { new: err.message };
 				} else {
 					pushToast(err.message, 'danger');
 				}
 			} else {
-				pushToast('Unexpected error', 'danger');
+				pushToast(t('changePasswordModal.errUnexpected'), 'danger');
 			}
 		} finally {
 			submitting = false;
@@ -95,11 +97,11 @@
 	}
 </script>
 
-<Modal {open} title="Change password" onClose={close}>
+<Modal {open} title={language.current && t('changePasswordModal.title')} onClose={close}>
 	<Input
 		bind:value={currentPassword}
 		type="password"
-		label="Current password"
+		label={language.current && t('changePasswordModal.currentLabel')}
 		autocomplete="current-password"
 		error={errors.current ?? ''}
 		disabled={submitting}
@@ -108,7 +110,7 @@
 		<Input
 			bind:value={newPassword}
 			type="password"
-			label="New password (≥ 15 characters)"
+			label={language.current && t('changePasswordModal.newLabel', { min: MIN_PASSWORD_LENGTH })}
 			autocomplete="new-password"
 			error={errors.new ?? ''}
 			disabled={submitting}
@@ -118,19 +120,19 @@
 		<Input
 			bind:value={confirmPassword}
 			type="password"
-			label="Confirm new password"
+			label={language.current && t('changePasswordModal.confirmLabel')}
 			autocomplete="new-password"
 			error={errors.confirm ?? ''}
 			disabled={submitting}
 		/>
 	</div>
 	<div class="mt-3 text-xs text-secondary">
-		Changing your password will sign out all other active sessions on other devices.
+		{language.current && t('changePasswordModal.otherSessionsNote')}
 	</div>
 
 	{#snippet footer()}
 		<Button variant="ghost" size="md" onclick={close} disabled={submitting}>
-			{#snippet children()}Cancel{/snippet}
+			{#snippet children()}{language.current && t('common.cancel')}{/snippet}
 		</Button>
 		<Button
 			variant="primary"
@@ -139,7 +141,7 @@
 			loading={submitting}
 			disabled={submitting}
 		>
-			{#snippet children()}Change password{/snippet}
+			{#snippet children()}{language.current && t('changePasswordModal.submit')}{/snippet}
 		</Button>
 	{/snippet}
 </Modal>

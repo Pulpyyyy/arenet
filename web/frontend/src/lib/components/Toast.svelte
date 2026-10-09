@@ -6,6 +6,8 @@
 <script lang="ts">
 	import type { ToastEntry } from '$lib/stores/toast';
 	import { dismissToast } from '$lib/stores/toast';
+	import { t } from '$lib/i18n';
+	import { language } from '$lib/stores/language.svelte';
 
 	let { entry }: { entry: ToastEntry } = $props();
 </script>
@@ -18,7 +20,7 @@
 	<p class="text-sm flex-1">{entry.message}</p>
 	<button
 		class="text-secondary hover:text-primary text-xs"
-		aria-label="Dismiss notification"
+		aria-label={language.current && t('common.dismissNotification')}
 		onclick={() => dismissToast(entry.id)}
 	>
 		×

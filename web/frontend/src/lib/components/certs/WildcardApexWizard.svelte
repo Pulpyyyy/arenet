@@ -147,15 +147,13 @@
 				data-testid="wizard-apex-input"
 			/>
 			<!--
-				v2.9.21 i18n — the hint paragraph carries dynamic
-				<code>*.{apex || 'example.com'}</code> markup that
-				can't survive a t() interpolation. Render the static
-				prefix via t() with a {wildcard} placeholder left
-				untouched, then inline the live <code> separately.
+				The hint carries a live <code>*.{apex}</code> that can't
+				go through t() interpolation, so the sentence is split
+				around it (before / code / after) in each language.
 			-->
 			<p class="hint">
-				{language.current && t('certs.wizardApexHint', { wildcard: '' })}
-				<code>*.{apex || 'example.com'}</code>
+				{language.current && t('certs.wizardApexHintBefore')}
+				<code>*.{apex || 'example.com'}</code>{language.current && t('certs.wizardApexHintAfter')}
 			</p>
 		</div>
 

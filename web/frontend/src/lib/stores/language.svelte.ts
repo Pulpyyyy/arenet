@@ -18,6 +18,10 @@
 
 import { authApi } from '$lib/api/auth';
 import { pushToast } from './toast';
+// Circular on purpose: $lib/i18n reads `language` from this module.
+// Neither side touches the other at import time (only inside
+// functions), so ES module evaluation order is not an issue.
+import { t } from '$lib/i18n';
 
 export type Language = 'en' | 'fr';
 
@@ -52,11 +56,10 @@ class LanguageStore {
 		} catch (err) {
 			this.applyLocally(previous);
 			this.persistLocally(previous);
-			// Language toast string is intentionally English: the toast
-			// fires when the language change FAILED, so we can't trust
-			// the post-fail bundle to render correctly. Same reasoning
-			// applies to a hypothetical FR toast if we shipped one.
-			pushToast('Failed to save language preference', 'danger');
+			// Resolved AFTER the revert above, so the toast speaks the
+			// language the UI is back in — the one the operator was
+			// reading when the change failed.
+			pushToast(t('settings.languageSaveFailed'), 'danger');
 			throw err;
 		} finally {
 			this.isApplying = false;

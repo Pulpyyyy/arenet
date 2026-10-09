@@ -4,6 +4,9 @@
   Licensed under the GNU AGPL v3 or later. See LICENSE.
 -->
 <script lang="ts">
+	import { t } from '$lib/i18n';
+	import { language } from '$lib/stores/language.svelte';
+
 	type Size = 'sm' | 'md' | 'lg';
 	type Color = 'cyan' | 'black' | 'white' | 'current';
 	let {
@@ -32,7 +35,7 @@
 	viewBox="0 0 24 24"
 	fill="none"
 	role="status"
-	aria-label="Loading"
+	aria-label={language.current && t('common.loadingAria')}
 >
 	<circle
 		cx="12"

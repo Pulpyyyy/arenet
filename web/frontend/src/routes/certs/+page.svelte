@@ -209,9 +209,15 @@
 	// ACME method KPI: DNS-01 wins as soon as at least one
 	// managed-domain is declared (we're using DNS-01 for at least
 	// some of the cert pool); else "Auto" (HTTP-01 default).
-	const acmeMethodLabel = $derived(domains.length > 0 ? 'DNS-01' : 'Auto');
+	const acmeMethodLabel = $derived(
+		language.current &&
+			(domains.length > 0 ? 'DNS-01' : t('certs.kpiACMEMethodAuto'))
+	);
 	const acmeMethodSub = $derived(
-		domains.length > 0 ? `via ${labelForProvider(domains[0].providerId)}` : 'HTTP-01'
+		language.current &&
+			(domains.length > 0
+				? t('certs.kpiACMEMethodVia', { provider: labelForProvider(domains[0].providerId) })
+				: t('certs.kpiACMEMethodHttp01'))
 	);
 
 	// Filtered cert list per the active tab. Pure client-side —
@@ -525,7 +531,7 @@
 			testid="kpi-certs-actifs"
 			label={language.current && t('certs.kpiActiveCertsLabel')}
 			value={certsTotal}
-			hint={language.current && `${t('certs.kpiActiveCertsFoot', { wildcard: certsWildcard, specific: certsSpecific })}${certsSpecific === 1 ? '' : 's'}`}
+			hint={language.current && t('certs.kpiActiveCertsFoot', { wildcard: certsWildcard, specific: certsSpecific, plural: certsSpecific === 1 ? '' : 's' })}
 		/>
 		<StatCard
 			testid="kpi-expirent-bientot"
@@ -577,16 +583,13 @@
 		<div class="renewal-body">
 			<div class="renewal-title">{language.current && t('certs.renewalTitle')}</div>
 			<!--
-				v2.9.21 i18n — the helper paragraph carries a {logsLink}
-				placeholder that's left untouched by the interpolate fn
-				(it's not in the params object). The static link is
-				rendered separately below to preserve the <a> tag without
-				HTML interpolation. Pre-fix this was a multi-line FR
-				paragraph; the t() resolution keeps the structure.
+				The sentence is split around the link (before / link /
+				after) so the <a> sits where each language puts it, with
+				no HTML interpolation.
 			-->
 			<p>
-				{language.current && t('certs.renewalHelper', { logsLink: '' })}
-				<a href="/logs">{language.current && t('certs.renewalLogsLink')}</a>
+				{language.current && t('certs.renewalHelperBefore')}
+				<a href="/logs">{language.current && t('certs.renewalLogsLink')}</a>{language.current && t('certs.renewalHelperAfter')}
 			</p>
 		</div>
 	</div>
@@ -725,7 +728,7 @@
 							</td>
 							<td>{cert.issuer || '—'}</td>
 							<td class="mono">
-								{(cert.sanList ?? []).length} SAN
+								{language.current && t('certs.sanCount', { count: (cert.sanList ?? []).length })}
 							</td>
 							<td class="dim">
 								{notBeforeMissing ? '—' : relativeTime(cert.notBefore)}
@@ -816,8 +819,8 @@
 		</div>
 
 		<p class="section-lead">
-			{language.current && t('certs.policiesLead', { settingsLink: '' })}
-			<a href="/settings">{language.current && t('certs.settingsLink')}</a>.
+			{language.current && t('certs.policiesLeadBefore')}
+			<a href="/settings">{language.current && t('certs.settingsLink')}</a>{language.current && t('certs.policiesLeadAfter')}
 		</p>
 
 		{#if sslDNSUnconfigured}
@@ -839,7 +842,7 @@
 									>{/if}
 							</div>
 							<div class="md-sub">
-								Provider: <span class="mono">{labelForProvider(md.providerId)}</span>
+								{language.current && t('certs.policiesProviderLabel')} <span class="mono">{labelForProvider(md.providerId)}</span>
 								{#if md.includeApex}· {language.current && t('certs.policiesIncludesApex')}{/if}
 							</div>
 							{#if isIssuing(md.apex)}
