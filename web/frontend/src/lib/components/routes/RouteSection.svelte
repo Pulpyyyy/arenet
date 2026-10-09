@@ -31,6 +31,8 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import type { Snippet } from 'svelte';
+	import { t } from '$lib/i18n';
+	import { language } from '$lib/stores/language.svelte';
 
 	/** What the section does to traffic; undefined = not an authorisation decision. */
 	export type Posture = 'allow' | 'block' | 'watch' | 'off' | 'set';
@@ -45,11 +47,25 @@
 		posture?: Posture;
 		/** Open on first render (the route's essentials). */
 		open?: boolean;
+		/**
+		 * The section holds a field error. Opens it and marks the closed
+		 * row, so an error is never left inside a section out of sight.
+		 */
+		invalid?: boolean;
 		testid?: string;
 		children: Snippet;
 	}
 
-	let { name, summary = '', badge = '', posture, open = false, testid, children }: Props = $props();
+	let {
+		name,
+		summary = '',
+		badge = '',
+		posture,
+		open = false,
+		invalid = false,
+		testid,
+		children
+	}: Props = $props();
 
 	// The open state must live HERE, bound to the element. Passing
 	// `open` straight through as an attribute made every section
@@ -58,11 +74,29 @@
 	// and the operator's section closed under their cursor.
 	// `open` is only the initial value.
 	let isOpen = $state(untrack(() => open));
+
+	// Opens on the transition to invalid only: the operator can still
+	// close a section that holds an error, and nothing reopens it until
+	// the next refused save.
+	$effect(() => {
+		if (invalid) untrack(() => (isOpen = true));
+	});
 </script>
 
-<details class="section" data-posture={posture} bind:open={isOpen} data-testid={testid}>
+<details
+	class="section"
+	data-posture={posture}
+	data-invalid={invalid ? '' : undefined}
+	bind:open={isOpen}
+	data-testid={testid}
+>
 	<summary>
 		<span class="name">{name}</span>
+		{#if invalid}
+			<span class="invalid" data-testid={testid ? `${testid}-invalid` : undefined}>
+				{language.current && t('routes.form.sectionInvalid')}
+			</span>
+		{/if}
 		<span class="summary">{summary}</span>
 		{#if badge}
 			<span class="badge" data-tone={posture ?? 'neutral'}>{badge}</span>
@@ -99,6 +133,11 @@
 	}
 	.section[data-posture='set'] {
 		border-left-color: var(--accent-cyan);
+	}
+	/* After the posture rules on purpose: an error outranks the posture
+	   colour until it is fixed. */
+	.section[data-invalid] {
+		border-color: var(--status-down);
 	}
 
 	summary {
@@ -169,6 +208,12 @@
 	}
 	.badge[data-tone='watch'] {
 		color: var(--status-warn);
+	}
+	.invalid {
+		flex: none;
+		font-size: 12px;
+		font-weight: 600;
+		color: var(--status-down);
 	}
 
 	.body {

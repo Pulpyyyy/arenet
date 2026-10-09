@@ -479,6 +479,7 @@
 			"wafExcludeRulesSecurityPage": "Sécurité",
 			"wafExcludeRulesCRSDisabledWarning": "⚠️ Le CRS est désactivé via le toggle ci-dessus — les exclusions sont silencieuses jusqu'à réactivation.",
 			"sectionEssentials": "Essentiel",
+			"sectionInvalid": "à corriger",
 			"sectionTLS": "TLS",
 			"sectionAuth": "Authentification",
 			"sectionWAF": "WAF",

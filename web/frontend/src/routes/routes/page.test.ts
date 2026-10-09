@@ -31,7 +31,7 @@
 //     so it's testable by `queryByLabelText` returning null /
 //     non-null rather than by computed style.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { tick } from 'svelte';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
@@ -643,6 +643,69 @@ describe('Routes page — validation rules (§5.2)', () => {
 		await submitForm();
 		expect(screen.getByText('URI is required')).toBeInTheDocument();
 		expect(apiMock.createRoute).not.toHaveBeenCalled();
+	});
+
+	// A refused field inside a closed section used to stay out of
+	// sight: Save produced a toast and nothing else on screen.
+	describe('a refused save brings the error into view', () => {
+		let scroll: ReturnType<typeof vi.fn>;
+		beforeEach(() => {
+			// jsdom has no scrollIntoView; the page calls it optionally.
+			scroll = vi.fn();
+			Element.prototype.scrollIntoView = scroll as unknown as Element['scrollIntoView'];
+		});
+		afterEach(() => {
+			delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+		});
+
+		it('opens and marks the section holding the error, and scrolls to it', async () => {
+			render(Page);
+			await openCreateForm();
+			await userEvent.type(hostInput(), 'h.test');
+			await userEvent.type(upstreamURLInputs()[0], 'http://127.0.0.1:9000');
+			await userEvent.click(screen.getByLabelText('Enable active health checks'));
+			const section = screen.getByTestId('section-health-check') as HTMLDetailsElement;
+			section.open = false;
+			await tick();
+
+			await submitForm();
+
+			await vi.waitFor(() => expect(scroll).toHaveBeenCalled());
+			expect(section.open).toBe(true);
+			expect(section.hasAttribute('data-invalid')).toBe(true);
+			expect(screen.getByTestId('section-health-check-invalid')).toBeInTheDocument();
+			expect(scroll.mock.contexts[0]).toHaveTextContent('URI is required');
+			// Sections without an error carry no marker.
+			expect(screen.queryByTestId('section-essentials-invalid')).toBeNull();
+		});
+
+		it('focuses the refused field when the error is on the field itself', async () => {
+			render(Page);
+			await openCreateForm();
+			await submitForm();
+
+			await vi.waitFor(() => expect(scroll).toHaveBeenCalled());
+			expect(screen.getByTestId('section-essentials-invalid')).toBeInTheDocument();
+			expect(document.activeElement).toBe(hostInput());
+		});
+
+		it('repeats a form-level refusal next to Save', async () => {
+			apiMock.createRoute.mockRejectedValue(
+				new ApiError('something the form cannot place', 400, 'validation')
+			);
+			render(Page);
+			await openCreateForm();
+			await userEvent.type(hostInput(), 'h.test');
+			await userEvent.type(upstreamURLInputs()[0], 'http://127.0.0.1:9000');
+
+			await submitForm();
+
+			await vi.waitFor(() =>
+				expect(screen.getByTestId('form-error-footer')).toHaveTextContent(
+					'something the form cannot place'
+				)
+			);
+		});
 	});
 
 	it('rejects HC URI that does not start with /', async () => {
