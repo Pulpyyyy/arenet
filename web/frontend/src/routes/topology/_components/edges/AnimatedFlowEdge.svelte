@@ -24,6 +24,7 @@
 <script lang="ts">
         import { BaseEdge, getBezierPath, type EdgeProps } from '@xyflow/svelte';
         import { resolveFlowTier, type FlowEdgeData, type FlowTier } from '../../_types';
+        import { watchReducedMotion } from '$lib/stores/reducedMotion.svelte';
 
         type Props = EdgeProps & { data?: FlowEdgeData };
 
@@ -189,7 +190,46 @@
         );
         let isRedirect = $derived(redirectCode !== null);
 
-        let baseStroke = $derived(tierStrokeStyle(tier));
+        // Reduced motion: no particles at all, the tier in the line.
+        //
+        // app.css stops CSS animation for "prefers-reduced-motion:
+        // reduce", but the particles ride SMIL <animateMotion>, which
+        // no stylesheet reaches — they kept travelling for the people
+        // who had asked for stillness. Under the preference the circles
+        // are not rendered, and the traffic tier the particles carried
+        // (how many, how bright) moves into the stroke: width and
+        // opacity grow with the tier, so a busy flow still reads as
+        // busy from a still picture. Colour and the 'bad' dash are
+        // unchanged.
+        const reducedMotion = watchReducedMotion();
+
+        function reducedMotionStroke(t: FlowTier): { width: number; opacity: number } {
+                switch (t) {
+                        case 'dead':
+                                return { width: 1, opacity: 0.2 };
+                        case 'idle':
+                                return { width: 1.25, opacity: 0.35 };
+                        case 'low':
+                                return { width: 1.75, opacity: 0.55 };
+                        case 'mid':
+                                return { width: 2.5, opacity: 0.75 };
+                        case 'high':
+                                return { width: 3.5, opacity: 0.95 };
+                        case 'warn':
+                                return { width: 2.5, opacity: 0.8 };
+                        case 'bad':
+                                return { width: 2.5, opacity: 0.85 };
+                }
+        }
+
+        let baseStroke = $derived.by(() => {
+                const style = tierStrokeStyle(tier);
+                if (!reducedMotion.current) return style;
+                const still = reducedMotionStroke(tier);
+                return style
+                        .replace(/stroke-width:\s*[\d.]+/, `stroke-width: ${still.width}`)
+                        .replace(/stroke-opacity:\s*[\d.]+/, `stroke-opacity: ${still.opacity}`);
+        });
 
         // A redirect edge must stay legible at zero traffic.
         //
@@ -262,7 +302,11 @@
      lifetime — touching any of them at runtime would restart the
      animation and reintroduce the C4 sawtooth. The CSS transitions
      on opacity/r/filter make tier changes look like a smooth fade
-     instead of a pop. -->
+     instead of a pop.
+
+     Not rendered at all under prefers-reduced-motion (see
+     reducedMotionStroke above): the stroke carries the tier. -->
+{#if !reducedMotion.current}
 {#each Array.from({ length: MAX_PARTICLES }) as _, i (i)}
         <circle
                 class="particle"
@@ -283,6 +327,7 @@
                 </animateMotion>
         </circle>
 {/each}
+{/if}
 
 <style>
         /* Smooth tier transitions — opacity/r/filter changes ease over

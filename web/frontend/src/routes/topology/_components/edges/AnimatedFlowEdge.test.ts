@@ -14,7 +14,7 @@
 // The layout side is covered in _layout.test.ts. This file covers the
 // drawing: dashed, no particles, labelled with the code.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { render } from '@testing-library/svelte';
 import type { ComponentProps } from 'svelte';
 import Edge from './AnimatedFlowEdge.svelte';
@@ -176,5 +176,71 @@ describe('AnimatedFlowEdge — a redirect stays visible without traffic', () => 
 		const style = container.querySelector('path')?.getAttribute('style') ?? '';
 		expect(style).toContain('stroke-dasharray: 4 4');
 		expect(style).not.toContain('stroke-dasharray: 5 4');
+	});
+});
+
+// --- prefers-reduced-motion -------------------------------------------------
+//
+// app.css stops CSS animation under the preference; the particles ride
+// SMIL <animateMotion>, which no stylesheet reaches, so they kept
+// travelling for people who had asked for stillness. Under the
+// preference the edge draws no particle and carries the tier in the
+// stroke instead.
+
+/** Install a matchMedia that answers `matches` for the reduced-motion
+ *  query. Undone by the returned function. */
+function preferReducedMotion(matches: boolean): () => void {
+	const original = window.matchMedia;
+	window.matchMedia = ((query: string) => ({
+		matches: query.includes('prefers-reduced-motion') ? matches : false,
+		media: query,
+		onchange: null,
+		addListener: () => {},
+		removeListener: () => {},
+		addEventListener: () => {},
+		removeEventListener: () => {},
+		dispatchEvent: () => true
+	})) as unknown as typeof window.matchMedia;
+	return () => {
+		window.matchMedia = original;
+	};
+}
+
+function strokeWidth(container: HTMLElement): number {
+	const style = container.querySelector('path')?.getAttribute('style') ?? '';
+	const m = /stroke-width:\s*([\d.]+)/.exec(style);
+	return m ? Number(m[1]) : NaN;
+}
+
+describe('AnimatedFlowEdge — reduced motion', () => {
+	let restore: () => void = () => {};
+	afterEach(() => {
+		restore();
+		restore = () => {};
+	});
+
+	it('renders no animateMotion and no particle when reduced motion is asked for', () => {
+		restore = preferReducedMotion(true);
+		const { container } = render(Edge, { props: props(flow({ reqPerSec: 30 })) });
+		// getElementsByTagName, not querySelector: it matches the
+		// camelCase SVG name whichever namespace the element lands in.
+		expect(container.getElementsByTagName('animateMotion').length).toBe(0);
+		expect(container.querySelectorAll('circle.particle').length).toBe(0);
+	});
+
+	it('keeps the particles when no preference is set', () => {
+		// The control: the test above must not pass on an edge that
+		// simply stopped drawing particles for everyone.
+		restore = preferReducedMotion(false);
+		const { container } = render(Edge, { props: props(flow({ reqPerSec: 30 })) });
+		expect(container.getElementsByTagName('animateMotion').length).toBeGreaterThan(0);
+	});
+
+	it('shows the traffic tier through stroke width and opacity instead', () => {
+		restore = preferReducedMotion(true);
+		const quiet = render(Edge, { props: props(flow({ reqPerSec: 0.5 })) });
+		const busy = render(Edge, { props: props(flow({ reqPerSec: 100 })) });
+		expect(strokeWidth(busy.container)).toBeGreaterThan(strokeWidth(quiet.container));
+		expect(strokeOpacity(busy.container)).toBeGreaterThan(strokeOpacity(quiet.container));
 	});
 });

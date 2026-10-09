@@ -21,8 +21,9 @@
 // fetch resolves.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { render, screen, waitFor, within } from '@testing-library/svelte';
 import WorldMap from './WorldMap.svelte';
+import { CATEGORY_DASHES } from './categoryColors';
 
 // A minimal TopoJSON fixture with one synthetic country
 // covering ~0..10 degrees — enough to drive feature() +
@@ -457,5 +458,95 @@ describe('WorldMap — V.8.HF1 tick-driven re-render', () => {
 		const laterPath = screen.getByTestId('worldmap-arcs').querySelector('path');
 		const laterD = laterPath?.getAttribute('d') ?? '';
 		expect(laterD).not.toBe(initialD);
+	});
+});
+
+// -------------------------------------------------------
+// Not colour alone, and not sight alone.
+//
+// An arc's category was carried only by its stroke hue:
+// normal (green) and waf (red) collapse for a deuteranope,
+// crowdsec and auth are near-identical blues for everyone.
+// Each category now also has a dash pattern. And the arcs,
+// moving lines inside an svg role="img", had no text
+// alternative at all: a visually hidden list now states the
+// recent events as category + country.
+
+describe('WorldMap — category beyond colour', () => {
+	it.each(['normal', 'throttle', 'waf', 'crowdsec', 'auth', 'country_block'] as const)(
+		'draws a %s arc with its category dash pattern',
+		async (category) => {
+			mockTopoJSONFetch();
+			render(WorldMap, {
+				props: {
+					arenetLat: 48.8566,
+					arenetLon: 2.3522,
+					events: [mkEvent({ category })]
+				}
+			});
+			await waitFor(() => {
+				const path = screen.getByTestId('worldmap-arcs').querySelector('path');
+				expect(path?.getAttribute('stroke-dasharray')).toBe(CATEGORY_DASHES[category]);
+			});
+		}
+	);
+});
+
+describe('WorldMap — text alternative for the arcs', () => {
+	it('lists recent events as category and country, newest first', () => {
+		mockTopoJSONFetch();
+		render(WorldMap, {
+			props: {
+				arenetLat: 48.8566,
+				arenetLon: 2.3522,
+				events: [
+					mkEvent({ category: 'auth', sourceCountry: 'JP' }),
+					mkEvent({ category: 'waf', sourceCountry: 'GB' })
+				]
+			}
+		});
+		const items = within(screen.getByTestId('worldmap-recent-events')).getAllByRole('listitem');
+		expect(items).toHaveLength(2);
+		// Newest (the last appended) first.
+		expect(items[0].getAttribute('data-category')).toBe('waf');
+		expect(items[0].textContent ?? '').toMatch(/WAF/);
+		expect(items[0].textContent ?? '').toMatch(/United Kingdom|GB/);
+		expect(items[1].getAttribute('data-category')).toBe('auth');
+		expect(items[1].textContent ?? '').toMatch(/Japan|JP/);
+	});
+
+	it('names the list for assistive technology', () => {
+		mockTopoJSONFetch();
+		render(WorldMap, {
+			props: { arenetLat: 48.8566, arenetLon: 2.3522, events: [mkEvent()] }
+		});
+		const list = within(screen.getByTestId('worldmap-recent-events')).getByRole('list');
+		expect(list.getAttribute('aria-label') ?? '').not.toBe('');
+	});
+
+	it('leaves out what the map does not draw (LAN, unplaced sources)', () => {
+		mockTopoJSONFetch();
+		render(WorldMap, {
+			props: {
+				arenetLat: 48.8566,
+				arenetLon: 2.3522,
+				events: [
+					mkEvent({ isLan: true, sourceLat: 0, sourceLon: 0, sourceCountry: 'UNK' }),
+					mkEvent({ sourceLat: 0, sourceLon: 0, sourceCountry: 'UNK' }),
+					mkEvent({ category: 'crowdsec', sourceCountry: 'DE' })
+				]
+			}
+		});
+		const items = within(screen.getByTestId('worldmap-recent-events')).getAllByRole('listitem');
+		expect(items).toHaveLength(1);
+		expect(items[0].getAttribute('data-category')).toBe('crowdsec');
+	});
+
+	it('says so when there is nothing to list', () => {
+		mockTopoJSONFetch();
+		render(WorldMap, { arenetLat: 48.8566, arenetLon: 2.3522 });
+		const box = screen.getByTestId('worldmap-recent-events');
+		expect(within(box).queryByRole('list')).toBeNull();
+		expect((box.textContent ?? '').trim()).not.toBe('');
 	});
 });

@@ -10,7 +10,7 @@
 // shape, not the rendered color.
 
 import { describe, it, expect } from 'vitest';
-import { CATEGORY_COLORS, CATEGORY_LABELS_FR } from './categoryColors';
+import { CATEGORY_COLORS, CATEGORY_DASHES, CATEGORY_LABELS_FR } from './categoryColors';
 import type { GeoEventCategory } from '$lib/api/types';
 
 const ALL_CATEGORIES: readonly GeoEventCategory[] = [
@@ -44,6 +44,29 @@ describe('CATEGORY_COLORS', () => {
 	it('uses --accent-cyan for crowdsec (distinct from waf)', () => {
 		expect(CATEGORY_COLORS.crowdsec).toBe('var(--accent-cyan)');
 		expect(CATEGORY_COLORS.crowdsec).not.toBe(CATEGORY_COLORS.waf);
+	});
+});
+
+// Hue alone does not separate the categories (normal vs waf for a
+// deuteranope, crowdsec vs auth for everyone), so each one also has a
+// line rhythm. All six, country_block included — it is the category
+// most often read as "just another grey line".
+const EVERY_CATEGORY: readonly GeoEventCategory[] = [...ALL_CATEGORIES, 'country_block'];
+
+describe('CATEGORY_DASHES', () => {
+	it.each(EVERY_CATEGORY)('declares a dash pattern for category %s', (cat) => {
+		// 'none' (solid) or a list of non-negative numbers.
+		expect(CATEGORY_DASHES[cat]).toMatch(/^(none|\d+(\.\d+)?( \d+(\.\d+)?)+)$/);
+	});
+
+	it('gives every category a DISTINCT pattern', () => {
+		const values = EVERY_CATEGORY.map((c) => CATEGORY_DASHES[c]);
+		expect(new Set(values).size).toBe(EVERY_CATEGORY.length);
+	});
+
+	it('separates the pairs that hue confuses', () => {
+		expect(CATEGORY_DASHES.normal).not.toBe(CATEGORY_DASHES.waf);
+		expect(CATEGORY_DASHES.crowdsec).not.toBe(CATEGORY_DASHES.auth);
 	});
 });
 
