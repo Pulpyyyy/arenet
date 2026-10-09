@@ -1371,7 +1371,12 @@
 			"hintDiscordMentions": "Identifiants Discord, séparés par des virgules ou des espaces — pas des pseudos. Toutes les personnes listées sont notifiées à chaque alerte envoyée par ce canal.",
 			"errDiscordMentionUser": "« {value} » n'est pas un identifiant d'utilisateur. Discord ne notifie que sur des identifiants numériques : activez le mode développeur, puis clic droit sur le membre et Copier l'identifiant utilisateur.",
 			"errDiscordMentionRole": "« {value} » n'est pas un identifiant de rôle. Discord ne notifie que sur des identifiants numériques : activez le mode développeur, puis clic droit sur le rôle et Copier l'identifiant du rôle.",
-			"errDiscordUrlHost": "Cela ne ressemble pas à une URL de webhook Discord (elle doit commencer par https://discord.com/ ou https://discordapp.com/)."
+			"errDiscordUrlHost": "Cela ne ressemble pas à une URL de webhook Discord (elle doit commencer par https://discord.com/ ou https://discordapp.com/).",
+			"btnCreateAndTest": "Créer et envoyer un test",
+			"hintCreateAndTest": "Tu ne peux tester un canal qu'une fois enregistré : « Créer et envoyer un test » l'enregistre, puis envoie une alerte de test par ce canal.",
+			"errSummaryOne": "1 champ est à corriger.",
+			"errSummaryMany": "{count} champs sont à corriger.",
+			"btnGoToError": "Aller au champ"
 		},
 		"ruleModal": {
 			"titleEdit": "Modifier la règle",

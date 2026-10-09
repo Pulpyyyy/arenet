@@ -19,11 +19,21 @@
       new password.
 
   Send-test button: fires POST /channels/{id}/test on the
-  CURRENTLY-STORED channel (edit mode only — a not-yet-
-  persisted draft has no ID). On create the button is
-  hidden; the operator can test after first save.
+  CURRENTLY-STORED channel. The backend has no endpoint that
+  tests an unsaved config (internal/api/routes.go mounts only
+  /settings/alerting/channels/{id}/test, and testAlertChannel
+  loads the channel from the store by ID), so on create the
+  button becomes "Create and send a test": it saves the channel,
+  then fires the same endpoint on the new ID.
+
+  Validation errors sit next to the field they concern
+  (aria-invalid + aria-describedby); a count sits next to the
+  footer buttons, and submit focuses the first invalid field.
+  Errors appear on the first submit attempt and then follow the
+  form live, so fixing a field clears its message.
 -->
 <script lang="ts">
+	import { tick } from 'svelte';
 	import {
 		alertingApi,
 		SEVERITY_TOKENS,
@@ -98,7 +108,15 @@
 
 	let submitting = $state(false);
 	let testing = $state(false);
-	let validationError = $state('');
+	// True while the create-mode "Create and send a test" flow runs,
+	// so only that button shows the spinner.
+	let creatingThenTesting = $state(false);
+	// Set by the first submit attempt: errors are not shown on a
+	// pristine form, then follow the fields live.
+	let attempted = $state(false);
+	// An error that belongs to no field (API refusal, network).
+	let formError = $state('');
+	let formEl: HTMLFormElement | undefined = $state(undefined);
 
 	// Reset the form when the modal opens or the target
 	// channel changes. The reactive guard means edit-mode
@@ -106,7 +124,8 @@
 	// resets to clean defaults.
 	$effect(() => {
 		if (!open) return;
-		validationError = '';
+		attempted = false;
+		formError = '';
 		if (channel) {
 			name = channel.name;
 			enabled = channel.enabled;
@@ -214,41 +233,146 @@
 			.filter((s) => s.length > 0);
 	}
 
-	function buildRequest(): AlertChannelRequest | null {
-		if (!name.trim()) {
-			validationError = t('alerting.channelModal.errNameRequired');
-			return null;
-		}
+	/**
+	 * DOM ids of the validated fields. Each error is keyed by the id of
+	 * the control it concerns, so the message renders next to it as
+	 * `${id}-err` and the control points at it via aria-describedby.
+	 */
+	const FIELD = {
+		name: 'channel-name',
+		discordUrl: 'discord-url',
+		discordTimeout: 'discord-timeout',
+		discordMentionUsers: 'discord-mention-users',
+		discordMentionRoles: 'discord-mention-roles',
+		webhookUrl: 'webhook-url',
+		webhookTimeout: 'webhook-timeout',
+		smtpHost: 'smtp-host',
+		smtpPort: 'smtp-port',
+		from: 'email-from'
+	} as const;
+
+	function toFieldId(i: number): string {
+		return `email-to-${i}`;
+	}
+
+	const DISCORD_URL_RE = /^https:\/\/(discord|discordapp)\.com\//;
+	const HTTP_URL_RE = /^https?:\/\//;
+	const NUMERIC_ID_RE = /^\d+$/;
+	const TIMEOUT_MIN = 1;
+	const TIMEOUT_MAX = 60;
+	const PORT_MIN = 1;
+	const PORT_MAX = 65535;
+
+	function outOfRange(v: number | null | undefined, min: number, max: number): boolean {
+		return typeof v !== 'number' || Number.isNaN(v) || v < min || v > max;
+	}
+
+	/**
+	 * Every field error of the current form, keyed by field id.
+	 *
+	 * Pure: reads the form state, writes nothing, so it can back a
+	 * $derived and the messages follow the operator's edits.
+	 */
+	function validate(): Record<string, string> {
+		const errs: Record<string, string> = {};
+		if (!name.trim()) errs[FIELD.name] = t('alerting.channelModal.errNameRequired');
+
 		if (kind === 'discord') {
-			if (!discordUrl.trim()) {
-				validationError = t('alerting.channelModal.errDiscordUrlRequired');
-				return null;
+			const url = discordUrl.trim();
+			if (!url) {
+				errs[FIELD.discordUrl] = t('alerting.channelModal.errDiscordUrlRequired');
+			} else if (!DISCORD_URL_RE.test(url)) {
+				// Mirrors the Go validator so the refusal arrives while the
+				// operator is looking at the field, not as a 400 afterwards.
+				errs[FIELD.discordUrl] = t('alerting.channelModal.errDiscordUrlHost');
 			}
-			// Mirrors the Go validator so the refusal arrives while the
-			// operator is looking at the field, not as a 400 afterwards.
-			if (!/^https:\/\/(discord|discordapp)\.com\//.test(discordUrl.trim())) {
-				validationError = t('alerting.channelModal.errDiscordUrlHost');
-				return null;
+			if (outOfRange(discordTimeout, TIMEOUT_MIN, TIMEOUT_MAX)) {
+				errs[FIELD.discordTimeout] = t('alerting.channelModal.errTimeoutRange');
 			}
-			if (discordTimeout < 1 || discordTimeout > 60) {
-				validationError = t('alerting.channelModal.errTimeoutRange');
-				return null;
-			}
-			const users = parseMentionIds(discordMentionUsers);
-			const roles = parseMentionIds(discordMentionRoles);
 			// A name instead of an ID is the mistake worth catching here: it
 			// would save cleanly and then notify nobody, with no error
 			// anywhere. Mirrors the Go validator.
-			const badUser = users.find((id) => !/^\d+$/.test(id));
+			const badUser = parseMentionIds(discordMentionUsers).find((id) => !NUMERIC_ID_RE.test(id));
 			if (badUser !== undefined) {
-				validationError = t('alerting.channelModal.errDiscordMentionUser', { value: badUser });
-				return null;
+				errs[FIELD.discordMentionUsers] = t('alerting.channelModal.errDiscordMentionUser', {
+					value: badUser
+				});
 			}
-			const badRole = roles.find((id) => !/^\d+$/.test(id));
+			const badRole = parseMentionIds(discordMentionRoles).find((id) => !NUMERIC_ID_RE.test(id));
 			if (badRole !== undefined) {
-				validationError = t('alerting.channelModal.errDiscordMentionRole', { value: badRole });
-				return null;
+				errs[FIELD.discordMentionRoles] = t('alerting.channelModal.errDiscordMentionRole', {
+					value: badRole
+				});
 			}
+			return errs;
+		}
+
+		if (kind === 'webhook') {
+			const url = webhookUrl.trim();
+			if (!url) {
+				errs[FIELD.webhookUrl] = t('alerting.channelModal.errWebhookUrlRequired');
+			} else if (!HTTP_URL_RE.test(url)) {
+				errs[FIELD.webhookUrl] = t('alerting.channelModal.errWebhookUrlScheme');
+			}
+			if (outOfRange(webhookTimeout, TIMEOUT_MIN, TIMEOUT_MAX)) {
+				errs[FIELD.webhookTimeout] = t('alerting.channelModal.errTimeoutRange');
+			}
+			return errs;
+		}
+
+		// email
+		if (!smtpHost.trim()) errs[FIELD.smtpHost] = t('alerting.channelModal.errSmtpHostRequired');
+		if (outOfRange(smtpPort, PORT_MIN, PORT_MAX)) {
+			errs[FIELD.smtpPort] = t('alerting.channelModal.errSmtpPortRange');
+		}
+		if (!from.trim() || !from.includes('@')) {
+			errs[FIELD.from] = t('alerting.channelModal.errFromEmail');
+		}
+		let anyTo = false;
+		toList.forEach((raw, i) => {
+			const addr = raw.trim();
+			if (addr === '') return;
+			anyTo = true;
+			if (!addr.includes('@')) {
+				errs[toFieldId(i)] = t('alerting.channelModal.errInvalidAddress', { addr });
+			}
+		});
+		if (!anyTo) errs[toFieldId(0)] = t('alerting.channelModal.errAtLeastOneTo');
+		return errs;
+	}
+
+	// Recomputed on every edit; only displayed once a submit was tried.
+	const liveErrors = $derived(validate());
+	const shownErrors: Record<string, string> = $derived(attempted ? liveErrors : {});
+	const errorCount = $derived(Object.keys(shownErrors).length);
+
+	/** aria-describedby value for a raw control: its error, if any. */
+	function describedBy(id: string): string | undefined {
+		return shownErrors[id] ? `${id}-err` : undefined;
+	}
+
+	/** Border token for a raw control, red when it carries an error. */
+	function borderFor(id: string): string {
+		return shownErrors[id] ? 'border-down' : 'border-border-default';
+	}
+
+	/** Moves focus to the first invalid control, in DOM order. */
+	async function focusFirstInvalid() {
+		await tick();
+		const el = formEl?.querySelector<HTMLElement>('[aria-invalid="true"]');
+		if (!el) return;
+		el.focus();
+		// jsdom has no scrollIntoView; browsers do.
+		if (typeof el.scrollIntoView === 'function') {
+			el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+		}
+	}
+
+	/** Builds the API request. Call only once validate() is empty. */
+	function buildRequest(): AlertChannelRequest {
+		if (kind === 'discord') {
+			const users = parseMentionIds(discordMentionUsers);
+			const roles = parseMentionIds(discordMentionRoles);
 			const cfg: DiscordConfig = {
 				webhookUrl: discordUrl.trim(),
 				username: discordUsername.trim() || undefined,
@@ -259,18 +383,6 @@
 			return { name: name.trim(), kind: 'discord', enabled, minSeverity, config: cfg };
 		}
 		if (kind === 'webhook') {
-			if (!webhookUrl.trim()) {
-				validationError = t('alerting.channelModal.errWebhookUrlRequired');
-				return null;
-			}
-			if (!/^https?:\/\//.test(webhookUrl)) {
-				validationError = t('alerting.channelModal.errWebhookUrlScheme');
-				return null;
-			}
-			if (webhookTimeout < 1 || webhookTimeout > 60) {
-				validationError = t('alerting.channelModal.errTimeoutRange');
-				return null;
-			}
 			const headers: Record<string, string> = {};
 			for (const h of webhookHeaders) {
 				if (h.key.trim() === '') continue;
@@ -292,29 +404,7 @@
 			};
 		}
 		// email
-		if (!smtpHost.trim()) {
-			validationError = t('alerting.channelModal.errSmtpHostRequired');
-			return null;
-		}
-		if (smtpPort < 1 || smtpPort > 65535) {
-			validationError = t('alerting.channelModal.errSmtpPortRange');
-			return null;
-		}
-		if (!from.trim() || !from.includes('@')) {
-			validationError = t('alerting.channelModal.errFromEmail');
-			return null;
-		}
 		const tos = toList.map((s) => s.trim()).filter((s) => s !== '');
-		if (tos.length === 0) {
-			validationError = t('alerting.channelModal.errAtLeastOneTo');
-			return null;
-		}
-		for (const addr of tos) {
-			if (!addr.includes('@')) {
-				validationError = t('alerting.channelModal.errInvalidAddress', { addr });
-				return null;
-			}
-		}
 		const cc = ccList.map((s) => s.trim()).filter((s) => s !== '');
 		const bcc = bccList.map((s) => s.trim()).filter((s) => s !== '');
 		// Password: edit + unchecked → send "" so backend
@@ -346,61 +436,118 @@
 		};
 	}
 
-	async function onSubmit(e: SubmitEvent) {
-		e.preventDefault();
-		validationError = '';
-		const req = buildRequest();
-		if (!req) return;
-		submitting = true;
-		try {
-			if (channel) {
-				await channelsStore.update(channel.id, req);
-				pushToast(t('alerting.channelModal.toastSaved', { name: req.name }), 'success');
-			} else {
-				await channelsStore.create(req);
-				pushToast(t('alerting.channelModal.toastCreated', { name: req.name }), 'success');
-			}
-			onSaved();
-		} catch (err) {
-			const msg = err instanceof ApiError ? err.message : t('alerting.networkError');
-			validationError = msg;
-		} finally {
-			submitting = false;
-		}
-	}
-
-	async function onTest() {
-		if (!channel) return;
+	/**
+	 * Fires the test endpoint on a stored channel and reports the
+	 * outcome as a toast. Never throws: a failed test is information,
+	 * not a reason to keep the modal open.
+	 */
+	async function runTest(id: string, channelName: string) {
 		testing = true;
 		try {
-			const res = await alertingApi.testChannel(channel.id);
+			const res = await alertingApi.testChannel(id);
 			if (res.ok) {
-				pushToast(t('alerting.channelModal.toastTestedOk', { name: channel.name }), 'success');
+				pushToast(t('alerting.channelModal.toastTestedOk', { name: channelName }), 'success');
 			} else {
 				pushToast(
-					t('alerting.channelModal.toastTestedFail', { name: channel.name, err: res.error ?? t('alerting.channelModal.toastUnknownErr') }),
+					t('alerting.channelModal.toastTestedFail', {
+						name: channelName,
+						err: res.error ?? t('alerting.channelModal.toastUnknownErr')
+					}),
 					'danger'
 				);
 			}
 		} catch (err) {
 			const msg = err instanceof ApiError ? err.message : t('alerting.networkError');
-			pushToast(t('alerting.channelModal.toastTestErr', { name: channel.name, err: msg }), 'danger');
+			pushToast(t('alerting.channelModal.toastTestErr', { name: channelName, err: msg }), 'danger');
 		} finally {
 			testing = false;
 		}
 	}
+
+	/**
+	 * Validates, then creates or updates the channel. With thenTest
+	 * (create mode only) the new channel is tested right after it is
+	 * stored: the backend can only test a channel that has an ID.
+	 */
+	async function save(thenTest: boolean) {
+		attempted = true;
+		formError = '';
+		if (Object.keys(validate()).length > 0) {
+			await focusFirstInvalid();
+			return;
+		}
+		const req = buildRequest();
+		submitting = true;
+		creatingThenTesting = thenTest;
+		let created: AlertChannel | null = null;
+		try {
+			if (channel) {
+				await channelsStore.update(channel.id, req);
+				pushToast(t('alerting.channelModal.toastSaved', { name: req.name }), 'success');
+			} else {
+				created = await channelsStore.create(req);
+				pushToast(t('alerting.channelModal.toastCreated', { name: req.name }), 'success');
+			}
+		} catch (err) {
+			formError = err instanceof ApiError ? err.message : t('alerting.networkError');
+			submitting = false;
+			creatingThenTesting = false;
+			return;
+		}
+		// The channel exists from here on: whatever the test says, the
+		// modal must close, or a second click would create a duplicate.
+		if (thenTest && created) {
+			await runTest(created.id, created.name || req.name);
+		}
+		submitting = false;
+		creatingThenTesting = false;
+		onSaved();
+	}
+
+	function onSubmit(e: SubmitEvent) {
+		e.preventDefault();
+		void save(false);
+	}
+
+	async function onTest() {
+		if (!channel) return;
+		await runTest(channel.id, channel.name);
+	}
 </script>
 
+<!-- Error line under a raw control. The Input component renders its
+     own, with the same `${id}-err` id. -->
+{#snippet fieldError(id: string)}
+	{#if shownErrors[id]}
+		<p id={`${id}-err`} class="text-xs text-down mt-1">{shownErrors[id]}</p>
+	{/if}
+{/snippet}
+
 <Modal {open} title={language.current && (isEdit ? t('alerting.channelModal.titleEdit') : t('alerting.channelModal.titleCreate'))} {onClose} width="lg">
-	<form onsubmit={onSubmit} class="space-y-4">
+	<!-- novalidate: the browser bubbles would duplicate (and pre-empt)
+	     the messages rendered next to each field. The body scrolls so
+	     the footer — buttons and error count — stays in view. -->
+	<form
+		bind:this={formEl}
+		onsubmit={onSubmit}
+		novalidate
+		class="space-y-4"
+	>
 		<!-- Common fields -->
-		<Input bind:value={name} label={language.current && t('alerting.channelModal.labelName')} placeholder={t('alerting.channelModal.placeholderName')} required />
+		<Input
+			id={FIELD.name}
+			bind:value={name}
+			label={language.current && t('alerting.channelModal.labelName')}
+			placeholder={t('alerting.channelModal.placeholderName')}
+			error={shownErrors[FIELD.name]}
+			required
+		/>
 
 		<div class="flex items-center gap-4">
 			<Checkbox bind:checked={enabled} label={language.current && t('alerting.channelModal.labelEnabled')} />
 		</div>
 
-		<div class="grid grid-cols-2 gap-4">
+		<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 			<div>
 				<label for="channel-kind" class="text-sm font-medium text-secondary mb-1.5 block">
 					{language.current && t('alerting.channelModal.labelType')}
@@ -455,14 +602,17 @@
 					{language.current && t('alerting.channelModal.labelDiscordUrl')}
 				</label>
 				<input
-					id="discord-url"
+					id={FIELD.discordUrl}
 					type="text"
 					bind:value={discordUrl}
 					placeholder="https://discord.com/api/webhooks/…"
 					data-testid="discord-url"
-					class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono"
+					aria-invalid={shownErrors[FIELD.discordUrl] ? 'true' : undefined}
+					aria-describedby={[describedBy(FIELD.discordUrl), 'discord-url-hint'].filter(Boolean).join(' ')}
+					class="w-full bg-surface border {borderFor(FIELD.discordUrl)} rounded-md px-3 py-2 text-sm text-primary font-mono"
 				/>
-				<p class="text-xs text-secondary mt-1">
+				{@render fieldError(FIELD.discordUrl)}
+				<p id="discord-url-hint" class="text-xs text-secondary mt-1">
 					{language.current && t('alerting.channelModal.hintDiscordUrl')}
 				</p>
 			</div>
@@ -484,14 +634,17 @@
 						{language.current && t('alerting.channelModal.labelTimeout')}
 					</label>
 					<input
-						id="discord-timeout"
+						id={FIELD.discordTimeout}
 						type="number"
 						min="1"
 						max="60"
 						bind:value={discordTimeout}
 						data-testid="discord-timeout"
-						class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary"
+						aria-invalid={shownErrors[FIELD.discordTimeout] ? 'true' : undefined}
+						aria-describedby={describedBy(FIELD.discordTimeout)}
+						class="w-full bg-surface border {borderFor(FIELD.discordTimeout)} rounded-md px-3 py-2 text-sm text-primary"
 					/>
+					{@render fieldError(FIELD.discordTimeout)}
 				</div>
 			</div>
 			<!-- v2.54 — mentions.
@@ -506,29 +659,35 @@
 						{language.current && t('alerting.channelModal.labelDiscordMentionUsers')}
 					</label>
 					<input
-						id="discord-mention-users"
+						id={FIELD.discordMentionUsers}
 						type="text"
 						bind:value={discordMentionUsers}
 						placeholder="306162232765874176, 847291046728394112"
 						data-testid="discord-mention-users"
-						class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono"
+						aria-invalid={shownErrors[FIELD.discordMentionUsers] ? 'true' : undefined}
+						aria-describedby={[describedBy(FIELD.discordMentionUsers), 'discord-mentions-hint'].filter(Boolean).join(' ')}
+						class="w-full bg-surface border {borderFor(FIELD.discordMentionUsers)} rounded-md px-3 py-2 text-sm text-primary font-mono"
 					/>
+					{@render fieldError(FIELD.discordMentionUsers)}
 				</div>
 				<div>
 					<label for="discord-mention-roles" class="text-sm font-medium text-secondary mb-1.5 block">
 						{language.current && t('alerting.channelModal.labelDiscordMentionRoles')}
 					</label>
 					<input
-						id="discord-mention-roles"
+						id={FIELD.discordMentionRoles}
 						type="text"
 						bind:value={discordMentionRoles}
 						placeholder="1180422398765432100"
 						data-testid="discord-mention-roles"
-						class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono"
+						aria-invalid={shownErrors[FIELD.discordMentionRoles] ? 'true' : undefined}
+						aria-describedby={[describedBy(FIELD.discordMentionRoles), 'discord-mentions-hint'].filter(Boolean).join(' ')}
+						class="w-full bg-surface border {borderFor(FIELD.discordMentionRoles)} rounded-md px-3 py-2 text-sm text-primary font-mono"
 					/>
+					{@render fieldError(FIELD.discordMentionRoles)}
 				</div>
 			</div>
-			<p class="text-xs text-secondary">
+			<p id="discord-mentions-hint" class="text-xs text-secondary">
 				{language.current && t('alerting.channelModal.hintDiscordMentions')}
 			</p>
 		{/if}
@@ -540,13 +699,15 @@
 				</p>
 			{/if}
 			<Input
+				id={FIELD.webhookUrl}
 				bind:value={webhookUrl}
 				label={language.current && t('alerting.channelModal.labelWebhookUrl')}
 				placeholder={t('alerting.channelModal.placeholderWebhookUrl')}
+				error={shownErrors[FIELD.webhookUrl]}
 				required
 			/>
 
-			<div class="grid grid-cols-2 gap-4">
+			<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 				<div>
 					<label
 						for="webhook-method"
@@ -571,13 +732,16 @@
 						{language.current && t('alerting.channelModal.labelTimeout')}
 					</label>
 					<input
-						id="webhook-timeout"
+						id={FIELD.webhookTimeout}
 						type="number"
 						bind:value={webhookTimeout}
 						min="1"
 						max="60"
-						class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary"
+						aria-invalid={shownErrors[FIELD.webhookTimeout] ? 'true' : undefined}
+						aria-describedby={describedBy(FIELD.webhookTimeout)}
+						class="w-full bg-surface border {borderFor(FIELD.webhookTimeout)} rounded-md px-3 py-2 text-sm text-primary"
 					/>
+					{@render fieldError(FIELD.webhookTimeout)}
 				</div>
 			</div>
 
@@ -644,27 +808,32 @@
 
 		<!-- Email fields -->
 		{#if kind === 'email'}
-			<div class="grid grid-cols-3 gap-4">
-				<div class="col-span-2">
+			<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+				<div class="sm:col-span-2">
 					<Input
+						id={FIELD.smtpHost}
 						bind:value={smtpHost}
 						label={language.current && t('alerting.channelModal.labelSmtpHost')}
 						placeholder={t('alerting.channelModal.placeholderSmtpHost')}
+						error={shownErrors[FIELD.smtpHost]}
 						required
 					/>
 				</div>
 				<div>
-					<label for="smtp-port" class="text-sm font-medium text-secondary mb-1.5 block">
+					<label for={FIELD.smtpPort} class="text-sm font-medium text-secondary mb-1.5 block">
 						{language.current && t('alerting.channelModal.labelSmtpPort')}
 					</label>
 					<input
-						id="smtp-port"
+						id={FIELD.smtpPort}
 						type="number"
 						bind:value={smtpPort}
 						min="1"
 						max="65535"
-						class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary"
+						aria-invalid={shownErrors[FIELD.smtpPort] ? 'true' : undefined}
+						aria-describedby={describedBy(FIELD.smtpPort)}
+						class="w-full bg-surface border {borderFor(FIELD.smtpPort)} rounded-md px-3 py-2 text-sm text-primary"
 					/>
+					{@render fieldError(FIELD.smtpPort)}
 				</div>
 			</div>
 
@@ -708,10 +877,12 @@
 			</div>
 
 			<Input
+				id={FIELD.from}
 				bind:value={from}
 				label={language.current && t('alerting.channelModal.labelFrom')}
 				type="email"
 				placeholder={t('alerting.channelModal.placeholderFromEmail')}
+				error={shownErrors[FIELD.from]}
 				required
 			/>
 
@@ -729,7 +900,12 @@
 				<div class="space-y-2">
 					{#each toList as _r, i (i)}
 						<div class="flex gap-2 items-start">
-							<Input bind:value={toList[i]} placeholder={t('alerting.channelModal.placeholderTo')} />
+							<Input
+								id={toFieldId(i)}
+								bind:value={toList[i]}
+								placeholder={t('alerting.channelModal.placeholderTo')}
+								error={shownErrors[toFieldId(i)]}
+							/>
 							{#if toList.length > 1}
 								<Button
 									variant="ghost"
@@ -869,37 +1045,75 @@
 			</div>
 		{/if}
 
-		{#if validationError}
-			<div
-				class="p-3 rounded bg-down/10 border border-down text-down text-sm"
-				role="alert"
-			>
-				{validationError}
-			</div>
+		{#if !isEdit}
+			<!-- The backend tests stored channels only (POST
+			     /channels/{id}/test), so the create-mode test button
+			     says up front that it saves first. -->
+			<p id="channel-create-test-hint" class="text-xs text-secondary">
+				{language.current && t('alerting.channelModal.hintCreateAndTest')}
+			</p>
 		{/if}
 	</form>
 
 	{#snippet footer()}
-		{#if isEdit}
-			<Button
-				variant="secondary"
-				onclick={onTest}
-				disabled={testing || submitting}
-				loading={testing}
-			>
-				{#snippet children()}{language.current && t('alerting.channelModal.btnSendTest')}{/snippet}
+		<div class="flex w-full flex-wrap items-center justify-end gap-2">
+			{#if errorCount > 0 || formError}
+				<div
+					class="mr-auto flex flex-wrap items-center gap-x-2 text-sm text-down"
+					data-testid="channel-form-summary"
+				>
+					<p role="alert">
+						{#if errorCount > 0}
+							{language.current &&
+								(errorCount === 1
+									? t('alerting.channelModal.errSummaryOne')
+									: t('alerting.channelModal.errSummaryMany', { count: errorCount }))}
+						{:else}
+							{formError}
+						{/if}
+					</p>
+					{#if errorCount > 0}
+						<button
+							type="button"
+							class="underline hover:no-underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan"
+							onclick={focusFirstInvalid}
+						>
+							{language.current && t('alerting.channelModal.btnGoToError')}
+						</button>
+					{/if}
+				</div>
+			{/if}
+			{#if isEdit}
+				<Button
+					variant="secondary"
+					onclick={onTest}
+					disabled={testing || submitting}
+					loading={testing}
+				>
+					{#snippet children()}{language.current && t('alerting.channelModal.btnSendTest')}{/snippet}
+				</Button>
+			{:else}
+				<Button
+					variant="secondary"
+					onclick={() => save(true)}
+					disabled={testing || submitting}
+					loading={creatingThenTesting}
+					aria-describedby="channel-create-test-hint"
+				>
+					{#snippet children()}{language.current && t('alerting.channelModal.btnCreateAndTest')}{/snippet}
+				</Button>
+			{/if}
+			<Button variant="ghost" onclick={onClose} disabled={submitting}>
+				{#snippet children()}{language.current && t('alerting.channelModal.btnCancel')}{/snippet}
 			</Button>
-		{/if}
-		<Button variant="ghost" onclick={onClose} disabled={submitting}>
-			{#snippet children()}{language.current && t('alerting.channelModal.btnCancel')}{/snippet}
-		</Button>
-		<Button
-			variant="primary"
-			onclick={(e) => onSubmit(e as unknown as SubmitEvent)}
-			disabled={submitting}
-			loading={submitting}
-		>
-			{#snippet children()}{language.current && (isEdit ? t('alerting.channelModal.btnSave') : t('alerting.channelModal.btnCreate'))}{/snippet}
-		</Button>
+			<Button
+				variant="primary"
+				onclick={(e) => onSubmit(e as unknown as SubmitEvent)}
+				disabled={submitting || testing}
+				loading={submitting && !creatingThenTesting}
+			>
+				{#snippet children()}{language.current && (isEdit ? t('alerting.channelModal.btnSave') : t('alerting.channelModal.btnCreate'))}{/snippet}
+			</Button>
+		</div>
 	{/snippet}
 </Modal>

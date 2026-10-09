@@ -16,6 +16,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import type { AlertChannel, AlertChannelRequest } from '$lib/api/alerting';
+import { ApiError } from '$lib/api/types';
 
 const createMock = vi.fn();
 const updateMock = vi.fn();
@@ -425,5 +426,205 @@ describe('ChannelModal — lost webhook URL', () => {
 
 		expect(screen.queryByTestId('channel-secrets-lost')).toBeNull();
 		expect((screen.getByLabelText(/URL/i) as HTMLInputElement).value).not.toBe('');
+	});
+});
+
+// The only error display used to be one line at the bottom of a long
+// form, out of sight of the field it was about. Each error now sits
+// under its field, the field says so to assistive tech, a count sits
+// by the buttons, and submit lands the operator on the first one.
+describe('ChannelModal — field errors', () => {
+	it('shows the error under its field, wired with aria-invalid / aria-describedby', async () => {
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		render(Modal, { props: { open: true, channel: null, onClose: () => {}, onSaved: () => {} } });
+
+		await fireEvent.input(screen.getByLabelText(/^Name$/i), { target: { value: 'ops' } });
+		await fireEvent.click(screen.getByText('Create'));
+
+		const url = screen.getByLabelText(/^URL$/i) as HTMLInputElement;
+		await waitFor(() => expect(url).toHaveAttribute('aria-invalid', 'true'));
+		const errId = url.getAttribute('aria-describedby');
+		expect(errId).toBeTruthy();
+		expect(document.getElementById(errId as string)?.textContent).toMatch(/webhook URL is required/i);
+		// The valid field is left alone.
+		expect(screen.getByLabelText(/^Name$/i)).not.toHaveAttribute('aria-invalid');
+		// A count by the footer buttons, not a copy of the message.
+		expect(screen.getByTestId('channel-form-summary').textContent).toMatch(/1 field needs fixing/i);
+	});
+
+	it('gives each invalid field its own message', async () => {
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		render(Modal, { props: { open: true, channel: null, onClose: () => {}, onSaved: () => {} } });
+
+		await fireEvent.input(screen.getByLabelText(/^URL$/i), { target: { value: 'ftp://bad' } });
+		await fireEvent.input(screen.getByLabelText(/Timeout/i), { target: { value: '0' } });
+		await fireEvent.click(screen.getByText('Create'));
+
+		await waitFor(() => expect(screen.getByText(/name is required/i)).toBeTruthy());
+		expect(screen.getByText(/http:\/\/ or https:\/\//i)).toBeTruthy();
+		expect(screen.getByText(/between 1 and 60/i)).toBeTruthy();
+		expect(screen.getByLabelText(/Timeout/i)).toHaveAttribute('aria-invalid', 'true');
+		expect(screen.getByTestId('channel-form-summary').textContent).toMatch(/3 fields need fixing/i);
+		expect(createMock).not.toHaveBeenCalled();
+	});
+
+	it('focuses the first invalid field on submit, in form order', async () => {
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		render(Modal, { props: { open: true, channel: null, onClose: () => {}, onSaved: () => {} } });
+
+		await fireEvent.input(screen.getByLabelText(/^Name$/i), { target: { value: 'ops' } });
+		// Two invalid fields: URL comes first in the form, timeout after.
+		await fireEvent.input(screen.getByLabelText(/Timeout/i), { target: { value: '99' } });
+		await fireEvent.click(screen.getByText('Create'));
+
+		await waitFor(() => expect(screen.getByLabelText(/^URL$/i)).toHaveFocus());
+	});
+
+	it('focuses an invalid email recipient row', async () => {
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		render(Modal, { props: { open: true, channel: null, onClose: () => {}, onSaved: () => {} } });
+
+		await fireEvent.change(screen.getByLabelText(/^Type$/i), { target: { value: 'email' } });
+		await fireEvent.input(screen.getByLabelText(/^Name$/i), { target: { value: 'mail' } });
+		await fireEvent.input(screen.getByLabelText(/SMTP host/i), { target: { value: 'smtp.example.com' } });
+		await fireEvent.input(screen.getByLabelText(/^From$/i), { target: { value: 'a@example.com' } });
+		const to = screen.getByPlaceholderText('ops@example.com') as HTMLInputElement;
+		await fireEvent.input(to, { target: { value: 'not-an-address' } });
+		await fireEvent.click(screen.getByText('Create'));
+
+		await waitFor(() => expect(to).toHaveFocus());
+		expect(to).toHaveAttribute('aria-invalid', 'true');
+		expect(screen.getByText(/not-an-address/)).toBeTruthy();
+	});
+
+	it('clears a field error once the field is fixed', async () => {
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		render(Modal, { props: { open: true, channel: null, onClose: () => {}, onSaved: () => {} } });
+
+		await fireEvent.input(screen.getByLabelText(/^Name$/i), { target: { value: 'ops' } });
+		await fireEvent.click(screen.getByText('Create'));
+		await waitFor(() => expect(screen.getByText(/webhook URL is required/i)).toBeTruthy());
+
+		await fireEvent.input(screen.getByLabelText(/^URL$/i), {
+			target: { value: 'https://hooks.example.com/x' }
+		});
+		expect(screen.queryByText(/webhook URL is required/i)).toBeNull();
+		expect(screen.getByLabelText(/^URL$/i)).not.toHaveAttribute('aria-invalid');
+		expect(screen.queryByTestId('channel-form-summary')).toBeNull();
+	});
+
+	it('shows no error before the first submit attempt', async () => {
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		render(Modal, { props: { open: true, channel: null, onClose: () => {}, onSaved: () => {} } });
+
+		expect(screen.queryByTestId('channel-form-summary')).toBeNull();
+		expect(screen.getByLabelText(/^URL$/i)).not.toHaveAttribute('aria-invalid');
+	});
+
+	it('puts an API refusal in the footer summary', async () => {
+		createMock.mockRejectedValue(new ApiError('name already taken', 409));
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		const onSaved = vi.fn();
+		render(Modal, { props: { open: true, channel: null, onClose: () => {}, onSaved } });
+
+		await fireEvent.input(screen.getByLabelText(/^Name$/i), { target: { value: 'ops' } });
+		await fireEvent.input(screen.getByLabelText(/^URL$/i), {
+			target: { value: 'https://hooks.example.com/x' }
+		});
+		await fireEvent.click(screen.getByText('Create'));
+
+		await waitFor(() =>
+			expect(screen.getByTestId('channel-form-summary').textContent).toMatch(/name already taken/)
+		);
+		expect(onSaved).not.toHaveBeenCalled();
+	});
+});
+
+// The backend tests only a stored channel: routes.go mounts
+// POST /settings/alerting/channels/{id}/test and nothing that takes an
+// unsaved config. So create mode offers "Create and send a test",
+// which saves, then fires the existing endpoint on the new ID.
+describe('ChannelModal — testing from create mode', () => {
+	async function fillValidWebhook() {
+		await fireEvent.input(screen.getByLabelText(/^Name$/i), { target: { value: 'ops-webhook' } });
+		await fireEvent.input(screen.getByLabelText(/^URL$/i), {
+			target: { value: 'https://hooks.example.com/x' }
+		});
+	}
+
+	it('offers "Create and send a test" in create mode, and "Send test" only in edit mode', async () => {
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		const { unmount } = render(Modal, {
+			props: { open: true, channel: null, onClose: () => {}, onSaved: () => {} }
+		});
+		expect(screen.getByText('Create and send a test')).toBeTruthy();
+		expect(screen.queryByText('Send test')).toBeNull();
+		unmount();
+
+		render(Modal, {
+			props: { open: true, channel: webhookFixture(), onClose: () => {}, onSaved: () => {} }
+		});
+		expect(screen.getByText('Send test')).toBeTruthy();
+		expect(screen.queryByText('Create and send a test')).toBeNull();
+	});
+
+	it('creates the channel, then tests the new ID, then closes', async () => {
+		createMock.mockResolvedValue({ ...webhookFixture(), id: 'ch-new' });
+		testMock.mockResolvedValue({ ok: true });
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		const onSaved = vi.fn();
+		render(Modal, { props: { open: true, channel: null, onClose: () => {}, onSaved } });
+
+		await fillValidWebhook();
+		await fireEvent.click(screen.getByText('Create and send a test'));
+
+		await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+		expect(createMock).toHaveBeenCalledTimes(1);
+		expect(testMock).toHaveBeenCalledWith('ch-new');
+		// Create first: the test endpoint needs the ID it returns.
+		expect(createMock.mock.invocationCallOrder[0]).toBeLessThan(
+			testMock.mock.invocationCallOrder[0]
+		);
+		expect(pushToastMock).toHaveBeenCalledWith(expect.stringMatching(/send successful/i), 'success');
+	});
+
+	it('still closes when the test fails — the channel exists, a retry would duplicate it', async () => {
+		createMock.mockResolvedValue({ ...webhookFixture(), id: 'ch-new' });
+		testMock.mockResolvedValue({ ok: false, error: 'HTTP 404' });
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		const onSaved = vi.fn();
+		render(Modal, { props: { open: true, channel: null, onClose: () => {}, onSaved } });
+
+		await fillValidWebhook();
+		await fireEvent.click(screen.getByText('Create and send a test'));
+
+		await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+		expect(pushToastMock).toHaveBeenCalledWith(expect.stringMatching(/HTTP 404/), 'danger');
+	});
+
+	it('does not test when the creation is refused', async () => {
+		createMock.mockRejectedValue(new ApiError('name already taken', 409));
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		const onSaved = vi.fn();
+		render(Modal, { props: { open: true, channel: null, onClose: () => {}, onSaved } });
+
+		await fillValidWebhook();
+		await fireEvent.click(screen.getByText('Create and send a test'));
+
+		await waitFor(() => expect(screen.getByTestId('channel-form-summary')).toBeTruthy());
+		expect(testMock).not.toHaveBeenCalled();
+		expect(onSaved).not.toHaveBeenCalled();
+	});
+
+	it('validates before creating, like the Create button', async () => {
+		const Modal = (await import('./ChannelModal.svelte')).default;
+		render(Modal, { props: { open: true, channel: null, onClose: () => {}, onSaved: () => {} } });
+
+		await fireEvent.input(screen.getByLabelText(/^Name$/i), { target: { value: 'ops' } });
+		await fireEvent.click(screen.getByText('Create and send a test'));
+
+		await waitFor(() => expect(screen.getByLabelText(/^URL$/i)).toHaveFocus());
+		expect(createMock).not.toHaveBeenCalled();
+		expect(testMock).not.toHaveBeenCalled();
 	});
 });

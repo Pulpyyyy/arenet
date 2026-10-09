@@ -1371,7 +1371,12 @@
 			"hintDiscordMentions": "Discord IDs, separated by commas or spaces — not names. Everyone listed is notified on every alert this channel sends.",
 			"errDiscordMentionUser": "\"{value}\" is not a user ID. Discord notifies only on numeric IDs: turn on Developer Mode, then right-click the member and choose Copy User ID.",
 			"errDiscordMentionRole": "\"{value}\" is not a role ID. Discord notifies only on numeric IDs: turn on Developer Mode, then right-click the role and choose Copy Role ID.",
-			"errDiscordUrlHost": "That does not look like a Discord webhook URL (it must start with https://discord.com/ or https://discordapp.com/)."
+			"errDiscordUrlHost": "That does not look like a Discord webhook URL (it must start with https://discord.com/ or https://discordapp.com/).",
+			"btnCreateAndTest": "Create and send a test",
+			"hintCreateAndTest": "A channel can only be tested once it is saved: “Create and send a test” saves it, then sends a test alert through it.",
+			"errSummaryOne": "1 field needs fixing.",
+			"errSummaryMany": "{count} fields need fixing.",
+			"btnGoToError": "Go to the field"
 		},
 		"ruleModal": {
 			"titleEdit": "Edit rule",
