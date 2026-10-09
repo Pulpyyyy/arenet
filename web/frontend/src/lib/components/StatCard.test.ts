@@ -61,4 +61,32 @@ describe('StatCard', () => {
 		expect(down?.className).toContain('down');
 		expect(down?.textContent).toContain('2');
 	});
+
+	// The tiles were dead ends, and an abnormal value looked like any
+	// other. Both props are optional: a caller passing neither gets the
+	// same <div> as before.
+	it('is a plain block with no tone when neither href nor tone is set', () => {
+		render(StatCard, { props: { label: 'Routes', value: 9, testid: 'tile' } });
+		const tile = screen.getByTestId('tile');
+		expect(tile.tagName).toBe('DIV');
+		expect(tile.hasAttribute('href')).toBe(false);
+		expect(tile.hasAttribute('data-tone')).toBe(false);
+	});
+
+	it('becomes a link to the page behind the number when href is set', () => {
+		render(StatCard, {
+			props: { label: 'WAF blocked', value: 4, href: '/waf', testid: 'tile' }
+		});
+		const link = screen.getByRole('link');
+		expect(link).toBe(screen.getByTestId('tile'));
+		expect(link.getAttribute('href')).toBe('/waf');
+		// The whole tile is the link, so its name carries the reading.
+		expect(link.textContent).toContain('WAF blocked');
+		expect(link.textContent).toContain('4');
+	});
+
+	it('exposes the warn tone as data-tone', () => {
+		render(StatCard, { props: { label: '5xx', value: 3, tone: 'warn', testid: 'tile' } });
+		expect(screen.getByTestId('tile').getAttribute('data-tone')).toBe('warn');
+	});
 });

@@ -1062,11 +1062,11 @@
 		"updatedAtFailed": "Refresh failed · data from {time}",
 		"recentWafCardTitle": "Recent WAF events",
 		"recentWafCardMeta": "last 5",
+		"recentWafOpenLogs": "Open Logs →",
 		"recentWafEmpty": "No recent WAF events in the window.",
 		"recentWafPillDetect": "detect",
 		"recentWafPillBlock": "block",
 		"recentWafFromIp": "{method} {path} — from {ip}",
-		"tailEmpty": "No recent events.",
 		"certLifecycleTitle": "Certificate lifecycle",
 		"certLifecycleMeta": "last 30 days · 1 bucket / day",
 		"certLifecycleAria": "Certificate lifecycle over 30 days",
@@ -1084,10 +1084,10 @@
 		"topRoutesEmpty": "No data in the window.",
 		"upstreamsTitle": "Upstream services",
 		"upstreamsMetaCount": "{count} distinct",
+		"upstreamsMetaTruncated": "{shown} of {total} distinct",
+		"upstreamsSeeAll": "All in Routes →",
 		"upstreamsRouteSuffix": "{count} route{plural}",
-		"upstreamsEmpty": "No upstreams configured.",
-		"tailTitle": "WAF events — recent feed",
-		"tailOpenLogs": "Open Logs →"
+		"upstreamsEmpty": "No upstreams configured."
 	},
 	"users": {
 		"loadFailed": "Failed to load users: {err}",

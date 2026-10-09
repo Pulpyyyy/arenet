@@ -1062,11 +1062,11 @@
 		"updatedAtFailed": "Échec du rafraîchissement · données de {time}",
 		"recentWafCardTitle": "Événements WAF récents",
 		"recentWafCardMeta": "5 derniers",
+		"recentWafOpenLogs": "Ouvrir les Logs →",
 		"recentWafEmpty": "Aucun événement WAF récent dans la fenêtre.",
 		"recentWafPillDetect": "detect",
 		"recentWafPillBlock": "block",
 		"recentWafFromIp": "{method} {path} — depuis {ip}",
-		"tailEmpty": "Aucun événement récent.",
 		"certLifecycleTitle": "Cycle de vie des certificats",
 		"certLifecycleMeta": "30 derniers jours · 1 bucket / jour",
 		"certLifecycleAria": "Cycle de vie des certificats sur 30 jours",
@@ -1084,10 +1084,10 @@
 		"topRoutesEmpty": "Aucune donnée dans la fenêtre.",
 		"upstreamsTitle": "Services upstream",
 		"upstreamsMetaCount": "{count} distincts",
+		"upstreamsMetaTruncated": "{shown} sur {total} distincts",
+		"upstreamsSeeAll": "Tous dans Routes →",
 		"upstreamsRouteSuffix": "{count} route{plural}",
-		"upstreamsEmpty": "Aucun upstream configuré.",
-		"tailTitle": "Événements WAF — flux récent",
-		"tailOpenLogs": "Ouvrir les Logs →"
+		"upstreamsEmpty": "Aucun upstream configuré."
 	},
 	"users": {
 		"loadFailed": "Échec du chargement des utilisateurs : {err}",

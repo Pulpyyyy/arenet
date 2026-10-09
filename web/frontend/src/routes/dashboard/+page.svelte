@@ -22,9 +22,15 @@
     variant in v1.4 because per-service-name aggregation +
     health-rollup is not a backend feature today (tracked as a
     R.5 backlog candidate).
-  - Recent events tail card: derived from the same WAF events
-    stream, monospace-styled per mock; "ouvrir Logs →" link to
-    /logs (still a stub in v1.4 but routable).
+  - The "Live tail" card that used to close the page repeated the
+    same five WAF events as the recent-events card, in UTC while
+    the rest of the page reads local time. It is gone; its "Open
+    Logs →" link moved to the recent-events card header, which is
+    the one place those events are shown.
+
+  Each KPI tile links to the page behind its number, and the
+  alarm-type ones (5xx, WAF blocks, expiring / failed certs) take
+  the warn tone when above zero.
 
   Empty + disabled states preserved from Step L:
   - disabled (summary.disabled=true): single panel, no charts.
@@ -145,6 +151,13 @@
 	});
 	const kpiCertFailed7d = $derived(certFailed7d);
 
+	// Alarm-type tiles take the warn tone above zero. The 5xx tile reads
+	// the raw count, not the rounded percentage: one 5xx in a busy day
+	// rounds to 0.00 % and would otherwise go unflagged.
+	function alarmTone(n: number): 'default' | 'warn' {
+		return n > 0 ? 'warn' : 'default';
+	}
+
 	// The chart's series definition lives at module scope
 	// so the operator's theme-token references stay readable.
 	// status-up / accent-cyan / status-down map respectively
@@ -164,8 +177,11 @@
 	);
 
 	// Distinct upstream URLs across all routes — the v1.4 stand-in
-	// for the mock's per-service-name aggregation.
-	const upstreams = $derived(
+	// for the mock's per-service-name aggregation. The card shows the
+	// first UPSTREAMS_SHOWN; the header used to print that slice's
+	// length as if it were the total.
+	const UPSTREAMS_SHOWN = 8;
+	const allUpstreams = $derived(
 		(() => {
 			const seen = new Set<string>();
 			const result: Array<{ url: string; routes: string[] }> = [];
@@ -180,9 +196,10 @@
 					}
 				}
 			}
-			return result.slice(0, 8);
+			return result;
 		})()
 	);
+	const upstreams = $derived(allUpstreams.slice(0, UPSTREAMS_SHOWN));
 
 	async function load(): Promise<void> {
 		loading = true;
@@ -377,19 +394,32 @@
 	     which now carries this exact treatment plus the unit and the
 	     foot line the copy had and it lacked. -->
 	<div class="kpis">
+		<!--
+			Each tile leads to the page behind its number. Traffic,
+			latency and 5xx go to /routes, where each route's panel
+			breaks them down: /logs is the security-event log, it holds
+			no access log and so no 5xx to filter on.
+		-->
 		<StatCard
+			testid="kpi-req-per-sec"
+			href="/routes"
 			label={language.current && t('dashboard.kpiReqPerSec')}
 			value={kpiReqPerSec}
 			unit="req/s"
 			hint={language.current && t('dashboard.kpiReqPerSecFoot', { total: summary?.totalReq ?? 0, routes: summary?.activeRouteCount ?? 0 })}
 		/>
 		<StatCard
+			testid="kpi-p95"
+			href="/routes"
 			label={language.current && t('dashboard.kpiP95')}
 			value={fmtP95(kpiP95)}
 			unit="ms"
 			hint={language.current && (kpiP95 === null ? t('dashboard.kpiP95FootNoData') : t('dashboard.kpiP95FootData'))}
 		/>
 		<StatCard
+			testid="kpi-5xx"
+			href="/routes"
+			tone={alarmTone(summary?.totalFiveXx ?? 0)}
 			label={language.current && t('dashboard.kpi5xxRate')}
 			value={kpi5xxPct}
 			unit="%"
@@ -405,12 +435,15 @@
 		-->
 		<StatCard
 			testid="kpi-waf-blocked"
+			href="/waf"
+			tone={alarmTone(kpiWafBlocked24h)}
 			label={language.current && t('dashboard.kpiWafBlocked')}
 			value={kpiWafBlocked24h}
 			hint={language.current && t('dashboard.kpiWafBlockedFoot', { ips: summary?.attackerIpsUnique ?? 0, throttle: summary?.totalThrottle ?? 0, rl: summary?.totalRateLimitExceeded ?? 0 })}
 		/>
 		<StatCard
 			testid="kpi-waf-detected"
+			href="/waf"
 			label={language.current && t('dashboard.kpiWafDetected')}
 			value={kpiWafDetected24h}
 			hint={language.current && t('dashboard.kpiWafDetectedFoot')}
@@ -422,18 +455,23 @@
 		-->
 		<StatCard
 			testid="kpi-cert-total"
+			href="/certs"
 			label={language.current && t('dashboard.kpiCertTotal')}
 			value={kpiCertTotal}
 			hint={language.current && t('dashboard.kpiCertTotalFoot')}
 		/>
 		<StatCard
 			testid="kpi-cert-expiring"
+			href="/certs"
+			tone={alarmTone(kpiCertExpiringSoon)}
 			label={language.current && t('dashboard.kpiCertExpiring')}
 			value={kpiCertExpiringSoon}
 			hint={language.current && (kpiCertExpiringSoon === 0 ? t('dashboard.kpiCertExpiringFootZero') : t('dashboard.kpiCertExpiringFootWatch'))}
 		/>
 		<StatCard
 			testid="kpi-cert-failed-7d"
+			href="/certs"
+			tone={alarmTone(kpiCertFailed7d)}
 			label={language.current && t('dashboard.kpiCertFailed7d')}
 			value={kpiCertFailed7d}
 			hint={language.current && (kpiCertFailed7d === 0 ? t('dashboard.kpiCertFailedFootZero') : t('dashboard.kpiCertFailedFootInvestigate'))}
@@ -481,7 +519,10 @@
 		<div class="card">
 			<div class="card-h">
 				<h3>{language.current && t('dashboard.recentWafCardTitle')}</h3>
-				<div class="meta">{language.current && t('dashboard.recentWafCardMeta')}</div>
+				<div class="meta">
+					{language.current && t('dashboard.recentWafCardMeta')} ·
+					<a href="/logs" class="meta-link">{language.current && t('dashboard.recentWafOpenLogs')}</a>
+				</div>
 			</div>
 			<div class="stack">
 				{#each recentEvents as ev (ev.id)}
@@ -504,7 +545,9 @@
 							<b>{ev.category} · {ev.ruleId}</b>
 							<span>{language.current && t('dashboard.recentWafFromIp', { method: ev.requestMethod, path: ev.requestPath, ip: ev.srcIp })}</span>
 						</div>
-						<div class="when">{fmtRelative(ev.ts)}</div>
+						<div class="when" title={new Date(ev.ts).toLocaleString(language.current)}>
+							{fmtRelative(ev.ts)}
+						</div>
 					</div>
 				{:else}
 					<div class="empty-row">{language.current && t('dashboard.recentWafEmpty')}</div>
@@ -574,7 +617,20 @@
 		<div class="card">
 			<div class="card-h">
 				<h3>{language.current && t('dashboard.upstreamsTitle')}</h3>
-				<div class="meta">{language.current && t('dashboard.upstreamsMetaCount', { count: upstreams.length })}</div>
+				<div class="meta" data-testid="upstreams-meta">
+					{#if allUpstreams.length > upstreams.length}
+						{language.current &&
+							t('dashboard.upstreamsMetaTruncated', {
+								shown: upstreams.length,
+								total: allUpstreams.length
+							})} ·
+						<a href="/routes" class="meta-link" data-testid="upstreams-see-all"
+							>{language.current && t('dashboard.upstreamsSeeAll')}</a
+						>
+					{:else}
+						{language.current && t('dashboard.upstreamsMetaCount', { count: allUpstreams.length })}
+					{/if}
+				</div>
 			</div>
 			<div class="stack">
 				{#each upstreams as u (u.url)}
@@ -586,48 +642,6 @@
 					<div class="empty-row">{language.current && t('dashboard.upstreamsEmpty')}</div>
 				{/each}
 			</div>
-		</div>
-	</div>
-
-	<!-- Live tail preview -->
-	<div class="card tail-card">
-		<div class="card-h">
-			<h3>{language.current && t('dashboard.tailTitle')}</h3>
-			<div class="meta">
-				<a href="/logs" class="meta-link">{language.current && t('dashboard.tailOpenLogs')}</a>
-			</div>
-		</div>
-		<div class="logs">
-			{#each recentEvents as ev (`tail-${ev.id}`)}
-				<!--
-					#R-WAF-EVENT-LABEL-INCONSISTENT — second
-					hardcoded site. Same fix as the Recent WAF
-					events card above: read ev.action +
-					ev.statusCode rather than fabricating
-					"BLOCK 403" on every row. Status code on
-					detect events is 0 (the upstream's response
-					was unknown at WAF-decision time); render as
-					"—" to make the operator-honest "no value"
-					answer obvious.
-				-->
-				<div class="log-row" data-testid="tail-event-{ev.id}">
-					<span class="log-time">{new Date(ev.ts).toISOString().substring(11, 19)}</span>
-					<span class="log-lvl {ev.action === 'DETECT' ? 'detect' : 'block'}">
-						{ev.action}
-					</span>
-					<span class="mono">{ev.statusCode || '—'}</span>
-					<span class="log-msg">
-						<span class="k">{ev.requestMethod}</span>
-						{ev.requestPath}
-						<span class="k">·</span>
-						WAF {ev.ruleId}
-						<span class="k">·</span>
-						{ev.srcIp}
-					</span>
-				</div>
-			{:else}
-				<div class="empty-row">{language.current && t('dashboard.tailEmpty')}</div>
-			{/each}
 		</div>
 	</div>
 {/if}
@@ -765,29 +779,4 @@
 		font-size: 12.5px;
 	}
 	.upstream-row:last-child { border-bottom: none; }
-
-	.tail-card { margin-bottom: 18px; }
-	.logs { font-family: var(--font-mono); font-size: 11.5px; }
-	.log-row {
-		display: grid;
-		grid-template-columns: 80px 50px 40px 1fr;
-		gap: 10px;
-		padding: 4px 0;
-		color: var(--fg-muted);
-		align-items: baseline;
-	}
-	.log-time { color: var(--fg-dim); font-size: 11px; }
-	.log-lvl {
-		font-size: 10px;
-		padding: 1px 6px;
-		border-radius: 4px;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		text-align: center;
-	}
-	.log-lvl.block { background: color-mix(in oklch, var(--status-down) 18%, transparent); color: var(--status-down); }
-	/* #R-WAF-EVENT-LABEL-INCONSISTENT — amber detect log level, parallel to the .block red. */
-	.log-lvl.detect { background: color-mix(in oklch, var(--status-warn) 18%, transparent); color: var(--status-warn); }
-	.log-msg { color: var(--fg); }
-	.log-msg .k { color: var(--fg-dim); }
 </style>
