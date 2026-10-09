@@ -271,10 +271,13 @@ defaults; you'll typically touch 2–3 on a real install.
   | Path | Source IP the allowlist sees |
   |---|---|
   | Host → port published on `127.0.0.1` (this is the SSH-tunnel path) | the network's **gateway** (e.g. `172.20.0.1`), not `127.0.0.1` |
+  | Another LAN machine → host's published port | that machine's **real LAN IP** (e.g. `192.168.1.227`) |
   | Host → its own LAN IP | the host's LAN IP |
   | Another container on the same network | that container's own IP (e.g. `172.20.0.3`) |
 
-  So `127.0.0.1` in the list is useless on Docker bridge; allow
+  So a per-workstation list works on Docker bridge: LAN clients
+  are not masqueraded. But `127.0.0.1` in the list is useless
+  there; allow
   the gateway as a `/32` instead. It lets the host (and the SSH
   tunnel) in **without** letting the neighbouring containers in,
   since they have their own addresses. Find it with
