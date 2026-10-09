@@ -535,12 +535,12 @@ describe('/certs — Domaines table (T.4)', () => {
 		certsMock.certificatesApi.list.mockResolvedValue(fixtureCerts);
 		render(Page);
 		await screen.findByTestId('certs-table');
-		// VALID → VALIDE, RENEWAL_PENDING → RENOUV. AUTO,
-		// EXPIRED → EXPIRÉ, OBTAIN_FAILED → ÉCHEC.
-		expect(screen.getAllByText('VALIDE').length).toBeGreaterThan(0);
-		expect(screen.getByText('RENOUV. AUTO')).toBeInTheDocument();
-		expect(screen.getByText('EXPIRÉ')).toBeInTheDocument();
-		expect(screen.getByText('ÉCHEC')).toBeInTheDocument();
+		// VALID → VALID, RENEWAL_PENDING → RENEWING,
+		// EXPIRED → EXPIRED, OBTAIN_FAILED → FAILED (English bundle).
+		expect(screen.getAllByText('VALID').length).toBeGreaterThan(0);
+		expect(screen.getByText('RENEWING')).toBeInTheDocument();
+		expect(screen.getByText('EXPIRED')).toBeInTheDocument();
+		expect(screen.getByText('FAILED')).toBeInTheDocument();
 	});
 
 	it('renders an OBTAIN_FAILED row with null sanList as "0 SAN" without crashing (hotfix regression)', async () => {
@@ -565,7 +565,7 @@ describe('/certs — Domaines table (T.4)', () => {
 		certsMock.certificatesApi.list.mockResolvedValue(fixtureCerts);
 		render(Page);
 		await screen.findByTestId('certs-table');
-		const echec = screen.getByText('ÉCHEC');
+		const echec = screen.getByText('FAILED');
 		// Tooltip wraps the badge; the bubble mounts on hover/focus.
 		// We assert the wrapper's aria-describedby contract by
 		// simulating focus and reading the bubble text.
