@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { oidcProviderLabel, hostnameOf, oidcProviderColors } from './oidc-labels';
+import { language } from '$lib/stores/language.svelte';
 
 describe('oidcProviderLabel', () => {
 	it('maps known kinds to their brand-cased label', () => {
@@ -12,10 +13,21 @@ describe('oidcProviderLabel', () => {
 		expect(oidcProviderLabel('authelia')).toBe('Authelia');
 	});
 
-	it('falls back to the French generic label for empty / undefined kinds', () => {
-		expect(oidcProviderLabel('')).toBe('OIDC générique');
-		expect(oidcProviderLabel(undefined)).toBe('OIDC générique');
-		expect(oidcProviderLabel('generic')).toBe('OIDC générique');
+	it('falls back to the generic label for empty / undefined kinds', () => {
+		expect(oidcProviderLabel('')).toBe('Generic OIDC');
+		expect(oidcProviderLabel(undefined)).toBe('Generic OIDC');
+		expect(oidcProviderLabel('generic')).toBe('Generic OIDC');
+	});
+
+	it('translates the generic label when French is chosen', () => {
+		language.current = 'fr';
+		try {
+			expect(oidcProviderLabel('generic')).toBe('OIDC générique');
+			// Brand names are never translated.
+			expect(oidcProviderLabel('keycloak')).toBe('Keycloak');
+		} finally {
+			language.current = 'en';
+		}
 	});
 
 	it('Title-cases unknown kinds (admin typo-resilience)', () => {

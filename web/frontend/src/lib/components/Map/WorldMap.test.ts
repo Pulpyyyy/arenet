@@ -151,7 +151,7 @@ describe('WorldMap', () => {
 		);
 		render(WorldMap, { arenetLat: 0, arenetLon: 0 });
 		await waitFor(() => {
-			expect(screen.getByRole('alert').textContent ?? '').toMatch(/Carte indisponible/);
+			expect(screen.getByRole('alert').textContent ?? '').toMatch(/Map unavailable/);
 		});
 	});
 

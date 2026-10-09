@@ -11,7 +11,7 @@
 
   Re-skinned in symmetry with /login and /setup (LSC port,
   2026-05): tokens OKLCH scoped to .lockscreen-page, glass card
-  with backdrop-filter, FR copy, eye toggle on the password
+  with backdrop-filter, translated copy, eye toggle on the password
   field, local cyan/violet halo behind the card. The
   constellation background is NOT reused on purpose — the
   LockScreen invariant is "underlying UI must remain visible
@@ -23,8 +23,8 @@
   must authenticate or close the tab.
 
   Auth logic preserved verbatim: auth.unlock(password) → POST
-  /api/v1/auth/unlock, 401 → "Mot de passe incorrect", other →
-  generic message.
+  /api/v1/auth/unlock, 401 → "wrong password", other → the
+  server's message.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -33,6 +33,15 @@
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { ApiError } from '$lib/api/types';
+	import { t } from '$lib/i18n';
+	import { language } from '$lib/stores/language.svelte';
+
+	// Reading language.current makes every label re-render on a
+	// language switch — same helper as the routes page.
+	function tl(key: string, params?: Record<string, string | number>): string {
+		void language.current;
+		return t(key, params);
+	}
 
 	let password = $state('');
 	let showPassword = $state(false);
@@ -55,7 +64,7 @@
 		e.preventDefault();
 		if (submitting) return;
 		if (!password) {
-			error = 'Le mot de passe est requis.';
+			error = t('auth.errors.passwordRequired');
 			return;
 		}
 		submitting = true;
@@ -77,9 +86,9 @@
 					await goto('/login?reason=oidc_unlock_required');
 					return;
 				}				
-				error = err.status === 401 ? 'Mot de passe incorrect.' : err.message;
+				error = err.status === 401 ? t('auth.lock.wrongPassword') : err.message;
 			} else {
-				error = 'Erreur inattendue.';
+				error = t('auth.errors.unexpected');
 			}
 			password = '';
 			passwordInput?.focus();
@@ -99,7 +108,7 @@
 	<div class="lockscreen-halo" aria-hidden="true"></div>
 
 	<div class="lockscreen-card">
-		<h2 id="lockscreen-title" class="lockscreen-title">Session verrouillée.</h2>
+		<h2 id="lockscreen-title" class="lockscreen-title">{tl('auth.lock.title')}</h2>
 
 		{#if auth.user?.authSource === 'oidc'}
 			<!-- Step #S-25: OIDC users have no local password.
@@ -110,18 +119,19 @@
 				400 + code:oidc_unlock_unsupported on POST /unlock)
 				remains in place as a safety net. -->
 			<p class="lockscreen-sub">
-				Connecté en tant que
-				<span class="lockscreen-user">{auth.user?.username ?? ''}</span> via SSO.
-				Re-authentifie-toi pour reprendre.
+				{tl('auth.lock.signedInAs')}
+				<span class="lockscreen-user">{auth.user?.username ?? ''}</span>
+				{tl('auth.lock.viaSso')}
+				{tl('auth.lock.ssoPrompt')}
 			</p>
 			<a class="lockscreen-submit" href="/api/v1/auth/oidc/login">
-				<span class="lockscreen-submit-label">Se reconnecter avec SSO</span>
+				<span class="lockscreen-submit-label">{tl('auth.lock.ssoButton')}</span>
 			</a>
-		{:else}		
+		{:else}
 		<p class="lockscreen-sub">
-			Connecté en tant que
+			{tl('auth.lock.signedInAs')}
 			<span class="lockscreen-user">{auth.user?.username ?? ''}</span>.
-			Entre ton mot de passe pour continuer.
+			{tl('auth.lock.passwordPrompt')}
 		</p>
 
 		{#if error}
@@ -145,7 +155,7 @@
 
 		<form onsubmit={handleSubmit} autocomplete="on" novalidate>
 			<div class="lockscreen-field">
-				<label for="lockscreen-password">Mot de passe</label>
+				<label for="lockscreen-password">{tl('auth.passwordLabel')}</label>
 				<div class="lockscreen-input-wrap">
 					<input
 						id="lockscreen-password"
@@ -162,7 +172,7 @@
 						class="lockscreen-pw-toggle"
 						onclick={togglePassword}
 						tabindex={-1}
-						aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+						aria-label={showPassword ? tl('auth.hidePassword') : tl('auth.showPassword')}
 					>
 						{#if showPassword}
 							<svg
@@ -204,7 +214,7 @@
 				disabled={submitting}
 			>
 				<span class="lockscreen-spin" aria-hidden="true"></span>
-				<span class="lockscreen-submit-label">Déverrouiller</span>
+				<span class="lockscreen-submit-label">{tl('auth.lock.unlock')}</span>
 			</button>
 		</form>
 		{/if}

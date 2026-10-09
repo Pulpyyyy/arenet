@@ -44,6 +44,7 @@
 <script lang="ts">
         import { Handle, Position, type NodeProps } from '@xyflow/svelte';
         import type { AliasNodeData } from '../../_types';
+        import { t } from '$lib/i18n';
 
         let { data }: NodeProps & { data: AliasNodeData } = $props();
 
@@ -69,7 +70,7 @@
                         `p99 ${data.p99LatencyMs} ms`,
                         `${data.errorRate5xx.toFixed(2)}% 5xx`,
                 ];
-                if (data.isIdle) parts.push('alias inactive depuis 60 s');
+                if (data.isIdle) parts.push(t('topology.nodes.aliasIdle'));
                 return parts.join(' · ');
         });
 </script>

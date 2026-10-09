@@ -144,9 +144,10 @@
                                 class="chevron"
                                 class:expanded={!data.collapsed}
                                 onclick={onChevronClick}
-                                aria-label={data.collapsed
-                                        ? `Déplier les ${data.aliasCount} alias`
-                                        : `Replier les ${data.aliasCount} alias`}
+                                aria-label={language.current &&
+                                        (data.collapsed
+                                                ? t('topology.nodes.expandAliases', { count: data.aliasCount ?? 0 })
+                                                : t('topology.nodes.collapseAliases', { count: data.aliasCount ?? 0 }))}
                                 aria-expanded={!data.collapsed}
                         >
                                 <!-- Lucide ChevronRight; CSS rotates 90° when expanded -->
@@ -172,9 +173,9 @@
                                 stroke-width="2"
                                 stroke-linecap="round"
                                 stroke-linejoin="round"
-                                aria-label="WAF · Mode détection"
+                                aria-label={language.current && t('topology.nodes.wafDetect')}
                         >
-                                <title>WAF · Mode détection</title>
+                                <title>{language.current && t('topology.nodes.wafDetect')}</title>
                                 <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
                         </svg>
                 {:else if data.wafLevel === 'block'}
@@ -186,9 +187,9 @@
                                 stroke-width="2"
                                 stroke-linecap="round"
                                 stroke-linejoin="round"
-                                aria-label="WAF · Mode blocage"
+                                aria-label={language.current && t('topology.nodes.wafBlock')}
                         >
-                                <title>WAF · Mode blocage</title>
+                                <title>{language.current && t('topology.nodes.wafBlock')}</title>
                                 <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
                                 <path d="m9 12 2 2 4-4" />
                         </svg>

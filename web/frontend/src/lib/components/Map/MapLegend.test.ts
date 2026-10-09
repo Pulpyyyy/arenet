@@ -6,7 +6,7 @@
 //
 // Pins the 5-row legend shape, the per-row CSS-var swatch
 // color (single source of truth = categoryColors.ts), the
-// French labels, and the "à venir" marker on the
+// translated labels, and the "à venir" marker on the
 // currently-unemitted "normal" category. A future
 // regression that drops a category or rewires a color
 // surfaces immediately.
@@ -15,6 +15,7 @@ import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import MapLegend from './MapLegend.svelte';
 import { CATEGORY_COLORS } from './categoryColors';
+import { language } from '$lib/stores/language.svelte';
 
 const CATEGORIES = ['normal', 'throttle', 'waf', 'crowdsec', 'auth', 'country_block'] as const;
 
@@ -40,7 +41,7 @@ describe('MapLegend', () => {
 		}
 	});
 
-	it('renders the French operator labels', () => {
+	it('renders the operator labels in English by default', () => {
 		render(MapLegend);
 		// Pin a sample of the operator-meaningful copy.
 		expect(screen.getByTestId('map-legend-item-throttle').textContent ?? '').toContain(
@@ -50,11 +51,26 @@ describe('MapLegend', () => {
 			'Coraza'
 		);
 		expect(screen.getByTestId('map-legend-item-crowdsec').textContent ?? '').toContain(
-			'réputation'
+			'reputation'
 		);
 		expect(screen.getByTestId('map-legend-item-auth').textContent ?? '').toContain(
-			'authentification'
+			'authentication'
 		);
+	});
+
+	it('renders the French labels when French is chosen', () => {
+		language.current = 'fr';
+		try {
+			render(MapLegend);
+			expect(screen.getByTestId('map-legend-item-crowdsec').textContent ?? '').toContain(
+				'réputation'
+			);
+			expect(screen.getByTestId('map-legend').getAttribute('aria-label') ?? '').toMatch(
+				/légende/i
+			);
+		} finally {
+			language.current = 'en';
+		}
 	});
 
 	it('does NOT mark "normal" as à venir (V.1.4 — backend now emits green arcs)', () => {
@@ -68,7 +84,9 @@ describe('MapLegend', () => {
 		// > 0 see live green arcs.
 		render(MapLegend);
 		const normalRow = screen.getByTestId('map-legend-item-normal');
-		expect(normalRow.textContent ?? '').not.toContain('à venir');
+		// Checked on the marker element, not its text: the text
+		// is translated, the element is not.
+		expect(normalRow.querySelector('.legend-coming-soon')).toBeNull();
 	});
 
 	it('preserves the .legend-coming-soon CSS hook for future categories', () => {
@@ -113,7 +131,7 @@ describe('MapLegend', () => {
 	it('has an aria-label on the root for screen-reader discoverability', () => {
 		render(MapLegend);
 		const root = screen.getByTestId('map-legend');
-		expect(root.getAttribute('aria-label') ?? '').toMatch(/légende/i);
+		expect(root.getAttribute('aria-label') ?? '').toMatch(/legend/i);
 	});
 
 	it('mirrors the topology panel visual language (.panel class + dots + legend-note)', () => {

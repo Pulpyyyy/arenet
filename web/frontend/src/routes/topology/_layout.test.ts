@@ -1211,7 +1211,7 @@ describe('buildTopologyGraph — redirecting routes', () => {
 		const { nodes } = buildTopologyGraph([broken]);
 		const data = nodes.find((n) => n.id === 'cluster-r-broken')!
 			.data as BackendClusterNodeData;
-		expect(data.warning).toBe('Aucun upstream configuré');
+		expect(data.warning).toBe('No upstream configured');
 	});
 
 	it('leaves a proxying route untouched', () => {

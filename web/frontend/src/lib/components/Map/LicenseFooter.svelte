@@ -19,17 +19,19 @@
 <script lang="ts">
 	// No props — single static footer used by /map. Future
 	// pages can reuse via direct import.
+	import { t } from '$lib/i18n';
+	import { language } from '$lib/stores/language.svelte';
 </script>
 
 <footer class="license-footer">
 	<span>
-		Données GeoIP :
+		{language.current && t('map.licenseGeoip')}
 		<a href="https://www.maxmind.com" target="_blank" rel="noopener noreferrer">GeoLite2</a>
 		© MaxMind (CC BY-SA 4.0)
 	</span>
 	<span class="license-footer__sep" aria-hidden="true">·</span>
 	<span>
-		Carte :
+		{language.current && t('map.licenseMap')}
 		<a
 			href="https://github.com/topojson/world-atlas"
 			target="_blank"

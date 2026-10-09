@@ -33,6 +33,10 @@ baseline.
 -->
 
 <script lang="ts">
+	// Aliased: the template iterates its y-axis ticks as `t`.
+	import { t as translate } from '$lib/i18n';
+	import { language } from '$lib/stores/language.svelte';
+
 	// Phase 5 — the generic constraint we'd like to express is
 	// "T extends { bucketStart: string } AND key ∈ keyof T",
 	// but Svelte's `generics=` declaration doesn't currently
@@ -307,7 +311,7 @@ baseline.
 					y={PAD_T + innerHeight / 2}
 					class="empty-state-text"
 					text-anchor="middle"
-					dominant-baseline="middle">Aucun événement sur cette période</text
+					dominant-baseline="middle">{language.current && translate('charts.emptyPeriod')}</text
 				>
 			{/if}
 

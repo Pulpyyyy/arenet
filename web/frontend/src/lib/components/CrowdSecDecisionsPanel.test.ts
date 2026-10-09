@@ -214,10 +214,10 @@ describe('CrowdSec decisions panel — Live LAPI tab', () => {
 		await waitFor(() => {
 			// Sample LAPI fixture has 2 CAPI + 1 cscli rows, no
 			// manual. So: all=3, local=1, capi=2, manual=0.
-			expect(screen.getByTestId('live-tab-all').textContent ?? '').toMatch(/Toutes\s*\(3\)/);
-			expect(screen.getByTestId('live-tab-local').textContent ?? '').toMatch(/Locales\s*\(1\)/);
+			expect(screen.getByTestId('live-tab-all').textContent ?? '').toMatch(/All\s*\(3\)/);
+			expect(screen.getByTestId('live-tab-local').textContent ?? '').toMatch(/Local\s*\(1\)/);
 			expect(screen.getByTestId('live-tab-capi').textContent ?? '').toMatch(/CAPI\s*\(2\)/);
-			expect(screen.getByTestId('live-tab-manual').textContent ?? '').toMatch(/Manuelles\s*\(0\)/);
+			expect(screen.getByTestId('live-tab-manual').textContent ?? '').toMatch(/Manual\s*\(0\)/);
 		});
 	});
 

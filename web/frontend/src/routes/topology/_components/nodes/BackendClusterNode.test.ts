@@ -96,7 +96,7 @@ describe("BackendClusterNode — the edge anchor", () => {
     // fallback edge to the parent so the operator can see the route
     // exists at all, with its empty-pool warning.
     render(BackendClusterNode, {
-      props: nodeProps(data({ warning: "Aucun upstream configuré" })),
+      props: nodeProps(data({ warning: "No upstream configured" })),
     });
     expect(screen.getByTestId("flow-handle")).toBeInTheDocument();
   });

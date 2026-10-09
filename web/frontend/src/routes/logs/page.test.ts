@@ -158,7 +158,7 @@ describe('/logs — cert events render in the unified table', () => {
 		expect(row.textContent ?? '').toMatch(/Let's Encrypt/);
 		expect(row.textContent ?? '').toMatch(/DNS-01/);
 		// Renewal marker.
-		expect(row.textContent ?? '').toMatch(/renouvellement/);
+		expect(row.textContent ?? '').toMatch(/renewal/);
 	});
 
 	it('cert_failed row appears with WARN level + truncated error', async () => {
@@ -190,7 +190,7 @@ describe('/logs — cert events render in the unified table', () => {
 		expect(row.textContent ?? '').toMatch(/\.\.\./);
 	});
 
-	it('cert_ocsp_revoked row appears with WARN level + "révocation OCSP"', async () => {
+	it('cert_ocsp_revoked row appears with WARN level + "OCSP revocation"', async () => {
 		securityMock.fetchCertEvents.mockResolvedValue({
 			events: [
 				certFixture({
@@ -206,7 +206,7 @@ describe('/logs — cert events render in the unified table', () => {
 		render(Page);
 		const row = await screen.findByText(/cert\.revoked/);
 		expect(row).toBeInTheDocument();
-		expect(row.textContent ?? '').toMatch(/révocation OCSP/);
+		expect(row.textContent ?? '').toMatch(/OCSP revocation/);
 	});
 
 	it('cert events render with method=ACME and srcIp=(interne) for system-emitted rows', async () => {
@@ -722,10 +722,10 @@ describe('/logs — duplicate-tuple regression (Svelte each_key_duplicate)', () 
 });
 
 describe('/logs — W.5 country-block source (W.7 follow-up: humanized + host-resolved)', () => {
-	it('renders a country-block row with COUNTRY pill + status + humanized French detail + host badge', async () => {
+	it('renders a country-block row with COUNTRY pill + status + humanized detail + host badge', async () => {
 		// W.5 introduced the country-block row; W.7 follow-
 		// up replaced the raw "deny-deny-match" detail with
-		// the humanized "pays interdit" + routes the host
+		// the humanized "country denied" + routes the host
 		// badge through <RouteHost> resolving routeId →
 		// hostname via listRoutes(). Both changes are
 		// asserted here; the W.7-follow-up describe block
@@ -766,8 +766,8 @@ describe('/logs — W.5 country-block source (W.7 follow-up: humanized + host-re
 		expect(rowBadge).toBeDefined();
 		// Status code from the persisted row, not hardcoded.
 		expect(screen.getByText('451')).toBeInTheDocument();
-		// Humanized French detail string (W.7 follow-up).
-		expect(screen.getByText(/RU · pays interdit/)).toBeInTheDocument();
+		// Humanized detail string (W.7 follow-up).
+		expect(screen.getByText(/RU · country denied/)).toBeInTheDocument();
 		// Raw "deny-deny-match" must NOT be visible body text.
 		expect(
 			screen.queryByText(/deny-deny-match/)
@@ -783,7 +783,7 @@ describe('/logs — W.5 country-block source (W.7 follow-up: humanized + host-re
 });
 
 describe('/logs — W.7 follow-up: humanize reason + host resolution', () => {
-	it('allow-miss → "pays non autorisé"', async () => {
+	it('allow-miss → "country not allowed"', async () => {
 		clientMock.listRoutes.mockResolvedValue([
 			{ id: 'route-uuid-allow', host: 'app.example.test' }
 		]);
@@ -805,7 +805,7 @@ describe('/logs — W.7 follow-up: humanize reason + host resolution', () => {
 		});
 		render(Page);
 		await screen.findByText('app.example.test');
-		expect(screen.getByText(/IN · pays non autorisé/)).toBeInTheDocument();
+		expect(screen.getByText(/IN · country not allowed/)).toBeInTheDocument();
 	});
 
 	it('raw reason stays in title tooltip on the detail span', async () => {
@@ -829,7 +829,7 @@ describe('/logs — W.7 follow-up: humanize reason + host resolution', () => {
 			hasMore: false
 		});
 		render(Page);
-		const detail = await screen.findByText(/RU · pays interdit/);
+		const detail = await screen.findByText(/RU · country denied/);
 		// title="" carries the raw mode-reason for
 		// forensic ops that grep journalctl by code.
 		expect(detail).toHaveAttribute('title', 'deny-match');
@@ -924,7 +924,7 @@ describe('/logs — W.7 follow-up: humanize reason + host resolution', () => {
 		});
 		render(Page);
 		// Row still mounts via the fallback path.
-		await screen.findByText(/RU · pays interdit/);
+		await screen.findByText(/RU · country denied/);
 		expect(screen.getByTestId('route-host')).toHaveClass(
 			'route-host--fallback'
 		);

@@ -6,8 +6,9 @@
 // status → badge variant mapping is the AC #10 LOCKED contract;
 // the labels are part of the spec vocabulary. Both pinned here.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import type { Certificate } from '$lib/api/types';
+import { language } from '$lib/stores/language.svelte';
 import {
 	certificateSourceLabel,
 	certificateStatusLabel,
@@ -55,8 +56,24 @@ describe('certificateStatusToBadgeVariant', () => {
 	});
 });
 
+// The labels follow the active language: the English UI used to
+// show the French badges because they were hardcoded here.
 describe('certificateStatusLabel', () => {
-	it('maps each status to the French operator label', () => {
+	afterEach(() => {
+		language.current = 'en';
+	});
+
+	it('maps each status to the English label by default', () => {
+		language.current = 'en';
+		expect(certificateStatusLabel('VALID')).toBe('VALID');
+		expect(certificateStatusLabel('RENEWAL_PENDING')).toBe('RENEWING');
+		expect(certificateStatusLabel('EXPIRED')).toBe('EXPIRED');
+		expect(certificateStatusLabel('OBTAIN_FAILED')).toBe('FAILED');
+		expect(certificateStatusLabel('UNKNOWN')).toBe('—');
+	});
+
+	it('keeps the spec French vocabulary when French is chosen', () => {
+		language.current = 'fr';
 		expect(certificateStatusLabel('VALID')).toBe('VALIDE');
 		expect(certificateStatusLabel('RENEWAL_PENDING')).toBe('RENOUV. AUTO');
 		expect(certificateStatusLabel('EXPIRED')).toBe('EXPIRÉ');
@@ -66,9 +83,19 @@ describe('certificateStatusLabel', () => {
 });
 
 describe('certificateSourceLabel', () => {
-	it('maps each source to the French label', () => {
+	afterEach(() => {
+		language.current = 'en';
+	});
+
+	it('maps each source to its label in English', () => {
+		language.current = 'en';
 		expect(certificateSourceLabel('wildcard')).toBe('wildcard');
 		expect(certificateSourceLabel('apex')).toBe('apex');
+		expect(certificateSourceLabel('specific')).toBe('specific');
+	});
+
+	it('translates "specific" in French', () => {
+		language.current = 'fr';
 		expect(certificateSourceLabel('specific')).toBe('spécifique');
 	});
 });

@@ -1155,14 +1155,14 @@
 		const ids: number[] = [];
 		for (const token of tokens) {
 			if (!/^\d+$/.test(token)) {
-				return { ids: [], error: `"${token}" n'est pas un entier valide` };
+				return { ids: [], error: t('routes.form.wafExcludeRulesErrNotInteger', { token }) };
 			}
 			const n = parseInt(token, 10);
 			if (n < 100000 || n > 999999) {
-				return { ids: [], error: `${n} n'est pas un ID CRS valide (doit être un entier 6 chiffres 100000..999999)` };
+				return { ids: [], error: t('routes.form.wafExcludeRulesErrNotCrsId', { n }) };
 			}
 			if (n <= 199999) {
-				return { ids: [], error: `${n} est dans la plage réservée Arenet (100000..199999), choisissez un ID >= 200000` };
+				return { ids: [], error: t('routes.form.wafExcludeRulesErrReserved', { n }) };
 			}
 			ids.push(n);
 		}
@@ -1261,7 +1261,10 @@
 		if (tokens.length > WAF_EXCLUDE_TAGS_MAX_COUNT) {
 			return {
 				tags: [],
-				error: `Trop de tags (${tokens.length}) — max ${WAF_EXCLUDE_TAGS_MAX_COUNT}`
+				error: t('routes.form.wafExcludeTagsErrTooMany', {
+					count: tokens.length,
+					max: WAF_EXCLUDE_TAGS_MAX_COUNT
+				})
 			};
 		}
 		const seen = new Set<string>();
@@ -1270,7 +1273,10 @@
 			if (token.length > WAF_EXCLUDE_TAG_MAX_LEN) {
 				return {
 					tags: [],
-					error: `"${token.slice(0, 24)}…" dépasse ${WAF_EXCLUDE_TAG_MAX_LEN} caractères`
+					error: t('routes.form.wafExcludeTagsErrTooLong', {
+						token: token.slice(0, 24),
+						max: WAF_EXCLUDE_TAG_MAX_LEN
+					})
 				};
 			}
 			// Mirror backend normalizeExcludeTags rejection of
@@ -1282,7 +1288,7 @@
 			if (/[\s,"]/.test(token)) {
 				return {
 					tags: [],
-					error: `"${token}" contient un caractère invalide pour SecAction (espace, virgule ou guillemet)`
+					error: t('routes.form.wafExcludeTagsErrInvalidChar', { token })
 				};
 			}
 			const lower = token.toLowerCase();
@@ -4871,9 +4877,9 @@
 												class="text-xs text-amber-700 dark:text-amber-300"
 												data-testid="upstream-path-warning"
 											>
-												Le chemin <code class="font-mono"
+												{tl('routes.form.upstreamPathWarningBefore')} <code class="font-mono"
 													>{nonRootPath(formData.upstreams[i].url)}</code
-												> sera ignoré — Caddy proxyfie uniquement vers <code class="font-mono"
+												> {tl('routes.form.upstreamPathWarningAfter')} <code class="font-mono"
 													>host:port</code
 												>.
 											</p>
@@ -5958,8 +5964,7 @@
 										class="text-xs text-muted"
 										data-testid="country-block-off-hint"
 									>
-										Aucun gate par pays. Choisissez Allow-list ou Deny-list
-										pour activer.
+										{tl('routes.form.countryBlockOffHint')}
 									</p>
 								{/if}
 							</div>
@@ -6622,7 +6627,7 @@
 					<div class="flex flex-col items-center gap-3 px-4 py-3 rounded-md">
 						<Spinner size="md" />
 						<p class="text-sm text-secondary">
-							Application des modifications Caddy…
+							{tl('routes.form.savingOverlay')}
 						</p>
 					</div>
 				</div>

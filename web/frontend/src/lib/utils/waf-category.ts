@@ -25,6 +25,7 @@
 // but the operator sees less friendly labels.
 
 import type { OwaspCategory } from '$lib/api/types';
+import { t } from '$lib/i18n';
 
 /** The family bucket the /waf page renders together. */
 export type CategoryFamily =
@@ -42,195 +43,75 @@ export interface CategoryMeta {
 	family: CategoryFamily;
 }
 
+// Labels and descriptions live in the locale files under
+// `wafCategory.*` and are read through getters, so every consumer
+// keeps reading `meta.label` / `meta.description` and still gets
+// the active language (t() reads language.current, which makes the
+// read reactive inside a $derived or a template).
+function meta(code: string, color: string, family: CategoryFamily): CategoryMeta {
+	return {
+		get label() {
+			return t(`wafCategory.${code}.label`);
+		},
+		get description() {
+			return t(`wafCategory.${code}.description`);
+		},
+		color,
+		family
+	};
+}
+
 /** Fallback for unknown categories (post-Y rows referencing a
  *  category the frontend hasn't been taught yet — keeps the
  *  UI rendering instead of crashing). */
 const UNKNOWN_META: CategoryMeta = {
-	label: 'Inconnu',
-	description: 'Catégorie non reconnue par le frontend.',
+	get label() {
+		return t('wafCategory.unknown.label');
+	},
+	get description() {
+		return t('wafCategory.unknown.description');
+	},
 	color: 'var(--text-muted)',
 	family: 'infrastructure'
 };
 
 export const CATEGORY_META: Record<OwaspCategory, CategoryMeta> = {
 	// --- Request attacks (red / orange family) ---
-	SQLi: {
-		label: 'SQL Injection',
-		description: 'CRS 942xxx — UNION SELECT, blind SQLi, malicious comments.',
-		color: 'var(--status-down)',
-		family: 'request-attack'
-	},
-	XSS: {
-		label: 'Cross-site scripting',
-		description: 'CRS 941xxx — payloads JS, vecteurs HTML, évasion par encodage.',
-		color: 'var(--status-warn)',
-		family: 'request-attack'
-	},
-	RCE: {
-		label: 'Remote Code Execution (shell)',
-		description: 'CRS 932xxx — injection de commandes shell, eval.',
-		color: 'var(--status-down)',
-		family: 'request-attack'
-	},
-	PHP: {
-		label: 'PHP injection',
-		description: 'CRS 933xxx — code PHP, fonctions dangereuses, variables superglobales.',
-		color: 'var(--status-down)',
-		family: 'request-attack'
-	},
-	JAVA: {
-		label: 'Java exploit',
-		description:
-			"CRS 944xxx — désérialisation Java, JNDI (Log4Shell), classes dangereuses.",
-		color: 'var(--status-down)',
-		family: 'request-attack'
-	},
-	GENERIC: {
-		label: 'Generic app attack (Node / SSRF / template)',
-		description: 'CRS 934xxx — SSRF, injection de template, Node.js patterns.',
-		color: 'var(--status-warn)',
-		family: 'request-attack'
-	},
-	LFI: {
-		label: 'Local File Inclusion',
-		description: 'CRS 930xxx — path traversal, /etc/passwd, exfil de config.',
-		color: 'var(--status-warn)',
-		family: 'request-attack'
-	},
-	RFI: {
-		label: 'Remote File Inclusion',
-		description: 'CRS 931xxx — inclusion de fichier distant via http://, ftp://, etc.',
-		color: 'var(--status-warn)',
-		family: 'request-attack'
-	},
+	SQLi: meta('SQLi', 'var(--status-down)', 'request-attack'),
+	XSS: meta('XSS', 'var(--status-warn)', 'request-attack'),
+	RCE: meta('RCE', 'var(--status-down)', 'request-attack'),
+	PHP: meta('PHP', 'var(--status-down)', 'request-attack'),
+	JAVA: meta('JAVA', 'var(--status-down)', 'request-attack'),
+	GENERIC: meta('GENERIC', 'var(--status-warn)', 'request-attack'),
+	LFI: meta('LFI', 'var(--status-warn)', 'request-attack'),
+	RFI: meta('RFI', 'var(--status-warn)', 'request-attack'),
 
 	// --- Protocol / behaviour ---
-	METHOD: {
-		label: 'Method enforcement',
-		description: 'CRS 911xxx — verbes HTTP non autorisés (TRACE, CONNECT, etc.).',
-		color: 'var(--status-info)',
-		family: 'protocol-behaviour'
-	},
-	PROTOCOL: {
-		label: 'Protocol enforcement',
-		description:
-			"CRS 920xxx — requêtes mal formées, headers absents, charset invalide.",
-		color: 'var(--status-info)',
-		family: 'protocol-behaviour'
-	},
-	PROTOCOL_ATK: {
-		label: 'Protocol attack',
-		description: 'CRS 921xxx — HTTP smuggling, request splitting.',
-		color: 'var(--status-warn)',
-		family: 'protocol-behaviour'
-	},
-	MULTIPART: {
-		label: 'Multipart attack',
-		description: 'CRS 922xxx — exploitation du parseur multipart.',
-		color: 'var(--status-warn)',
-		family: 'protocol-behaviour'
-	},
-	SCANNER: {
-		label: 'Scanner detection',
-		description:
-			"CRS 913xxx — détection d'outils de scan (sqlmap, nikto, nmap, etc.) via User-Agent.",
-		color: 'var(--status-info)',
-		family: 'protocol-behaviour'
-	},
-	SESSION: {
-		label: 'Session fixation',
-		description: 'CRS 943xxx — patterns d\'attaque sur les sessions et cookies.',
-		color: 'var(--status-warn)',
-		family: 'protocol-behaviour'
-	},
+	METHOD: meta('METHOD', 'var(--status-info)', 'protocol-behaviour'),
+	PROTOCOL: meta('PROTOCOL', 'var(--status-info)', 'protocol-behaviour'),
+	PROTOCOL_ATK: meta('PROTOCOL_ATK', 'var(--status-warn)', 'protocol-behaviour'),
+	MULTIPART: meta('MULTIPART', 'var(--status-warn)', 'protocol-behaviour'),
+	SCANNER: meta('SCANNER', 'var(--status-info)', 'protocol-behaviour'),
+	SESSION: meta('SESSION', 'var(--status-warn)', 'protocol-behaviour'),
 
 	// --- Aggregators ---
-	ANOMALY_REQ: {
-		label: 'Anomaly score (request)',
-		description:
-			"CRS 949xxx — l'agrégateur de score d'anomalie inbound, déclenche le block quand le seuil global est atteint.",
-		color: 'var(--text-muted)',
-		family: 'aggregator'
-	},
-	ANOMALY_RESP: {
-		label: 'Anomaly score (response)',
-		description: 'CRS 959xxx — agrégateur de score sur la réponse upstream.',
-		color: 'var(--text-muted)',
-		family: 'aggregator'
-	},
-	CORRELATION: {
-		label: 'Correlation',
-		description: 'CRS 980xxx — corrélation inbound / outbound, méta-règles.',
-		color: 'var(--text-muted)',
-		family: 'aggregator'
-	},
+	ANOMALY_REQ: meta('ANOMALY_REQ', 'var(--text-muted)', 'aggregator'),
+	ANOMALY_RESP: meta('ANOMALY_RESP', 'var(--text-muted)', 'aggregator'),
+	CORRELATION: meta('CORRELATION', 'var(--text-muted)', 'aggregator'),
 
 	// --- Response-side / data leak ---
-	DATA_LEAK: {
-		label: 'Data leak (generic)',
-		description:
-			"CRS 950xxx — fuite d'information générique dans la réponse (debug, headers serveur, etc.).",
-		color: 'var(--status-warn)',
-		family: 'data-leak'
-	},
-	DATA_LEAK_SQL: {
-		label: 'Data leak (SQL errors)',
-		description: 'CRS 951xxx — messages d\'erreur SQL fuités (MySQL, PostgreSQL, MSSQL).',
-		color: 'var(--status-warn)',
-		family: 'data-leak'
-	},
-	DATA_LEAK_JAVA: {
-		label: 'Data leak (Java stack)',
-		description: 'CRS 952xxx — stack traces Java fuitées dans la réponse.',
-		color: 'var(--status-warn)',
-		family: 'data-leak'
-	},
-	DATA_LEAK_PHP: {
-		label: 'Data leak (PHP errors)',
-		description: 'CRS 953xxx — warnings / fatal errors PHP fuités.',
-		color: 'var(--status-warn)',
-		family: 'data-leak'
-	},
-	DATA_LEAK_IIS: {
-		label: 'Data leak (IIS info)',
-		description: 'CRS 954xxx — fuite d\'info IIS (.NET, version, paths internes).',
-		color: 'var(--status-warn)',
-		family: 'data-leak'
-	},
-	WEBSHELL: {
-		label: 'Web shell signature',
-		description:
-			'CRS 955xxx — signatures de webshells dans la réponse (c99, r57, b374k, etc.).',
-		color: 'var(--status-down)',
-		family: 'data-leak'
-	},
+	DATA_LEAK: meta('DATA_LEAK', 'var(--status-warn)', 'data-leak'),
+	DATA_LEAK_SQL: meta('DATA_LEAK_SQL', 'var(--status-warn)', 'data-leak'),
+	DATA_LEAK_JAVA: meta('DATA_LEAK_JAVA', 'var(--status-warn)', 'data-leak'),
+	DATA_LEAK_PHP: meta('DATA_LEAK_PHP', 'var(--status-warn)', 'data-leak'),
+	DATA_LEAK_IIS: meta('DATA_LEAK_IIS', 'var(--status-warn)', 'data-leak'),
+	WEBSHELL: meta('WEBSHELL', 'var(--status-down)', 'data-leak'),
 
 	// --- Infrastructure / catch-all ---
-	INIT: {
-		label: 'CRS init',
-		description: 'CRS 901xxx — initialisation des variables tx.*, paranoia level.',
-		color: 'var(--text-muted)',
-		family: 'infrastructure'
-	},
-	COMMON_EXCEPT: {
-		label: 'False-positive bypass',
-		description: 'CRS 905xxx — exceptions communes pour éviter les false-positives.',
-		color: 'var(--text-muted)',
-		family: 'infrastructure'
-	},
-	CUSTOM: {
-		label: 'Règles personnalisées',
-		description: 'Arenet 120000–129999 — règles guidées définies sur la route.',
-		color: 'var(--accent-cyan)',
-		family: 'infrastructure'
-	},
-	OTHER: {
-		label: 'Autres règles Coraza',
-		description:
-			"Règles hors taxonomie CRS standard (extensions opérateur, plugins custom).",
-		color: 'var(--text-muted)',
-		family: 'infrastructure'
-	}
+	INIT: meta('INIT', 'var(--text-muted)', 'infrastructure'),
+	COMMON_EXCEPT: meta('COMMON_EXCEPT', 'var(--text-muted)', 'infrastructure'),
+	CUSTOM: meta('CUSTOM', 'var(--accent-cyan)', 'infrastructure'),
+	OTHER: meta('OTHER', 'var(--text-muted)', 'infrastructure')
 };
 
 /** Safe accessor — returns the fallback meta for unknown
@@ -245,11 +126,21 @@ export function categoryMeta(c: OwaspCategory | string): CategoryMeta {
  *  first, then behaviour, then aggregators, response-side,
  *  infrastructure. */
 export const FAMILY_LABEL: Record<CategoryFamily, string> = {
-	'request-attack': 'Attaques sur la requête',
-	'protocol-behaviour': 'Protocole / comportement',
-	aggregator: 'Agrégateurs de score',
-	'data-leak': 'Fuite de données (réponse)',
-	infrastructure: 'Infrastructure CRS'
+	get 'request-attack'() {
+		return t('wafCategory.family.requestAttack');
+	},
+	get 'protocol-behaviour'() {
+		return t('wafCategory.family.protocolBehaviour');
+	},
+	get aggregator() {
+		return t('wafCategory.family.aggregator');
+	},
+	get 'data-leak'() {
+		return t('wafCategory.family.dataLeak');
+	},
+	get infrastructure() {
+		return t('wafCategory.family.infrastructure');
+	}
 };
 
 /** Categories grouped by family in dashboard-display order.

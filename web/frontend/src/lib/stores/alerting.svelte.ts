@@ -18,6 +18,7 @@ import {
 	type AlertRule
 } from '$lib/api/alerting';
 import { ApiError } from '$lib/api/types';
+import { t } from '$lib/i18n';
 
 // --- alertEventsStore --------------------------------------
 
@@ -57,7 +58,7 @@ function createAlertEventsStore() {
 		} catch (err) {
 			if (reset) {
 				state.loadError =
-					err instanceof ApiError ? err.message : 'Échec du chargement des événements';
+					err instanceof ApiError ? err.message : t('alerting.loadEventsFailed');
 				state.events = [];
 			}
 			// On loadMore failure we keep the existing list and
@@ -113,7 +114,7 @@ function createChannelsStore() {
 			state.channels = await alertingApi.listChannels();
 		} catch (err) {
 			state.loadError =
-				err instanceof ApiError ? err.message : 'Échec du chargement des canaux';
+				err instanceof ApiError ? err.message : t('alerting.loadChannelsFailed');
 		} finally {
 			state.loading = false;
 		}
@@ -195,7 +196,7 @@ function createRulesStore() {
 			state.rules = await alertingApi.listRules();
 		} catch (err) {
 			state.loadError =
-				err instanceof ApiError ? err.message : 'Échec du chargement des règles';
+				err instanceof ApiError ? err.message : t('alerting.loadRulesFailed');
 		} finally {
 			state.loading = false;
 		}

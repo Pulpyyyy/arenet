@@ -21,6 +21,7 @@ import {
 	FAMILY_LABEL,
 	type CategoryFamily
 } from './waf-category';
+import { language } from '$lib/stores/language.svelte';
 
 describe('waf-category', () => {
 	it('CATEGORY_META has an entry for every OwaspCategory in ALL_OWASP_CATEGORIES', () => {
@@ -28,6 +29,34 @@ describe('waf-category', () => {
 			expect(CATEGORY_META[c], `missing meta for ${c}`).toBeDefined();
 			expect(CATEGORY_META[c].label.length).toBeGreaterThan(0);
 			expect(CATEGORY_META[c].description.length).toBeGreaterThan(0);
+		}
+	});
+
+	// The copy lives in the locale files: a missing key would make
+	// t() hand back the raw key, which still passes the length checks
+	// above. Check both languages resolve to real text, and that the
+	// English one follows the language switch.
+	it('resolves every label, description and family in both languages', () => {
+		try {
+			for (const lang of ['en', 'fr'] as const) {
+				language.current = lang;
+				for (const c of ALL_OWASP_CATEGORIES) {
+					expect(CATEGORY_META[c].label).not.toContain('wafCategory.');
+					expect(CATEGORY_META[c].description).not.toContain('wafCategory.');
+				}
+				for (const fam of Object.keys(FAMILY_LABEL) as CategoryFamily[]) {
+					expect(FAMILY_LABEL[fam]).not.toContain('wafCategory.');
+				}
+				expect(categoryMeta('TOTALLY_FAKE_CATEGORY').label).not.toContain('wafCategory.');
+			}
+			language.current = 'en';
+			expect(FAMILY_LABEL['request-attack']).toBe('Request attacks');
+			expect(CATEGORY_META.CUSTOM.label).toBe('Custom rules');
+			language.current = 'fr';
+			expect(FAMILY_LABEL['request-attack']).toBe('Attaques sur la requête');
+			expect(CATEGORY_META.CUSTOM.label).toBe('Règles personnalisées');
+		} finally {
+			language.current = 'en';
 		}
 	});
 

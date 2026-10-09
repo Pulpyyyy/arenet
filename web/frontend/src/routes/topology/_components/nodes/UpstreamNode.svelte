@@ -46,6 +46,8 @@
 <script lang="ts">
         import { Handle, Position, type NodeProps } from '@xyflow/svelte';
         import type { UpstreamNodeData } from '../../_types';
+        import { t } from '$lib/i18n';
+        import { language } from '$lib/stores/language.svelte';
 
         let { data }: NodeProps & { data: UpstreamNodeData } = $props();
 </script>
@@ -85,9 +87,9 @@
                                         stroke-width="2"
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
-                                        aria-label="Health check configuré · surveillé"
+                                        aria-label={language.current && t('topology.nodes.healthCheckWatched')}
                                 >
-                                        <title>Health check configuré · surveillé</title>
+                                        <title>{language.current && t('topology.nodes.healthCheckWatched')}</title>
                                         <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.5.5 0 0 1-.96 0L9.24 3.18a.5.5 0 0 0-.96 0l-2.35 8.36A2 2 0 0 1 4 13H2" />
                                 </svg>
                         {/if}
@@ -95,7 +97,11 @@
                 <span class="up-p99">p99 {Math.round(data.p99LatencyMs)} ms</span>
         </div>
         <div class="up-line-2">
-                <div class="load-bar" aria-label="Charge relative {Math.round(data.loadRatio * 100)}%">
+                <div
+                        class="load-bar"
+                        aria-label={language.current &&
+                                t('topology.nodes.relativeLoad', { pct: Math.round(data.loadRatio * 100) })}
+                >
                         <div
                                 class="load-fill"
                                 style:width="{Math.round(data.loadRatio * 100)}%"

@@ -39,6 +39,7 @@ import type {
         TopologyUpstream,
         UpstreamNodeData,
 } from './_types';
+import { t } from '$lib/i18n';
 
 // ---------------------------------------------------------------------------
 // Layout constants
@@ -1167,7 +1168,10 @@ function deriveClusterWarning(route: TopologyRoute): string | undefined {
         // broken. Checked BEFORE the length test, not after: the length
         // is zero in both cases and only the redirect explains it.
         if (route.redirectTarget) return undefined;
-        if (ups.length === 0) return 'Aucun upstream configuré';
+        // Translated at build time: the page rebuilds the graph on every
+        // WebSocket frame (2 s by default), so a language switch shows
+        // up on the next one.
+        if (ups.length === 0) return t('topology.cluster.noUpstream');
         // Three-state aware (Regression A, 2026-06-03). v1.1.0 emits
         // 'unknown' for every upstream — "no probe data yet, not the
         // same as bad". The warning must fire ONLY for STRICTLY
@@ -1176,8 +1180,8 @@ function deriveClusterWarning(route: TopologyRoute): string | undefined {
         // too → red "Tous les upstreams sont indisponibles" on every
         // route in the canvas.
         const unhealthy = ups.filter((u) => u.status === 'unhealthy').length;
-        if (unhealthy === ups.length) return 'Tous les upstreams sont indisponibles';
-        if (unhealthy > 0) return `${unhealthy} upstream(s) hors-service`;
+        if (unhealthy === ups.length) return t('topology.cluster.allDown');
+        if (unhealthy > 0) return t('topology.cluster.someDown', { count: unhealthy });
         // All upstreams unknown OR all healthy OR a mix without any
         // strictly-unhealthy → no warning. The header surfaces the
         // count breakdown for those cases.

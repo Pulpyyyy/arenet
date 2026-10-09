@@ -198,7 +198,15 @@
 						<rect x="3" y="7" width="10" height="7" rx="1" />
 						<path d="M5 7V5a3 3 0 016 0v2" />
 					</svg>
-					<span>Mode <b>lecture seule</b> — votre compte a le rôle <b>viewer</b>. Contactez un administrateur pour obtenir les droits d'écriture.</span>
+					<!-- Split around the two bold words because their position
+					     differs between languages; "after" carries its own
+					     leading space or punctuation. -->
+					<span
+						>{language.current && t('readOnlyBanner.before')}
+						<b>{language.current && t('readOnlyBanner.strong')}</b>
+						{language.current && t('readOnlyBanner.middle')}
+						<b>viewer</b>{language.current && t('readOnlyBanner.after')}</span
+					>
 				</div>
 			{/if}
 			<main class="app-main" aria-busy={$loading} aria-live="polite">

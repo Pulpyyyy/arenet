@@ -1927,7 +1927,7 @@ describe('Routes page — W.7 follow-up: section visibility on mode=off', () => 
 		// activate." Future copy changes should reach this
 		// test before reaching production.
 		const hint = screen.getByTestId('country-block-off-hint');
-		expect(hint.textContent).toContain('Aucun gate par pays');
+		expect(hint.textContent).toContain('No country gate');
 		expect(hint.textContent).toContain('Allow-list');
 		expect(hint.textContent).toContain('Deny-list');
 	});
@@ -2026,7 +2026,7 @@ describe('Routes page — TLS advanced disclosure + UX hints (#R-PROXMOX-HTTPS-L
 		await tick();
 		const warning = screen.getByTestId('upstream-path-warning');
 		expect(warning.textContent).toContain('/api2/json');
-		expect(warning.textContent).toMatch(/ignoré/i);
+		expect(warning.textContent).toMatch(/ignored/i);
 		// And the value is preserved (no auto-strip — the operator
 		// has to decide).
 		expect(firstURL().value).toBe('https://1.2.3.4:8006/api2/json');

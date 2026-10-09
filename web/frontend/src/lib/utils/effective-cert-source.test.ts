@@ -17,6 +17,7 @@ import {
 	certSourceLabel,
 	certSourceTooltip,
 } from './effective-cert-source';
+import { language } from '$lib/stores/language.svelte';
 
 describe('parseEffectiveCertSource', () => {
 	it('returns kind "none" for undefined / null / empty', () => {
@@ -98,46 +99,58 @@ describe('parseEffectiveCertSource', () => {
 });
 
 describe('certSourceLabel', () => {
-	it('emits "Couvert par *.<apex>" for managed-domain', () => {
+	it('emits "Covered by *.<apex>" for managed-domain', () => {
 		expect(
 			certSourceLabel({ kind: 'managed-domain', coveringApex: 'example.com' })
-		).toBe('Couvert par *.example.com');
+		).toBe('Covered by *.example.com');
 	});
 
-	it('emits "Cert dédié (DNS-01)" / "Cert dédié (HTTP-01)" for per-route', () => {
+	it('emits "Dedicated cert (DNS-01)" / "Dedicated cert (HTTP-01)" for per-route', () => {
 		expect(certSourceLabel({ kind: 'per-route-acme', challenge: 'dns-01' })).toBe(
-			'Cert dédié (DNS-01)'
+			'Dedicated cert (DNS-01)'
 		);
 		expect(certSourceLabel({ kind: 'per-route-acme', challenge: 'http-01' })).toBe(
-			'Cert dédié (HTTP-01)'
+			'Dedicated cert (HTTP-01)'
 		);
 	});
 
-	it('emits "Cert interne" for per-route-internal', () => {
-		expect(certSourceLabel({ kind: 'per-route-internal' })).toBe('Cert interne');
+	it('emits "Internal cert" for per-route-internal', () => {
+		expect(certSourceLabel({ kind: 'per-route-internal' })).toBe('Internal cert');
 	});
 
-	it('emits "Cert manuel : <name>" for a named manual cert', () => {
-		expect(certSourceLabel({ kind: 'manual', certName: 'SCCNF' })).toBe('Cert manuel : SCCNF');
+	it('emits "Manual cert: <name>" for a named manual cert', () => {
+		expect(certSourceLabel({ kind: 'manual', certName: 'SCCNF' })).toBe('Manual cert: SCCNF');
 	});
 
-	it('emits "Cert manuel : *.<apex>" when the manual cert is a wildcard', () => {
+	it('emits "Manual cert: *.<apex>" when the manual cert is a wildcard', () => {
 		// The caller detects a wildcard SAN and passes "*.example.com"
 		// as certName so a manual wildcard reads like the ACME wildcard.
 		expect(certSourceLabel({ kind: 'manual', certName: '*.example.com' })).toBe(
-			'Cert manuel : *.example.com'
+			'Manual cert: *.example.com'
 		);
 	});
 
-	it('emits a bare "Cert manuel" when the cert name is unresolved', () => {
+	it('emits a bare "Manual cert" when the cert name is unresolved', () => {
 		// Defensive: an orphaned cert_id (cert deleted) still gets a
 		// meaningful badge instead of falling back to the empty string.
-		expect(certSourceLabel({ kind: 'manual' })).toBe('Cert manuel');
-		expect(certSourceLabel({ kind: 'manual', certName: '' })).toBe('Cert manuel');
+		expect(certSourceLabel({ kind: 'manual' })).toBe('Manual cert');
+		expect(certSourceLabel({ kind: 'manual', certName: '' })).toBe('Manual cert');
 	});
 
 	it('emits empty string for kind "none"', () => {
 		expect(certSourceLabel({ kind: 'none' })).toBe('');
+	});
+
+	it('follows the active language', () => {
+		language.current = 'fr';
+		try {
+			expect(
+				certSourceLabel({ kind: 'managed-domain', coveringApex: 'example.com' })
+			).toBe('Couvert par *.example.com');
+			expect(certSourceLabel({ kind: 'manual', certName: 'SCCNF' })).toBe('Cert manuel : SCCNF');
+		} finally {
+			language.current = 'en';
+		}
 	});
 });
 
@@ -161,17 +174,17 @@ describe('certSourceTooltip', () => {
 	});
 
 	it('mentions auto-signed for per-route-internal', () => {
-		expect(certSourceTooltip({ kind: 'per-route-internal' })).toContain('auto-signé');
+		expect(certSourceTooltip({ kind: 'per-route-internal' })).toContain('self-signed');
 	});
 
 	it('mentions the uploaded external cert for manual', () => {
 		const tt = certSourceTooltip({ kind: 'manual', certName: 'SCCNF' });
 		expect(tt).toContain('SCCNF');
-		expect(tt.toLowerCase()).toContain('manuel');
+		expect(tt.toLowerCase()).toContain('manual');
 	});
 
 	it('gives a generic manual tooltip when the name is unresolved', () => {
-		expect(certSourceTooltip({ kind: 'manual' }).toLowerCase()).toContain('manuel');
+		expect(certSourceTooltip({ kind: 'manual' }).toLowerCase()).toContain('manual');
 	});
 
 	it('emits empty string for kind "none"', () => {
