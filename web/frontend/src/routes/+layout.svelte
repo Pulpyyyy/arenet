@@ -267,7 +267,7 @@
 		padding: 8px 14px;
 		background: oklch(80% 0.14 85 / 0.10);
 		border-bottom: 1px solid oklch(80% 0.14 85 / 0.3);
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 		font-size: 12.5px;
 	}
 	.ro-banner svg { flex: none; }

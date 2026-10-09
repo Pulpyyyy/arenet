@@ -262,7 +262,7 @@
 		color: var(--text-secondary);
 	}
 	.role-admin {
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 		border-color: var(--status-warn);
 	}
 	h2 {
@@ -293,7 +293,7 @@
 		vertical-align: top;
 	}
 	.req {
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 	}
 	.muted {
 		color: var(--text-muted);
@@ -326,7 +326,7 @@
 		color: var(--status-up);
 	}
 	.status-4 {
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 	}
 	.status-5 {
 		color: var(--status-down);
@@ -381,7 +381,7 @@
 	.warn {
 		margin: 0;
 		font-size: 12px;
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 	}
 	.error {
 		margin: 0;

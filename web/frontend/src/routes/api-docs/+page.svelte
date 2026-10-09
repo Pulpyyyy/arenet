@@ -279,7 +279,7 @@
 	}
 	.m-put,
 	.m-patch {
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 	}
 	.m-delete {
 		color: var(--status-down);

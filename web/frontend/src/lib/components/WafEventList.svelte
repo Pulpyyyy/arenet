@@ -131,7 +131,7 @@ selected route.
 						</td>
 					{/if}
 					<td>
-						<span class="badge" style:background={categoryMeta(e.category).color}>
+						<span class="badge" style:--badge-c={categoryMeta(e.category).color}>
 							{e.category}
 						</span>
 					</td>
@@ -219,7 +219,13 @@ selected route.
 		display: inline-block;
 		padding: 0.1rem 0.45rem;
 		border-radius: 3px;
-		color: var(--text-on-color, #ffffff);
+		/* Tinted pill (the dashboard's pattern) instead of white on a
+		 * solid fill, which was ~1.9:1 on amber. The text is the
+		 * category colour pulled 30% toward --text-primary, in oklab so
+		 * the hue holds: >=4.6:1 for every palette colour, both themes.
+		 * --badge-c is set inline per row. */
+		background: color-mix(in oklch, var(--badge-c) 18%, transparent);
+		color: color-mix(in oklab, var(--badge-c) 70%, var(--text-primary));
 		font-size: var(--text-xs, 11px);
 		font-weight: 600;
 		letter-spacing: 0.04em;

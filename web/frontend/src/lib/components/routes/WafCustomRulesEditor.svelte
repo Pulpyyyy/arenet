@@ -133,7 +133,7 @@
 	</span>
 	<p class="text-xs text-muted mb-2 max-w-prose">{language.current && t('wafRules.hint')}</p>
 	{#if wafMode === 'off'}
-		<p class="text-xs text-status-warn mb-2" data-testid="waf-rules-off">{language.current && t('wafRules.wafOff')}</p>
+		<p class="text-xs text-warn mb-2" data-testid="waf-rules-off">{language.current && t('wafRules.wafOff')}</p>
 	{/if}
 
 	{#if value.length === 0}
@@ -268,7 +268,7 @@
 				{language.current && preview}
 			</p>
 			{#if error}
-				<p class="text-xs text-status-down" role="alert" data-testid="waf-rule-error">{error}</p>
+				<p class="text-xs text-down" role="alert" data-testid="waf-rule-error">{error}</p>
 			{/if}
 			<div class="editor-actions">
 				<button type="button" class="btn" onclick={() => (draft = null)} data-testid="waf-rule-cancel">

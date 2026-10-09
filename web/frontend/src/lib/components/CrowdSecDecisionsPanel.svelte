@@ -603,7 +603,7 @@
 								<tr>
 									<td class="ts" title={d.ts}>{relativeTs(d.ts)}</td>
 									<td>
-										<span class="badge" style:background={scopeColor(d.scope)}>
+										<span class="badge" style:--badge-c={scopeColor(d.scope)}>
 											{d.scope || '—'}
 										</span>
 									</td>
@@ -617,7 +617,7 @@
 										{/if}
 									</td>
 									<td>
-										<span class="badge" style:background={typeColor(d.type)}>
+										<span class="badge" style:--badge-c={typeColor(d.type)}>
 											{d.type || 'ban'}
 										</span>
 									</td>
@@ -761,18 +761,18 @@
 								{@const parsedManual = parseManualScenario(d.scenario)}
 								<tr>
 									<td>
-										<span class="badge" style:background={typeColor(d.type)}>
+										<span class="badge" style:--badge-c={typeColor(d.type)}>
 											{d.type || 'ban'}
 										</span>
 									</td>
 									<td>
-										<span class="badge" style:background={scopeColor(d.scope)}>
+										<span class="badge" style:--badge-c={scopeColor(d.scope)}>
 											{d.scope || '—'}
 										</span>
 									</td>
 									<td class="mono">{d.value || '—'}</td>
 									<td>
-										<span class="badge" style:background={originBadgeColor(d.origin)}>
+										<span class="badge" style:--badge-c={originBadgeColor(d.origin)}>
 											{originBadgeLabel(d.origin)}
 										</span>
 									</td>
@@ -1223,14 +1223,20 @@
 		display: inline-block;
 		padding: 0.1rem 0.45rem;
 		border-radius: 3px;
-		color: var(--text-on-color, #ffffff);
+		/* Tinted pill (the dashboard's pattern) instead of white on a
+		 * solid fill, which was ~1.9:1 on amber. The text is the badge
+		 * colour pulled 30% toward --text-primary, in oklab so the hue
+		 * holds: >=4.6:1 for every palette colour, both themes.
+		 * --badge-c is set inline per row (or by .auto-badge). */
+		background: color-mix(in oklch, var(--badge-c) 18%, transparent);
+		color: color-mix(in oklab, var(--badge-c) 70%, var(--text-primary));
 		font-size: var(--text-xs, 11px);
 		font-weight: 600;
 		letter-spacing: 0.04em;
 		white-space: nowrap;
 	}
 	.auto-badge {
-		background: var(--accent-cyan);
+		--badge-c: var(--accent-cyan);
 		margin-left: 0.4rem;
 		font-size: var(--text-xs, 10px);
 		text-transform: uppercase;
@@ -1343,7 +1349,7 @@
 		flex: 1;
 		font-family: var(--font-mono, monospace);
 		font-size: var(--text-xs, 11px);
-		background: var(--bg-default, #000);
+		background: var(--bg-base);
 		color: var(--text-primary);
 		padding: 0.4rem 0.6rem;
 		border-radius: 4px;

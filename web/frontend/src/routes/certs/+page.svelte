@@ -1425,7 +1425,7 @@
 		font-variant-numeric: tabular-nums;
 	}
 	.expiry-warn {
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 	}
 	.expiry-down {
 		color: var(--status-down);

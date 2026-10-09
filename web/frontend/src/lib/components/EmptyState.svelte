@@ -86,7 +86,7 @@
 		color: var(--text-muted);
 	}
 	.empty-state[data-tone='warn'] .mark {
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 	}
 	.title {
 		margin: 0;

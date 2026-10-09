@@ -273,7 +273,7 @@
 		font-size: 12px;
 		line-height: 1.5;
 	}
-	.ro-banner svg { flex: none; color: var(--status-warn); margin-top: 2px; }
+	.ro-banner svg { flex: none; color: var(--status-warn-fg); margin-top: 2px; }
 
 	.kv-grid {
 		display: grid;
@@ -312,7 +312,7 @@
 	}
 	.pill.configured {
 		background: color-mix(in oklch, var(--status-warn) 18%, transparent);
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 	}
 
 	.empty {

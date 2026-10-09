@@ -168,7 +168,7 @@
 		color: var(--status-down);
 	}
 	.badge[data-tone='watch'] {
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 	}
 
 	.body {

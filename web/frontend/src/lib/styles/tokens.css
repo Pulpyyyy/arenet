@@ -90,7 +90,10 @@
 	/* Text */
 	--text-primary: oklch(96% 0.005 250);
 	--text-secondary: oklch(68% 0.012 250);
-	--text-muted: oklch(54% 0.011 250);
+	/* 62% (was 54%, ~3.4:1 on --bg-surface): muted text is mostly
+	 * 10-11px, so it has to clear WCAG AA 4.5:1 on every surface it
+	 * sits on — base 5.4, elevated 5.1, surface 4.8. */
+	--text-muted: oklch(62% 0.011 250);
 	--text-inverse: oklch(15% 0.005 250);
 
 	/* Signature accent — Step R shift from cyan (#00d9ff) to purple-blue
@@ -98,10 +101,17 @@
 	 * existing components keep rendering; the hue is what changes. */
 	--accent-cyan: oklch(68% 0.21 255);
 	--accent-cyan-d: oklch(62% 0.22 255);
+	/* Accent as TEXT on an accent-tinted surface (--accent-soft), e.g.
+	 * the active sidebar item. Lighter than --accent here so it reads
+	 * on the dark tint (~6:1); the light theme flips it darker. */
+	--accent-fg: oklch(82% 0.16 255);
 
 	/* Status — OKLCH equivalents of the mock's --ok/--warn/--bad/--info. */
 	--status-up: oklch(72% 0.16 150);
 	--status-warn: oklch(80% 0.14 85);
+	/* Warn as emphasised TEXT on a warn-tinted surface (the read-only
+	 * banner's <b>). Same role as --accent-fg, for the warn hue. */
+	--status-warn-fg: oklch(86% 0.14 85);
 	--status-down: oklch(66% 0.20 25);
 	--status-info: oklch(72% 0.12 230);
 	--status-meta: oklch(62% 0.012 250);
@@ -155,16 +165,23 @@
 	/* Text */
 	--text-primary: oklch(18% 0.006 250);
 	--text-secondary: oklch(38% 0.010 250);
-	--text-muted: oklch(60% 0.012 250);
+	/* 52% (was 60%, ~3.5:1 on --bg-surface): base 5.2, elevated
+	 * 5.5, surface 4.9 — WCAG AA for the 10-11px muted text. */
+	--text-muted: oklch(52% 0.012 250);
 	--text-inverse: oklch(100% 0 0);
 
 	/* Signature */
 	--accent-cyan: oklch(52% 0.18 255);
 	--accent-cyan-d: oklch(46% 0.20 255);
+	/* Darker than --accent: ~5.5:1 on --accent-soft over --bg-sidebar.
+	 * The dark value (82%) is ~1.4:1 here — that was the bug. */
+	--accent-fg: oklch(46% 0.18 255);
 
 	/* Status */
 	--status-up: oklch(55% 0.16 150);
 	--status-warn: oklch(62% 0.16 85);
+	/* ~5.8:1 on the banner's 10% warn tint over --bg-base. */
+	--status-warn-fg: oklch(48% 0.12 85);
 	--status-down: oklch(54% 0.20 25);
 	--status-info: oklch(54% 0.16 290);
 	--status-meta: oklch(55% 0.012 250);

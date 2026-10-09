@@ -203,7 +203,7 @@
 	.segment[data-state='maintenance'].active {
 		background: var(--badge-warning-bg);
 		box-shadow: inset 0 0 0 1px var(--badge-warning-border);
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 	}
 	/* Disabled: same tinted pattern but visibly muted ("teinte opaque /
 	   atténuée") — a lower-opacity red + dimmed icon so a disabled route

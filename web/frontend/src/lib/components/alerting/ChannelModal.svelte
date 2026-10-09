@@ -535,7 +535,7 @@
 
 		{#if kind === 'webhook'}
 			{#if channel?.secretsLost}
-				<p class="text-xs text-status-warn" role="alert" data-testid="channel-secrets-lost">
+				<p class="text-xs text-warn" role="alert" data-testid="channel-secrets-lost">
 					{language.current && t('alerting.channelModal.secretsLost')}
 				</p>
 			{/if}
