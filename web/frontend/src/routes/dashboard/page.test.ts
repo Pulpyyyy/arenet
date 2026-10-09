@@ -12,19 +12,19 @@
 //   (b) hardcoded "block" / "BLOCK 403" labels in the WAF
 //       events feed, ignoring the per-event ev.action.
 //
+// The "Live tail" card that repeated the same five events in UTC is
+// gone; the recent-events card is the one place they are shown.
+//
 // Post-fix we pin:
 //   1. Two separate WAF KPI tiles (BLOCKED + DETECTED) with
 //      the right values projected to /h.
 //   2. Top Routes table renders the new WAF detect column.
 //   3. Recent WAF events surface DETECT label on detect-
-//      mode rows, BLOCK on block-mode rows. Status code on
-//      detect events renders as "—" (the operator-honest
-//      "no value" answer for an upstream the WAF didn't
-//      observe).
+//      mode rows, BLOCK on block-mode rows.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { tick } from 'svelte';
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
 
 const { metricsMock, securityMock, clientMock, certificatesMock, toastMock } = vi.hoisted(() => ({
 	metricsMock: {
@@ -192,7 +192,7 @@ describe('Dashboard — WAF event label fix (#R-WAF-EVENT-LABEL-INCONSISTENT)', 
 		statusCode: 0
 	};
 
-	it('renders BLOCK label + status code on block-mode events', async () => {
+	it('renders the BLOCK label on block-mode events, once', async () => {
 		metricsMock.fetchSummary.mockResolvedValue(makeSummary());
 		securityMock.fetchEvents.mockResolvedValue({ events: [blockEvent] });
 		render(Page);
@@ -202,13 +202,16 @@ describe('Dashboard — WAF event label fix (#R-WAF-EVENT-LABEL-INCONSISTENT)', 
 
 		const recent = screen.getByTestId('recent-event-1');
 		expect(recent.textContent?.toLowerCase()).toContain('block');
-		const tail = screen.getByTestId('tail-event-1');
-		expect(tail.textContent).toContain('BLOCK');
-		// Status code 403 must surface (no hardcoded fallback).
-		expect(tail.textContent).toContain('403');
+		// The duplicate "Live tail" card is gone: the event is shown once.
+		expect(screen.queryByTestId('tail-event-1')).toBeNull();
+		expect(screen.getAllByText('SQLi · 942100')).toHaveLength(1);
+		// The row reads relative time; the absolute reading on hover is
+		// local, never a bare UTC clock.
+		const when = recent.querySelector('.when');
+		expect(when?.getAttribute('title')).toBe(new Date(blockEvent.ts).toLocaleString('en'));
 	});
 
-	it('renders DETECT label + dash status on detect-mode events', async () => {
+	it('renders the DETECT label on detect-mode events', async () => {
 		metricsMock.fetchSummary.mockResolvedValue(makeSummary());
 		securityMock.fetchEvents.mockResolvedValue({ events: [detectEvent] });
 		render(Page);
@@ -221,12 +224,6 @@ describe('Dashboard — WAF event label fix (#R-WAF-EVENT-LABEL-INCONSISTENT)', 
 		// Must NOT carry the misleading "block" label that pre-fix
 		// silently rendered on detect events.
 		expect(recent.textContent?.toLowerCase()).not.toContain('block');
-
-		const tail = screen.getByTestId('tail-event-2');
-		expect(tail.textContent).toContain('DETECT');
-		// statusCode 0 renders as "—" (no value at WAF time).
-		expect(tail.textContent).toContain('—');
-		expect(tail.textContent).not.toContain('403');
 	});
 
 	it('renders both labels correctly when mixed events are in the feed', async () => {
@@ -378,5 +375,129 @@ describe('Dashboard — Phase 5 cert KPI tiles', () => {
 		// stays renderable instead of toasting an error.
 		expect(screen.getByTestId('kpi-cert-total').textContent).toContain('0');
 		expect(screen.getByTestId('kpi-cert-expiring').textContent).toContain('0');
+	});
+});
+
+// The traffic chart said "Req/s" over counts per minute, kept the
+// previous metric's points when a fetch failed, and the page said
+// "real-time" over data read once.
+describe('Dashboard — traffic chart units and freshness', () => {
+	it('labels the series per bucket, from the response', async () => {
+		metricsMock.fetchSummary.mockResolvedValue(makeSummary());
+		metricsMock.fetchTimeseries.mockResolvedValue({ bucketSizeSeconds: 60, points: [] });
+		render(Page);
+
+		await waitFor(() => expect(screen.getByTestId('chart-unit')).toHaveTextContent('requests / min'));
+		expect(screen.getByRole('button', { name: 'Requests' })).toBeInTheDocument();
+		expect(screen.queryByText('Req/s')).toBeNull();
+	});
+
+	it('shows the failure instead of the previous metric when a switch fails', async () => {
+		metricsMock.fetchSummary.mockResolvedValue(makeSummary());
+		metricsMock.fetchTimeseries.mockResolvedValueOnce({
+			bucketSizeSeconds: 60,
+			points: [
+				{ ts: '2026-06-10T22:00:00Z', value: 12 },
+				{ ts: '2026-06-10T22:01:00Z', value: 14 }
+			]
+		});
+		render(Page);
+		await waitFor(() => expect(screen.getByTestId('chart-unit')).toBeInTheDocument());
+
+		metricsMock.fetchTimeseries.mockRejectedValueOnce(new Error('boom'));
+		await fireEvent.click(screen.getByRole('button', { name: '5xx' }));
+
+		expect(await screen.findByTestId('chart-error')).toBeInTheDocument();
+		expect(screen.getByTestId('chart-unit')).toHaveTextContent('5xx responses / min');
+		expect(toastMock.pushToast).not.toHaveBeenCalled();
+	});
+
+	it('says when the data was last updated', async () => {
+		metricsMock.fetchSummary.mockResolvedValue(makeSummary());
+		render(Page);
+		expect(await screen.findByTestId('dashboard-updated-at')).toHaveTextContent('Updated at');
+	});
+});
+
+// The tiles were dead ends, an abnormal value looked like any other,
+// and the upstreams header printed the shown slice as the total.
+describe('Dashboard — tiles lead somewhere and flag what needs a look', () => {
+	async function renderWith(summary: Partial<SummaryResponse>): Promise<void> {
+		metricsMock.fetchSummary.mockResolvedValue(makeSummary(summary));
+		render(Page);
+		await screen.findByTestId('kpi-cert-failed-7d');
+	}
+
+	it('links each tile to the page behind its number', async () => {
+		await renderWith({});
+		const hrefs: Record<string, string> = {
+			'kpi-req-per-sec': '/routes',
+			'kpi-p95': '/routes',
+			'kpi-5xx': '/routes',
+			'kpi-waf-blocked': '/waf',
+			'kpi-waf-detected': '/waf',
+			'kpi-cert-total': '/certs',
+			'kpi-cert-expiring': '/certs',
+			'kpi-cert-failed-7d': '/certs'
+		};
+		for (const [id, href] of Object.entries(hrefs)) {
+			const tile = screen.getByTestId(id);
+			expect(tile.tagName, id).toBe('A');
+			expect(tile.getAttribute('href'), id).toBe(href);
+		}
+	});
+
+	it('gives the alarm tiles the warn tone when they are above zero', async () => {
+		certificatesMock.list.mockResolvedValue([
+			{ domain: 'soon.example', notAfter: new Date(Date.now() + 5 * 86_400_000).toISOString() }
+		]);
+		securityMock.fetchCertEventsAggregate
+			.mockResolvedValueOnce({ buckets: [] })
+			.mockResolvedValueOnce({
+				buckets: [{ bucketStart: '2026-06-09T00:00:00Z', issued: 0, renewed: 0, failed: 1 }]
+			});
+		// One 5xx in 100 000 requests rounds to 0 % and is still flagged.
+		await renderWith({
+			totalReq: 100_000,
+			totalFiveXx: 1,
+			totalWafBlocked: 3,
+			totalWafDetected: 9
+		});
+
+		for (const id of ['kpi-5xx', 'kpi-waf-blocked', 'kpi-cert-expiring', 'kpi-cert-failed-7d']) {
+			expect(screen.getByTestId(id).getAttribute('data-tone'), id).toBe('warn');
+		}
+		// Volumes and detect-mode matches are not alarms.
+		for (const id of ['kpi-req-per-sec', 'kpi-p95', 'kpi-waf-detected', 'kpi-cert-total']) {
+			expect(screen.getByTestId(id).hasAttribute('data-tone'), id).toBe(false);
+		}
+	});
+
+	it('keeps the alarm tiles quiet at zero', async () => {
+		await renderWith({ totalFiveXx: 0, totalWafBlocked: 0 });
+		for (const id of ['kpi-5xx', 'kpi-waf-blocked', 'kpi-cert-expiring', 'kpi-cert-failed-7d']) {
+			expect(screen.getByTestId(id).hasAttribute('data-tone'), id).toBe(false);
+		}
+	});
+
+	it('says "8 of N" and links to /routes when the upstream list is cut', async () => {
+		clientMock.listRoutes.mockResolvedValue(
+			Array.from({ length: 11 }, (_, i) => ({
+				id: `r${i}`,
+				host: `h${i}.example.com`,
+				upstreams: [{ url: `http://10.0.0.${i}`, weight: 1 }]
+			}))
+		);
+		await renderWith({});
+
+		expect(screen.getByTestId('upstreams-meta')).toHaveTextContent('8 of 11 distinct');
+		expect(screen.getByTestId('upstreams-see-all').getAttribute('href')).toBe('/routes');
+		expect(document.querySelectorAll('.upstream-row')).toHaveLength(8);
+	});
+
+	it('gives the plain count when every upstream is shown', async () => {
+		await renderWith({});
+		expect(screen.getByTestId('upstreams-meta')).toHaveTextContent('1 distinct');
+		expect(screen.queryByTestId('upstreams-see-all')).toBeNull();
 	});
 });

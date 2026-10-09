@@ -20,6 +20,14 @@
 
   `trend` is kept from the pre-v2.41 API: positive is an up arrow in
   the up colour, negative a down arrow in the down colour.
+
+  Both optional, both off by default (existing callers unchanged):
+
+    href — the tile becomes a link to the page behind the number;
+           the whole tile is the target, with a visible focus ring
+    tone — 'warn' marks a value that wants a look (a 5xx, an
+           expiring certificate): warning border and value colour,
+           exposed as data-tone for styling and tests
 -->
 <script lang="ts">
 	interface Props {
@@ -36,6 +44,10 @@
 		hint?: string;
 		/** 'text' shrinks the value: it is a word, not a measurement. */
 		variant?: 'number' | 'text';
+		/** When set, the tile is a link to the page behind the number. */
+		href?: string;
+		/** 'warn' flags a value that wants a look; 'default' is quiet. */
+		tone?: 'default' | 'warn';
 		testid?: string;
 	}
 
@@ -46,6 +58,8 @@
 		trend = 0,
 		hint = '',
 		variant = 'number',
+		href,
+		tone = 'default',
 		testid
 	}: Props = $props();
 
@@ -54,7 +68,13 @@
 	const trendAbs = $derived(Math.abs(trend));
 </script>
 
-<div class="tile" data-testid={testid}>
+<svelte:element
+	this={href ? 'a' : 'div'}
+	class="tile"
+	{href}
+	data-tone={tone === 'default' ? undefined : tone}
+	data-testid={testid}
+>
 	<div class="label">{label}</div>
 	<div class="value" data-variant={variant}>
 		{value}{#if unit}<span class="unit">{unit}</span>{/if}
@@ -65,7 +85,7 @@
 	{#if hint}
 		<div class="foot">{hint}</div>
 	{/if}
-</div>
+</svelte:element>
 
 <style>
 	.tile {
@@ -73,6 +93,26 @@
 		border: 1px solid var(--border-subtle);
 		border-radius: var(--radius, 8px);
 		padding: 14px 16px;
+	}
+	.tile[href] {
+		display: block;
+		color: inherit;
+		text-decoration: none;
+		transition: background 0.12s;
+	}
+	/* Background, not border: the border carries the warn tone. */
+	.tile[href]:hover {
+		background: var(--bg-hover);
+	}
+	.tile[href]:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+	.tile[data-tone='warn'] {
+		border-color: var(--status-warn);
+	}
+	.tile[data-tone='warn'] .value {
+		color: var(--status-warn);
 	}
 	.label {
 		color: var(--text-muted);

@@ -1073,7 +1073,7 @@
 		"wafRules": "Règles WAF"
 	},
 	"dashboard": {
-		"subtitle": "Trafic en temps réel sur tes {count} routes, événements WAF récents et services en amont. Fenêtre {window}.",
+		"subtitle": "Trafic sur tes {count} routes, événements WAF récents et services en amont. Fenêtre {window}, rafraîchie chaque minute.",
 		"disabledTitle": "Métriques indisponibles",
 		"disabledBody": "Le sous-système d'observabilité n'a pas démarré. Le proxy sert toujours le trafic ; seul l'historique des métriques manque. Regarde les journaux d'Arenet pour la cause.",
 		"noRoutesTitle": "Aucune route configurée",
@@ -1101,16 +1101,22 @@
 		"kpiCertFailedFootZero": "aucune erreur d'émission",
 		"kpiCertFailedFootInvestigate": "investiguer",
 		"trafficCardTitle": "Trafic — fenêtre {window}",
-		"trafficBtnReq": "Req/s",
+		"trafficBtnReq": "Requêtes",
 		"trafficBtnLatency": "Latence",
-		"trafficBtnErrors": "Erreurs",
+		"trafficBtnErrors": "5xx",
+		"chartUnitRequests": "requêtes / {per}",
+		"chartUnit5xx": "réponses 5xx / {per}",
+		"chartUnitLatency": "p95, ms",
+		"chartLoadFailed": "La série n'a pas pu être chargée.",
+		"updatedAt": "Mis à jour à {time}",
+		"updatedAtFailed": "Échec du rafraîchissement · données de {time}",
 		"recentWafCardTitle": "Événements WAF récents",
 		"recentWafCardMeta": "5 derniers",
+		"recentWafOpenLogs": "Ouvrir les Logs →",
 		"recentWafEmpty": "Aucun événement WAF récent dans la fenêtre.",
 		"recentWafPillDetect": "detect",
 		"recentWafPillBlock": "block",
 		"recentWafFromIp": "{method} {path} — depuis {ip}",
-		"tailEmpty": "Aucun événement récent.",
 		"certLifecycleTitle": "Cycle de vie des certificats",
 		"certLifecycleMeta": "30 derniers jours · 1 bucket / jour",
 		"certLifecycleAria": "Cycle de vie des certificats sur 30 jours",
@@ -1128,10 +1134,10 @@
 		"topRoutesEmpty": "Aucune donnée dans la fenêtre.",
 		"upstreamsTitle": "Services upstream",
 		"upstreamsMetaCount": "{count} distincts",
+		"upstreamsMetaTruncated": "{shown} sur {total} distincts",
+		"upstreamsSeeAll": "Tous dans Routes →",
 		"upstreamsRouteSuffix": "{count} route{plural}",
-		"upstreamsEmpty": "Aucun upstream configuré.",
-		"tailTitle": "Événements WAF — flux récent",
-		"tailOpenLogs": "Ouvrir les Logs →"
+		"upstreamsEmpty": "Aucun upstream configuré."
 	},
 	"users": {
 		"loadFailed": "Échec du chargement des utilisateurs : {err}",
@@ -2639,6 +2645,9 @@
 		"action": "Changer mon mot de passe"
 	},
 	"observability": {
+		"chartRequests": "Requêtes / {per}",
+		"chart4xx": "4xx / {per}",
+		"chart5xx": "5xx / {per}",
 		"latencyTitle": "Latence (ms)",
 		"latencySeriesTtfb": "serveur",
 		"latencySeriesTotal": "avec transfert",
