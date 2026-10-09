@@ -52,6 +52,7 @@
 		type TCPServiceCounters
 	} from '$lib/api/tcp-services';
 	import TCPFlowDiagram from '$lib/components/tcp/TCPFlowDiagram.svelte';
+	import { formatBytes } from '$lib/utils/format';
 
 	function tl(key: string, params?: Record<string, string | number>): string {
 		void language.current;
@@ -313,20 +314,6 @@
 			formError = serverErrorMessage(err);
 			confirmDeleteOpen = false;
 		}
-	}
-
-	// Bytes in a shape an operator reads at a glance rather than
-	// counting digits.
-	function formatBytes(n: number): string {
-		if (n < 1024) return `${n} B`;
-		const units = ['kB', 'MB', 'GB', 'TB'];
-		let value = n / 1024;
-		let unit = 0;
-		while (value >= 1024 && unit < units.length - 1) {
-			value /= 1024;
-			unit++;
-		}
-		return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 	}
 
 	function listenOf(svc: TCPService): string {

@@ -29,6 +29,7 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
+	import { formatBytes } from '$lib/utils/format';
 
 	const selectClass =
 		'px-2 py-1 rounded-md bg-surface border border-border-default text-primary outline-none focus:border-accent-cyan';
@@ -224,12 +225,6 @@
 		return new Date(iso).toLocaleString(language.current === 'fr' ? 'fr-FR' : 'en-GB');
 	}
 
-	function fmtSize(bytes: number): string {
-		if (bytes < 1024) return `${bytes} B`;
-		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
-		return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
-	}
-
 	const weekdays = [0, 1, 2, 3, 4, 5, 6];
 </script>
 
@@ -418,7 +413,7 @@
 								{#each files as f (f.name)}
 									<tr class="border-t border-border-subtle" data-testid="sched-file-row">
 										<td class="py-1 font-mono">{f.name}</td>
-										<td class="py-1">{fmtSize(f.size)}</td>
+										<td class="py-1">{formatBytes(f.size)}</td>
 										<td class="py-1 text-right space-x-2">
 											<a
 												href={settingsApi.backupDownloadURL(f.name)}

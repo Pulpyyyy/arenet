@@ -183,7 +183,7 @@
 			<p class="text-xs text-muted">
 				{language.current && t('createServiceAccount.tokenIdLabel')} <code class="font-mono">{revealed.tokenId}</code>
 				{#if revealed.expiresAt}
-					 {language.current && t('createServiceAccount.expiresOnLabel')} {new Date(revealed.expiresAt).toLocaleString()}
+					 {language.current && t('createServiceAccount.expiresOnLabel')} {new Date(revealed.expiresAt).toLocaleString(language.current)}
 				{/if}
 			</p>
 		</div>

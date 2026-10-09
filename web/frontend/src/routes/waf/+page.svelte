@@ -230,7 +230,7 @@
 	<div class="kpis">
 		<StatCard
 			label={language.current && t('waf.kpiRequestsInspected')}
-			value={totalInspected24h.toLocaleString()}
+			value={totalInspected24h.toLocaleString(language.current)}
 			unit="/ 24h"
 			hint={language.current && t('waf.kpiRequestsInspectedFoot')}
 		/>
@@ -244,13 +244,13 @@
 		<StatCard
 			testid="kpi-blocked"
 			label={language.current && t('waf.kpiBlocked')}
-			value={totalBlocked24h.toLocaleString()}
+			value={totalBlocked24h.toLocaleString(language.current)}
 			hint={language.current && t('waf.kpiBlockedFoot', { pct: blockRatioPct })}
 		/>
 		<StatCard
 			testid="kpi-detected"
 			label={language.current && t('waf.kpiDetected')}
-			value={totalDetected24h.toLocaleString()}
+			value={totalDetected24h.toLocaleString(language.current)}
 			hint={language.current && t('waf.kpiDetectedFoot')}
 		/>
 		<StatCard
@@ -302,7 +302,7 @@
 			<div class="fam-block" data-testid="fam-{fam.family}">
 				<div class="fam-h">
 					<h4>{fam.familyLabel}</h4>
-					<span class="fam-meta">{language.current && t('waf.familyEventsCounter', { count: fam.totalEvents.toLocaleString() })}</span>
+					<span class="fam-meta">{language.current && t('waf.familyEventsCounter', { count: fam.totalEvents.toLocaleString(language.current) })}</span>
 				</div>
 				<div class="cat-grid">
 					{#each fam.rows as row (row.cat)}
@@ -345,13 +345,13 @@
 								</div>
 								<div class="cat-meta">
 									<div class="cat-meta-val cat-meta-block">
-										{row.block24h.toLocaleString()}
+										{row.block24h.toLocaleString(language.current)}
 									</div>
 									<div class="cat-meta-foot">{language.current && t('waf.blocks24hFoot')}</div>
 								</div>
 								<div class="cat-meta">
 									<div class="cat-meta-val cat-meta-detect">
-										{row.detect24h.toLocaleString()}
+										{row.detect24h.toLocaleString(language.current)}
 									</div>
 									<div class="cat-meta-foot">{language.current && t('waf.detects24hFoot')}</div>
 								</div>
@@ -381,8 +381,8 @@
 													<tr>
 														<td class="mono">{rule.ruleId}</td>
 														<td class="mono">{rule.category}</td>
-														<td class="num">{rule.count.toLocaleString()}</td>
-														<td class="mono">{new Date(rule.lastSeen).toLocaleString()}</td>
+														<td class="num">{rule.count.toLocaleString(language.current)}</td>
+														<td class="mono">{new Date(rule.lastSeen).toLocaleString(language.current)}</td>
 													</tr>
 												{/each}
 											</tbody>

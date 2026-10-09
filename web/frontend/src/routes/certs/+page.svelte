@@ -341,21 +341,23 @@
 	}
 
 	/**
-	 * "Xh", "Xd" / "Xj" relative-time string for the badge label.
+	 * "Xh", "Xd" / "Xj" duration string for the badge label.
 	 * Compact ; the full timestamp lives in the tooltip.
 	 *
-	 * v2.9.22 i18n — the day suffix ("d" in EN / "j" in FR) tracks
-	 * the active language preference. The hour suffix "h" is
-	 * universal (same in both locales). Reading language.current
-	 * inline lets a $derived caller pick up the switch reactively.
+	 * The narrow unit style of Intl.NumberFormat yields exactly that
+	 * compact form in the app language ("5h", "3d" / "3j"), so no
+	 * suffix is hand-coded. Reading language.current inline lets a
+	 * $derived caller pick up the switch reactively.
 	 */
 	function staleAgo(failTime: Date): string {
 		const ms = Date.now() - failTime.getTime();
 		const hours = Math.floor(ms / (60 * 60 * 1000));
-		if (hours < 48) return `${hours}h`;
-		const days = Math.floor(hours / 24);
-		const daySuffix = language.current === 'fr' ? 'j' : 'd';
-		return `${days}${daySuffix}`;
+		const inDays = hours >= 48;
+		return new Intl.NumberFormat(language.current, {
+			style: 'unit',
+			unit: inDays ? 'day' : 'hour',
+			unitDisplay: 'narrow'
+		}).format(inDays ? Math.floor(hours / 24) : hours);
 	}
 
 	/** True once the apex's wildcard cert is in the list with a real

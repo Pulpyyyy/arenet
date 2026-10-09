@@ -30,6 +30,8 @@
 -->
 
 <script lang="ts">
+	import { formatTime } from '$lib/utils/format';
+
 	interface Cell {
 		/** RFC 3339 timestamp of the event. */
 		ts: string;
@@ -207,10 +209,7 @@
 	}
 
 	function formatBucketTime(ts: number): string {
-		const d = new Date(ts);
-		const hh = String(d.getHours()).padStart(2, '0');
-		const mm = String(d.getMinutes()).padStart(2, '0');
-		return `${hh}:${mm}`;
+		return formatTime(new Date(ts));
 	}
 
 	function tooltipRows(idx: number): Array<{ key: string; label: string; color: string; count: number }> {

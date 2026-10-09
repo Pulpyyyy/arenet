@@ -289,8 +289,9 @@ describe('/tcp-services — traffic', () => {
 		expect(text).toContain('42');
 		expect(text).toContain('3');
 		expect(text).toContain('2');
-		expect(text).toContain('2.0 kB');
-		expect(text).toContain('5.0 MB');
+		// Decimal units (lib/utils/format.ts): 2048 B → 2 kB, 5 MiB → 5.2 MB.
+		expect(text).toMatch(/2\skB/);
+		expect(text).toMatch(/5\.2\sMB/);
 	});
 
 	it('shows a dash for a service that has carried nothing yet', async () => {
@@ -448,7 +449,7 @@ describe('/tcp-services — live counters', () => {
 			});
 			await vi.advanceTimersByTimeAsync(5000);
 			await vi.waitFor(() =>
-				expect(screen.getByTestId('tcp-traffic-svc1').textContent).toContain('4.0 kB')
+				expect(screen.getByTestId('tcp-traffic-svc1').textContent).toMatch(/4\.1\skB/)
 			);
 		} finally {
 			vi.useRealTimers();

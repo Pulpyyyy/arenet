@@ -95,7 +95,8 @@ describe('SystemInfoSection', () => {
 
 		await waitFor(() => expect(screen.getByTestId('system-info')).toBeInTheDocument());
 		expect(screen.getByTestId('system-memory-source').textContent).toMatch(/container/i);
-		expect(screen.getByTestId('system-memory-detail').textContent).toContain('512 MB');
+		// Sizes are decimal (lib/utils/format.ts): 512 MiB reads 537 MB.
+		expect(screen.getByTestId('system-memory-detail').textContent).toMatch(/537\sMB/);
 		// A quota must read as a restriction, not as a smaller machine:
 		// the host's real count stays on screen next to it.
 		expect(screen.getByTestId('system-cpu-cores').textContent).toContain('16');

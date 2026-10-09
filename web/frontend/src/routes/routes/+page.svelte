@@ -30,6 +30,7 @@
 	import { pathRuleContentChecks, sanitizePathRules } from '$lib/utils/path-rules';
 	import { manualCertDisplayName } from '$lib/utils/manual-cert-name';
 	import { gateApplies } from '$lib/utils/route-gates';
+	import { formatBytes } from '$lib/utils/format';
 	import type {
 		SecLangError,
 		WafCustomRule,
@@ -132,21 +133,6 @@
 	 *  read as "instant". */
 	function formatMs(v: number | null): string {
 		return v === null ? '—' : `${Math.round(v)} ms`;
-	}
-
-	/** Bytes at the scale an operator reads them. Deliberately decimal
-	 *  (kB = 1000), matching how bandwidth and file sizes are quoted
-	 *  everywhere the number will be compared against. */
-	function formatBytes(n: number, locale: string): string {
-		if (n < 1000) return `${n} B`;
-		const units = ['kB', 'MB', 'GB', 'TB'];
-		let v = n / 1000;
-		let i = 0;
-		while (v >= 1000 && i < units.length - 1) {
-			v /= 1000;
-			i++;
-		}
-		return `${v.toLocaleString(locale, { maximumFractionDigits: v < 10 ? 1 : 0 })} ${units[i]}`;
 	}
 
 	function clearRouteSummary() {
@@ -3607,7 +3593,7 @@
 	}
 
 	function fmtDate(iso: string): string {
-		return new Date(iso).toLocaleString();
+		return new Date(iso).toLocaleString(language.current);
 	}
 </script>
 
@@ -4821,7 +4807,7 @@
 														>
 														<span class="text-xs text-muted"
 															>{language.current && t('routes.form.certSourceManualExpiry')}
-															{new Date(cert.notAfter).toLocaleDateString()}</span
+															{new Date(cert.notAfter).toLocaleDateString(language.current)}</span
 														>
 													</span>
 												</label>
