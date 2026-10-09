@@ -93,6 +93,11 @@
 	let routes = $state<Route[]>([]);
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
+	// Set by the first successful load. The full-page spinner and error
+	// only stand in for a list that was never shown: a reload after a
+	// row state change, an import or a save used to unmount the list
+	// and the edit panel with it — sections re-collapsed, scroll lost.
+	let loaded = $state(false);
 
 	type FormMode = 'create' | 'edit';
 	let formOpen = $state(false);
@@ -766,16 +771,35 @@
 		return activeHTTPSCount === 1;
 	}
 
-	function openDisableConfirm(r: Route) {
+	// Saving the form's State as Disabled stops the route's traffic just
+	// as the row control does, so it asks the same question, last-HTTPS
+	// warning included. Confirming resumes that save instead of calling
+	// the disable endpoint; the flag lets the resumed save through.
+	let disableFromForm = false;
+	let formDisableConfirmed = false;
+
+	function openDisableConfirm(r: Route, fromForm = false) {
 		disableTarget = r;
 		disableIsLastHttps = isLastActiveHTTPSRoute(r);
+		disableFromForm = fromForm;
 	}
 
 	async function confirmDisableRoute() {
-		if (!disableTarget) return;
+		const target = disableTarget;
+		if (!target) return;
+		if (disableFromForm) {
+			disableTarget = null;
+			formDisableConfirmed = true;
+			await submitForm();
+			return;
+		}
+		await runRowAction(target, disableRowRoute);
+	}
+
+	async function disableRowRoute(r: Route) {
 		disablingRoute = true;
 		try {
-			await disableRoute(disableTarget.id);
+			await disableRoute(r.id);
 			// No dedicated "toasts.disabled" i18n key exists (out of
 			// this task's key set); the confirm dialog's own action
 			// label already told the operator what just happened, so
@@ -916,15 +940,63 @@
 			return;
 		}
 		if (next === 'maintenance') {
-			void handleEnterMaintenance(r);
+			void runRowAction(r, handleEnterMaintenance);
 			return;
 		}
 		// next === 'active'
 		if (current === 'disabled') {
-			void handleEnableRoute(r);
+			void runRowAction(r, handleEnableRoute);
 		} else if (current === 'maintenance') {
-			void handleExitMaintenance(r);
+			void runRowAction(r, handleExitMaintenance);
 		}
+	}
+
+	// Row state requests in flight, by route id. That row's control is
+	// disabled meanwhile: a double click used to send the change twice.
+	let pendingRowIds = $state<string[]>([]);
+
+	async function runRowAction(r: Route, action: (r: Route) => Promise<void>): Promise<void> {
+		if (pendingRowIds.includes(r.id)) return;
+		const before = routeState(r);
+		pendingRowIds = [...pendingRowIds, r.id];
+		try {
+			await action(r);
+		} finally {
+			pendingRowIds = pendingRowIds.filter((id) => id !== r.id);
+		}
+		reseedFormState(r.id, before);
+	}
+
+	// The panel seeds its State section when it opens. After a row
+	// changed the state of the route open there, the next Save shipped
+	// that stale seed and silently undid the change. Only the state
+	// follows the stored route: the operator's other edits, and the
+	// unsaved marker tracking them, are kept.
+	function reseedFormState(id: string, before: ReturnType<typeof routeState>): void {
+		if (!formOpen || formMode !== 'edit' || editingId !== id || formSnapshot === '') return;
+		const fresh = routes.find((x) => x.id === id);
+		if (!fresh || routeState(fresh) === before) return;
+		const snap = JSON.parse(formSnapshot) as typeof formData;
+		formData.disabled = snap.disabled = fresh.disabled ?? false;
+		// The maintenance settings the server applied, unless the
+		// operator has edited the form's: Save ships them under
+		// Maintenance.
+		if (
+			fresh.maintenanceConfig &&
+			JSON.stringify(formData.maintenanceConfig) === JSON.stringify(snap.maintenanceConfig)
+		) {
+			const mc = {
+				retryAfterSeconds: fresh.maintenanceConfig.retryAfterSeconds,
+				bypassIps: [...(fresh.maintenanceConfig.bypassIps ?? [])],
+				message: fresh.maintenanceConfig.message ?? ''
+			};
+			formData.maintenanceConfig = mc;
+			snap.maintenanceConfig = { ...mc, bypassIps: [...mc.bypassIps] };
+			seedRetryParts();
+		}
+		formSnapshot = JSON.stringify(snap);
+		stateChoice = routeState(fresh);
+		stateSnapshot = stateChoice;
 	}
 
 
@@ -1461,6 +1533,9 @@
 			// v2.41 — same reasoning for the discard confirm: it is
 			// portalled to body, so its own buttons are "outside".
 			if (confirmDiscardOpen) return;
+			// And for the disable confirm, which a save from the form
+			// opens: answering it must not close that form.
+			if (disableTarget !== null) return;
 			const target = event.target;
 			if (!(target instanceof Node)) return;
 			if (node.contains(target)) return;
@@ -3002,6 +3077,8 @@
 		// this guard is the correctness primitive. With it, even 100
 		// queued click events fire submitForm() only once for the
 		// in-flight save.
+		const disableConfirmed = formDisableConfirmed;
+		formDisableConfirmed = false;
 		if (submitting) {
 			return;
 		}
@@ -3028,6 +3105,15 @@
 				'danger'
 			);
 			void revealFirstError();
+			return;
+		}
+		// Disabling a serving route from the form takes the row control's
+		// confirmation (see openDisableConfirm); nothing is sent until
+		// the operator confirms, and cancelling leaves the form as is.
+		const stored = formMode === 'edit' ? routes.find((x) => x.id === editingId) : undefined;
+		if (stored && !stored.disabled && stateChoice === 'disabled' && !disableConfirmed) {
+			submitting = false;
+			openDisableConfirm(stored, true);
 			return;
 		}
 		try {
@@ -3553,6 +3639,7 @@
 		loadError = null;
 		try {
 			routes = await listRoutes();
+			loaded = true;
 		} catch (err) {
 			const msg = err instanceof ApiError ? err.message : String(err);
 			loadError = msg;
@@ -3751,11 +3838,11 @@
 	</div>
 {/if}
 
-{#if loading}
+{#if loading && !loaded}
 	<div class="flex items-center gap-2 mt-12 text-secondary">
 		<Spinner /> {language.current && t('routes.loadingLabel')}
 	</div>
-{:else if loadError}
+{:else if loadError && !loaded}
 	<div class="mt-12 text-down" role="alert">{language.current && t('routes.loadFailed', { err: loadError })}</div>
 {:else if routes.length === 0 && !formOpen}
 	<!-- Empty-state CTA. Skipped when formOpen is true so the new-
@@ -4113,6 +4200,7 @@
 												disabled: t('routes.state.disabled')
 											}}
 											onchange={(next) => onRouteStateChange(r, next)}
+											disabled={pendingRowIds.includes(r.id)}
 										/>
 										{/if}
 									</div>
@@ -4382,11 +4470,12 @@
 					     each closed row carries the state it holds (see RouteSection). -->
 					<!-- v2.41.1 — State first: what the route does right now is
 					     read before anything else, and the operator asked for it
-					     at the top. The three states are exclusive, so they are a
-					     segmented control like the country filter's — and, like
-					     the icons in the routes list, picking one APPLIES it
-					     through the dedicated endpoints (disable keeps its
-					     confirm dialog and its last-HTTPS warning). The
+					     at the top. The states are exclusive, so they are a
+					     segmented control like the country filter's. Unlike the
+					     icons in the routes list, picking one applies nothing
+					     until Save (v2.41.2); saving a serving route as Disabled
+					     asks the row control's confirmation, last-HTTPS warning
+					     included (see submitForm). The
 					     maintenance settings appear only under Maintenance,
 					     because that is the only state they describe. -->
 					<RouteSection

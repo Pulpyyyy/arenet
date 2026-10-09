@@ -29,8 +29,11 @@
       theme-store integration: a single writer for the value)
     - role="radiogroup" on the container, role="radio" + aria-checked
       per segment
-    - keyboard navigation via ArrowLeft/ArrowRight/Home/End, roving
-      focus follows the checked segment (WAI-ARIA radiogroup pattern)
+    - keyboard navigation via ArrowLeft/ArrowRight/Home/End with a
+      roving tabindex (WAI-ARIA radiogroup pattern), but with MANUAL
+      activation: arrows only move focus, Enter/Space commits. Every
+      pick is a live change to a route, and arrowing past Maintenance
+      on the way to Disabled used to put the route in maintenance.
 
   Public API (add-only; do not rename/remove props):
 
@@ -74,12 +77,21 @@
 		onchange?.(v);
 	}
 
-	// WAI-ARIA radiogroup pattern: arrow keys move the checked state
-	// (not just focus) — mirrors Toggle's click-to-select semantics
-	// extended to 3 segments with wraparound.
+	// The segment keyboard focus is on while it is inside the group;
+	// null otherwise, so the tab stop falls back to the checked one.
+	let focused = $state<RouteState | null>(null);
+	const tabStop = $derived(focused ?? value);
+
 	function onKeydown(e: KeyboardEvent): void {
 		if (disabled) return;
-		const idx = STATES.indexOf(value);
+		if (e.key === 'Enter' || e.key === ' ') {
+			// The commit is the focused button's own click. Stopped here
+			// so an ancestor's key handler (a routes row opens its panel
+			// on Enter/Space) does not also act on it.
+			e.stopPropagation();
+			return;
+		}
+		const idx = STATES.indexOf(tabStop);
 		let next: number | null = null;
 		switch (e.key) {
 			case 'ArrowLeft':
@@ -100,7 +112,14 @@
 				return;
 		}
 		e.preventDefault();
-		pick(STATES[next]);
+		focused = STATES[next];
+		const group = (e.target as HTMLElement).closest('[role="radiogroup"]');
+		group?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus();
+	}
+
+	function onFocusout(e: FocusEvent): void {
+		const group = (e.target as HTMLElement).closest('[role="radiogroup"]');
+		if (!group?.contains(e.relatedTarget as Node | null)) focused = null;
 	}
 </script>
 
@@ -111,6 +130,7 @@
 	aria-label={ariaLabel}
 	aria-disabled={disabled || undefined}
 	onkeydown={onKeydown}
+	onfocusout={onFocusout}
 >
 	{#each STATES as state (state)}
 		<button
@@ -122,8 +142,9 @@
 			aria-checked={state === value}
 			aria-label={labels[state]}
 			title={labels[state]}
-			tabindex={state === value ? 0 : -1}
+			tabindex={state === tabStop ? 0 : -1}
 			{disabled}
+			onfocus={() => (focused = state)}
 			onclick={() => pick(state)}
 		>
 			<span class="icon" aria-hidden="true">
