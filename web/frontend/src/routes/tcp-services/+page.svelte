@@ -20,7 +20,7 @@
   check before they trust the relay.
 -->
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Badge from '$lib/components/Badge.svelte';
@@ -32,6 +32,7 @@
 	import PostureSentence from '$lib/components/form/PostureSentence.svelte';
 	import { serverErrorMessage } from '$lib/api/server-errors';
 	import { guardNavigation } from '$lib/utils/navigation-guard';
+	import { ApiError } from '$lib/api/types';
 	import { pushToast } from '$lib/stores/toast';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
@@ -90,6 +91,107 @@
 	let fCIDRs = $state('');
 	let fHealthCheck = $state(false);
 	let fDisabled = $state(false);
+	// The service as stored, while editing. The form shows one backend,
+	// an allow list and a health-check switch; the API replaces the whole
+	// service on update, so whatever the form cannot show must be carried
+	// over from here or it is erased by the first save.
+	let stored = $state.raw<TCPService | null>(null);
+
+	// --- field errors -------------------------------------------
+	// Checked before the request rather than learned from a 400: an
+	// empty port used to be sent as 0 and come back as one English
+	// sentence at the bottom of the form, far from the field to fix.
+	// Listed in screen order — the first one in error gets the focus.
+	const FIELD_INPUT_IDS = {
+		name: 'tcp-name',
+		listenPort: 'tcp-listen-port',
+		listenAddr: 'tcp-listen-addr',
+		backendHost: 'tcp-backend-host',
+		backendPort: 'tcp-backend-port'
+	} as const;
+	type FieldKey = keyof typeof FIELD_INPUT_IDS;
+	type FieldErrors = Partial<Record<FieldKey, string>>;
+	const FIELD_ORDER = Object.keys(FIELD_INPUT_IDS) as FieldKey[];
+	// The same bounds storage.TCPService.Validate enforces.
+	const NAME_MAX_LENGTH = 64;
+	const PORT_MIN = 1;
+	const PORT_MAX = 65535;
+
+	let fieldErrors = $state<FieldErrors>({});
+
+	function portError(port: number | null): string | undefined {
+		// An emptied number input binds to null; a half-typed one
+		// ("1e") reads as empty to the browser and lands here too.
+		if (port === null || Number.isNaN(port)) return tl('tcpServices.form.portRequired');
+		if (!Number.isInteger(port) || port < PORT_MIN || port > PORT_MAX) {
+			return tl('tcpServices.form.portRange');
+		}
+		return undefined;
+	}
+
+	function validate(): FieldErrors {
+		const errors: FieldErrors = {};
+		const name = fName.trim();
+		if (name === '') errors.name = tl('tcpServices.form.nameRequired');
+		else if (name.length > NAME_MAX_LENGTH) errors.name = tl('tcpServices.form.nameTooLong');
+		const listenPort = portError(fListenPort);
+		if (listenPort) errors.listenPort = listenPort;
+		if (fBackendHost.trim() === '') errors.backendHost = tl('tcpServices.form.backendHostRequired');
+		const backendPort = portError(fBackendPort);
+		if (backendPort) errors.backendPort = backendPort;
+		return errors;
+	}
+
+	// Server refusals that name a field the form shows. The two coded
+	// ones come from caddymgr.CanBind; the others are the fixed
+	// prefixes of storage.TCPService.Validate and
+	// caddymgr.ValidateTCPListen. "backend 1" only: the form edits the
+	// first backend, a refusal about another one belongs to none of
+	// these inputs. Anything unmatched stays in the block at the bottom.
+	const SERVER_FIELD_PATTERNS: ReadonlyArray<[RegExp, FieldKey]> = [
+		[/tcp service: name /, 'name'],
+		[/tcp service: listen_addr /, 'listenAddr'],
+		[/tcp service: listen_port /, 'listenPort'],
+		[/port \d+ is used by /, 'listenPort'],
+		[/ both listen on /, 'listenPort'],
+		[/tcp service: backend 1: host /, 'backendHost'],
+		[/tcp service: backend 1: port /, 'backendPort']
+	];
+
+	function serverErrorField(err: unknown): FieldKey | null {
+		if (
+			err instanceof ApiError &&
+			(err.code === 'listen_port_taken' || err.code === 'listen_needs_capability')
+		) {
+			return 'listenPort';
+		}
+		const message = err instanceof Error ? err.message : '';
+		for (const [pattern, field] of SERVER_FIELD_PATTERNS) {
+			if (pattern.test(message)) return field;
+		}
+		return null;
+	}
+
+	function clearFieldError(field: FieldKey): void {
+		if (!fieldErrors[field]) return;
+		const next = { ...fieldErrors };
+		delete next[field];
+		fieldErrors = next;
+	}
+
+	async function focusFirstError(): Promise<void> {
+		// The message and aria-describedby must exist before the focus
+		// lands, or a screen reader announces the field without them.
+		await tick();
+		const first = FIELD_ORDER.find((f) => fieldErrors[f]);
+		if (!first) return;
+		const el = document.getElementById(FIELD_INPUT_IDS[first]);
+		if (!el) return;
+		el.focus();
+		// Absent from jsdom; in a browser it brings a field that sits
+		// below the fold of a stacked layout back into view.
+		if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' });
+	}
 
 	// Unsaved changes: the form is snapshotted when it opens, and
 	// anything different afterwards is unsaved work. Cancel, picking
@@ -271,7 +373,9 @@
 		fCIDRs = '';
 		fHealthCheck = false;
 		fDisabled = false;
+		stored = null;
 		formError = null;
+		fieldErrors = {};
 		testResult = null;
 	}
 
@@ -289,6 +393,7 @@
 	function openEdit(svc: TCPService) {
 		resetForm();
 		editingId = svc.id;
+		stored = $state.snapshot(svc) as TCPService;
 		fName = svc.name;
 		fProtocol = svc.protocol ?? 'tcp';
 		fAcceptProtocol = svc.acceptProtocol ?? '';
@@ -299,7 +404,10 @@
 		fProxyProtocol = svc.proxyProtocol ?? '';
 		fCrowdSec = svc.crowdSecEnabled ?? false;
 		fRestrict = svc.ipFilter?.mode === 'allow';
-		fCIDRs = (svc.ipFilter?.cidrs ?? []).join(', ');
+		// Only an allow list belongs in the "allowed ranges" box: a deny
+		// list loaded there would become an allow list the moment the
+		// operator switched Restrict on — the opposite gate.
+		fCIDRs = svc.ipFilter?.mode === 'allow' ? (svc.ipFilter.cidrs ?? []).join(', ') : '';
 		fHealthCheck = svc.healthCheck?.enabled ?? false;
 		fDisabled = svc.disabled ?? false;
 		formOpen = true;
@@ -311,28 +419,81 @@
 			.split(/[,\n]/)
 			.map((c) => c.trim())
 			.filter((c) => c !== '');
+		const storedFilter = stored?.ipFilter;
+		let ipFilter: TCPServiceRequest['ipFilter'] = undefined;
+		if (fRestrict) {
+			ipFilter = { ...(storedFilter?.mode === 'allow' ? storedFilter : {}), mode: 'allow', cidrs };
+		} else if (storedFilter?.mode !== 'allow') {
+			// Restrict off and the stored gate is not an allow list the
+			// operator just switched off: it is a deny list (or an inert
+			// "off" one) this form cannot show, so it stays.
+			ipFilter = storedFilter;
+		}
 		return {
 			name: fName.trim(),
 			protocol: fProtocol,
-			// Every field of this payload is rebuilt by hand, so a new
-			// one that is not listed here is silently dropped on save
-			// with a success toast — that is how the v2.46 path
-			// redirect was lost. See the buildPayload test.
+			// Every field of this payload is rebuilt by hand and the API
+			// replaces the whole service, so a field not listed here is
+			// silently erased on save with a success toast — that is how
+			// the v2.46 path redirect was lost, and how editing the name
+			// of a two-backend service used to delete its second backend.
+			// What the form does not show comes from `stored`.
 			acceptProtocol: fAcceptProtocol || undefined,
 			listenAddr: fListenAddr.trim(),
 			listenPort: fListenPort ?? 0,
-			upstreams: [{ host: fBackendHost.trim(), port: fBackendPort ?? 0 }],
+			// The form edits the first backend; the others, and the first
+			// one's connection cap, are carried over.
+			upstreams: [
+				{ ...stored?.upstreams[0], host: fBackendHost.trim(), port: fBackendPort ?? 0 },
+				...(stored?.upstreams.slice(1) ?? [])
+			],
+			lbPolicy: stored?.lbPolicy,
 			proxyProtocol: fProxyProtocol,
 			crowdSecEnabled: fCrowdSec,
-			ipFilter: fRestrict ? { mode: 'allow', cidrs } : undefined,
-			healthCheck: fHealthCheck ? { enabled: true } : undefined,
+			ipFilter,
+			// The switch owns `enabled`; interval and timeout are kept.
+			// Absent and disabled emit the same thing (no check), so a
+			// service that never had one is not given one.
+			healthCheck: stored?.healthCheck
+				? { ...stored.healthCheck, enabled: fHealthCheck }
+				: fHealthCheck
+					? { enabled: true }
+					: undefined,
 			disabled: fDisabled
 		};
 	}
 
+	// What the stored service carries that the form does not show, said
+	// before Save so "kept" is not something the operator has to trust.
+	const hiddenKept = $derived.by(() => {
+		if (!stored) return '';
+		const items: string[] = [];
+		const extra = stored.upstreams.length - 1;
+		if (extra > 0) items.push(tl('tcpServices.form.hiddenBackends', { count: extra }));
+		if (stored.lbPolicy) items.push(tl('tcpServices.form.hiddenLBPolicy', { policy: stored.lbPolicy }));
+		if (stored.upstreams.some((u) => u.maxConnections)) {
+			items.push(tl('tcpServices.form.hiddenMaxConnections'));
+		}
+		// Not once Restrict is on: the allow list then replaces it.
+		if (!fRestrict && stored.ipFilter?.mode === 'deny') {
+			items.push(
+				tl('tcpServices.form.hiddenDenyFilter', { count: stored.ipFilter.cidrs?.length ?? 0 })
+			);
+		}
+		if (stored.healthCheck?.interval || stored.healthCheck?.timeout) {
+			items.push(tl('tcpServices.form.hiddenHealthTiming'));
+		}
+		return items.length > 0 ? tl('tcpServices.form.hiddenKept', { items: items.join(', ') }) : '';
+	});
+
 	async function save() {
-		saving = true;
 		formError = null;
+		fieldErrors = validate();
+		if (Object.keys(fieldErrors).length > 0) {
+			await focusFirstError();
+			return;
+		}
+		saving = true;
 		try {
 			if (editingId) {
 				await updateTCPService(editingId, buildPayload());
@@ -343,7 +504,16 @@
 			formOpen = false;
 			await load();
 		} catch (err) {
-			formError = serverErrorMessage(err);
+			const message = serverErrorMessage(err);
+			const field = serverErrorField(err);
+			if (field) {
+				const next: FieldErrors = {};
+				next[field] = message;
+				fieldErrors = next;
+				void focusFirstError();
+			} else {
+				formError = message;
+			}
 		} finally {
 			saving = false;
 		}
@@ -557,13 +727,40 @@
 					</h3>
 				</div>
 
+				<!-- novalidate: the ports' min/max would otherwise make the
+				     browser block the submit with its own untranslated
+				     bubble before save() could say anything next to the
+				     field. The attributes stay as hints for the spinners. -->
 				<form
 					class="flex flex-col gap-4 p-5"
+					novalidate
 					onsubmit={(e) => {
 						e.preventDefault();
 						save();
 					}}
 				>
+					{#if hiddenKept}
+						<p
+							class="rounded-md border border-border-subtle bg-surface p-3 text-xs text-secondary leading-relaxed"
+							data-testid="tcp-hidden-kept"
+						>
+							{hiddenKept}
+						</p>
+					{/if}
+
+					<!-- The message under a field, linked to it by
+					     aria-describedby — the shape Input.svelte uses. -->
+					{#snippet fieldError(field: FieldKey)}
+						{#if fieldErrors[field]}
+							<p
+								id="{FIELD_INPUT_IDS[field]}-err"
+								class="mt-1 text-xs text-down"
+								data-testid="{FIELD_INPUT_IDS[field]}-err"
+							>
+								{fieldErrors[field]}
+							</p>
+						{/if}
+					{/snippet}
 
 					<div class="grid gap-3 sm:grid-cols-2">
 						<div>
@@ -573,8 +770,14 @@
 							<input
 								id="tcp-name"
 								bind:value={fName}
-								class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary"
+								oninput={() => clearFieldError('name')}
+								aria-invalid={fieldErrors.name ? 'true' : undefined}
+								aria-describedby={fieldErrors.name ? 'tcp-name-err' : undefined}
+								class="w-full bg-surface border rounded-md px-3 py-2 text-sm text-primary"
+								class:border-down={fieldErrors.name}
+								class:border-border-default={!fieldErrors.name}
 							/>
+							{@render fieldError('name')}
 						</div>
 						<div>
 							<label for="tcp-listen-port" class="text-sm font-medium text-secondary block mb-1"
@@ -586,8 +789,14 @@
 								min="1"
 								max="65535"
 								bind:value={fListenPort}
-								class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono"
+								oninput={() => clearFieldError('listenPort')}
+								aria-invalid={fieldErrors.listenPort ? 'true' : undefined}
+								aria-describedby={fieldErrors.listenPort ? 'tcp-listen-port-err' : undefined}
+								class="w-full bg-surface border rounded-md px-3 py-2 text-sm text-primary font-mono"
+								class:border-down={fieldErrors.listenPort}
+								class:border-border-default={!fieldErrors.listenPort}
 							/>
+							{@render fieldError('listenPort')}
 						</div>
 						<div>
 							<label for="tcp-listen-addr" class="text-sm font-medium text-secondary block mb-1"
@@ -596,9 +805,15 @@
 							<input
 								id="tcp-listen-addr"
 								bind:value={fListenAddr}
+								oninput={() => clearFieldError('listenAddr')}
+								aria-invalid={fieldErrors.listenAddr ? 'true' : undefined}
+								aria-describedby={fieldErrors.listenAddr ? 'tcp-listen-addr-err' : undefined}
 								placeholder="0.0.0.0"
-								class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono"
+								class="w-full bg-surface border rounded-md px-3 py-2 text-sm text-primary font-mono"
+								class:border-down={fieldErrors.listenAddr}
+								class:border-border-default={!fieldErrors.listenAddr}
 							/>
+							{@render fieldError('listenAddr')}
 						</div>
 						<div class="grid grid-cols-[1fr_90px] gap-2">
 							<div>
@@ -608,9 +823,15 @@
 								<input
 									id="tcp-backend-host"
 									bind:value={fBackendHost}
+									oninput={() => clearFieldError('backendHost')}
+									aria-invalid={fieldErrors.backendHost ? 'true' : undefined}
+									aria-describedby={fieldErrors.backendHost ? 'tcp-backend-host-err' : undefined}
 									placeholder="10.20.0.5"
-									class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono"
+									class="w-full bg-surface border rounded-md px-3 py-2 text-sm text-primary font-mono"
+									class:border-down={fieldErrors.backendHost}
+									class:border-border-default={!fieldErrors.backendHost}
 								/>
+								{@render fieldError('backendHost')}
 							</div>
 							<div>
 								<label for="tcp-backend-port" class="text-sm font-medium text-secondary block mb-1"
@@ -622,8 +843,14 @@
 									min="1"
 									max="65535"
 									bind:value={fBackendPort}
-									class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono"
+									oninput={() => clearFieldError('backendPort')}
+									aria-invalid={fieldErrors.backendPort ? 'true' : undefined}
+									aria-describedby={fieldErrors.backendPort ? 'tcp-backend-port-err' : undefined}
+									class="w-full bg-surface border rounded-md px-3 py-2 text-sm text-primary font-mono"
+									class:border-down={fieldErrors.backendPort}
+									class:border-border-default={!fieldErrors.backendPort}
 								/>
+								{@render fieldError('backendPort')}
 							</div>
 						</div>
 					</div>

@@ -1149,6 +1149,12 @@
 			"disabled": "Disabled",
 			"disabledHelper": "The service is kept but nothing is listening.",
 			"notApplicable": "A relay forwards bytes without reading them: no WAF, no error pages, no country blocking. TLS stays negotiated end to end between the client and the backend.",
+			"hiddenKept": "Kept on save, though this form does not show them: {items}.",
+			"hiddenBackends": "{count} more backend(s)",
+			"hiddenLBPolicy": "the {policy} balancing policy",
+			"hiddenMaxConnections": "per-backend connection limits",
+			"hiddenDenyFilter": "a deny filter ({count} range(s))",
+			"hiddenHealthTiming": "the health-check timing",
 			"testButton": "Test the backends",
 			"udp_not_testable": "UDP is connectionless: there is no handshake to attempt, so Arenet cannot prove this backend is reachable without speaking its protocol.",
 			"proxyNote": "This service prepends the PROXY protocol {version} header. The backend must be configured to expect it from this host, or connections fail silently — on Stalwart that setting is proxyTrustedNetworks.",
@@ -1162,7 +1168,12 @@
 			"save": "Save",
 			"acceptProtocol": "Accepted protocol",
 			"acceptProtocolAny": "Anything",
-			"acceptProtocolHint": "Closes connections whose handshake is not this protocol, before they reach the backend. A correct backend already refuses garbage, so this is hardening — what it adds is that a scanner never gets through, and that repeated mismatches are counted. The list depends on the transport above."
+			"acceptProtocolHint": "Closes connections whose handshake is not this protocol, before they reach the backend. A correct backend already refuses garbage, so this is hardening — what it adds is that a scanner never gets through, and that repeated mismatches are counted. The list depends on the transport above.",
+			"nameRequired": "Give the service a name.",
+			"nameTooLong": "64 characters at most.",
+			"portRequired": "Enter a port.",
+			"portRange": "A whole number from 1 to 65535.",
+			"backendHostRequired": "Enter the backend’s address or host name."
 		},
 		"deleteDialog": {
 			"title": "Delete this service?",

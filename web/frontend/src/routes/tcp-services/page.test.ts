@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { tick } from 'svelte';
+import { ApiError } from '$lib/api/types';
 
 const { api } = vi.hoisted(() => ({
 	api: {
@@ -236,6 +237,113 @@ describe('/tcp-services — saving', () => {
 		expect(api.updateTCPService.mock.calls[0][1].acceptProtocol).toBe('ssh');
 	});
 
+	// The API replaces the whole service on update, and the form shows one
+	// backend, an allow list and a health-check switch. Renaming a relay
+	// used to delete its other backends, its deny list and its check
+	// timing — with a success toast.
+	function richService() {
+		return service({
+			upstreams: [
+				{ host: '10.20.0.5', port: 993, maxConnections: 50 },
+				{ host: '10.20.0.6', port: 993 },
+				{ host: '10.20.0.7', port: 993 }
+			],
+			lbPolicy: 'least_conn',
+			ipFilter: { mode: 'deny', cidrs: ['203.0.113.0/24'] },
+			healthCheck: { enabled: true, interval: '10s', timeout: '2s' }
+		});
+	}
+
+	it('keeps what the form cannot show when only the name changes', async () => {
+		api.listTCPServices.mockResolvedValue([richService()]);
+		api.updateTCPService.mockResolvedValue(richService());
+		render(Page);
+		await userEvent.click(await screen.findByTestId('tcp-row-svc1'));
+		await tick();
+
+		const name = document.getElementById('tcp-name') as HTMLInputElement;
+		await userEvent.clear(name);
+		await userEvent.type(name, 'imaps-renamed');
+		await userEvent.click(screen.getByText('Save'));
+
+		await waitFor(() => expect(api.updateTCPService).toHaveBeenCalledTimes(1));
+		const payload = api.updateTCPService.mock.calls[0][1];
+		expect(payload.name).toBe('imaps-renamed');
+		expect(payload.upstreams).toEqual([
+			{ host: '10.20.0.5', port: 993, maxConnections: 50 },
+			{ host: '10.20.0.6', port: 993 },
+			{ host: '10.20.0.7', port: 993 }
+		]);
+		expect(payload.lbPolicy).toBe('least_conn');
+		expect(payload.ipFilter).toEqual({ mode: 'deny', cidrs: ['203.0.113.0/24'] });
+		expect(payload.healthCheck).toEqual({ enabled: true, interval: '10s', timeout: '2s' });
+	});
+
+	// Switching Restrict on is an explicit choice of an allow list, and
+	// it must start empty: the deny list loaded into the "allowed ranges"
+	// box would have inverted the gate.
+	it('replaces the deny list by an allow list only when Restrict is switched on', async () => {
+		api.listTCPServices.mockResolvedValue([richService()]);
+		api.updateTCPService.mockResolvedValue(richService());
+		render(Page);
+		await userEvent.click(await screen.findByTestId('tcp-row-svc1'));
+		await tick();
+
+		await userEvent.click(screen.getByTestId('tcp-restrict'));
+		await tick();
+		const cidrs = document.getElementById('tcp-cidrs') as HTMLTextAreaElement;
+		expect(cidrs.value).toBe('');
+		await userEvent.type(cidrs, '192.168.1.0/24');
+		await userEvent.click(screen.getByText('Save'));
+
+		await waitFor(() => expect(api.updateTCPService).toHaveBeenCalledTimes(1));
+		const payload = api.updateTCPService.mock.calls[0][1];
+		expect(payload.ipFilter).toEqual({ mode: 'allow', cidrs: ['192.168.1.0/24'] });
+		// The rest is still carried over.
+		expect(payload.upstreams).toHaveLength(3);
+	});
+
+	it('says what it keeps without showing it, and only when there is something', async () => {
+		api.listTCPServices.mockResolvedValue([
+			richService(),
+			service({ id: 'svc2', name: 'plain', listenPort: 2222 })
+		]);
+		render(Page);
+		await userEvent.click(await screen.findByTestId('tcp-row-svc1'));
+		await tick();
+
+		const note = screen.getByTestId('tcp-hidden-kept').textContent ?? '';
+		expect(note).toMatch(/kept on save/i);
+		expect(note).toContain('2 more backend');
+		expect(note).toMatch(/deny filter/);
+		expect(note).toMatch(/health-check timing/);
+
+		// Once Restrict is on the deny list is no longer kept, so the
+		// note stops promising it.
+		await userEvent.click(screen.getByTestId('tcp-restrict'));
+		await tick();
+		expect(screen.getByTestId('tcp-hidden-kept').textContent).not.toMatch(/deny filter/);
+
+		await userEvent.click(screen.getByTestId('tcp-row-svc2'));
+		await tick();
+		expect(screen.queryByTestId('tcp-hidden-kept')).toBeNull();
+	});
+
+	it('gives no health check to a service that never had one', async () => {
+		api.listTCPServices.mockResolvedValue([service()]);
+		api.updateTCPService.mockResolvedValue(service());
+		render(Page);
+		await userEvent.click(await screen.findByTestId('tcp-row-svc1'));
+		await tick();
+		await userEvent.click(screen.getByText('Save'));
+
+		await waitFor(() => expect(api.updateTCPService).toHaveBeenCalledTimes(1));
+		const payload = api.updateTCPService.mock.calls[0][1];
+		expect(payload.healthCheck).toBeUndefined();
+		expect(payload.ipFilter).toBeUndefined();
+		expect(payload.upstreams).toEqual([{ host: '10.20.0.5', port: 993 }]);
+	});
+
 	// Switching to UDP must clear a TCP-only protocol rather than submit
 	// a pair the API refuses with a 400 the operator cannot interpret.
 	it('clears a TCP-only protocol when the transport becomes UDP', async () => {
@@ -260,16 +368,141 @@ describe('/tcp-services — saving', () => {
 		expect(options).not.toContain('tls');
 	});
 
+	// The form now checks its fields first, so it is filled: an empty
+	// one never reaches the API. A refusal that names no field still
+	// lands in the block at the bottom.
 	it('surfaces what the server refused', async () => {
-		api.createTCPService.mockRejectedValue(new Error('port 443 is used by Arenet HTTPS routes'));
-		render(Page);
-		await waitFor(() => expect(screen.getByTestId('tcp-empty')).toBeInTheDocument());
-		await userEvent.click(screen.getAllByText('+ New service')[0]);
-		await tick();
+		api.createTCPService.mockRejectedValue(new Error('caddy reload failed: listener exploded'));
+		await openNewForm();
+		await fillValidForm();
 		await userEvent.click(screen.getByText('Save'));
 
 		await waitFor(() => expect(screen.getByTestId('tcp-form-error')).toBeInTheDocument());
-		expect(screen.getByTestId('tcp-form-error').textContent).toContain('Arenet HTTPS routes');
+		expect(screen.getByTestId('tcp-form-error').textContent).toContain('listener exploded');
+	});
+});
+
+async function openNewForm() {
+	render(Page);
+	await waitFor(() => expect(screen.getByTestId('tcp-empty')).toBeInTheDocument());
+	await userEvent.click(screen.getAllByText('+ New service')[0]);
+	await tick();
+}
+
+function field(id: string): HTMLInputElement {
+	return document.getElementById(id) as HTMLInputElement;
+}
+
+async function fillValidForm() {
+	await userEvent.type(field('tcp-name'), 'imaps');
+	await userEvent.type(field('tcp-listen-port'), '993');
+	await userEvent.type(field('tcp-backend-host'), '10.20.0.5');
+	await userEvent.type(field('tcp-backend-port'), '993');
+	await tick();
+}
+
+// The form used to send whatever it held — an empty port went out as
+// 0 — and every refusal came back as one sentence at the bottom, far
+// from the field to fix.
+describe('/tcp-services — the form checks its fields before sending', () => {
+	it('sends nothing while required fields are empty, and says so next to each', async () => {
+		await openNewForm();
+		await userEvent.click(screen.getByText('Save'));
+
+		for (const id of ['tcp-name', 'tcp-listen-port', 'tcp-backend-host', 'tcp-backend-port']) {
+			const err = await screen.findByTestId(`${id}-err`);
+			expect(err.textContent?.trim()).not.toBe('');
+			expect(field(id).getAttribute('aria-invalid')).toBe('true');
+			expect(field(id).getAttribute('aria-describedby')).toBe(err.id);
+		}
+		expect(screen.getByTestId('tcp-name-err').textContent).toMatch(/name/i);
+		expect(screen.getByTestId('tcp-listen-port-err').textContent).toMatch(/port/i);
+		// The interface may stay empty: it means "all".
+		expect(screen.queryByTestId('tcp-listen-addr-err')).toBeNull();
+		expect(field('tcp-listen-addr').getAttribute('aria-invalid')).toBeNull();
+		// Errors that belong to a field are not repeated at the bottom.
+		expect(screen.queryByTestId('tcp-form-error')).toBeNull();
+		// The first field in error is where the operator lands.
+		await waitFor(() => expect(document.activeElement).toBe(field('tcp-name')));
+		expect(api.createTCPService).not.toHaveBeenCalled();
+	});
+
+	it('refuses a port out of range, then saves once it is fixed', async () => {
+		api.createTCPService.mockResolvedValue(service());
+		await openNewForm();
+		await userEvent.type(field('tcp-name'), 'imaps');
+		await userEvent.type(field('tcp-listen-port'), '70000');
+		await userEvent.type(field('tcp-backend-host'), '10.20.0.5');
+		await userEvent.type(field('tcp-backend-port'), '993');
+		await tick();
+		await userEvent.click(screen.getByText('Save'));
+
+		const err = await screen.findByTestId('tcp-listen-port-err');
+		expect(err.textContent).toMatch(/1 to 65535/);
+		expect(screen.queryByTestId('tcp-name-err')).toBeNull();
+		expect(screen.queryByTestId('tcp-backend-port-err')).toBeNull();
+		await waitFor(() => expect(document.activeElement).toBe(field('tcp-listen-port')));
+		expect(api.createTCPService).not.toHaveBeenCalled();
+
+		// Editing the field clears its message; a valid value goes out.
+		await userEvent.clear(field('tcp-listen-port'));
+		await userEvent.type(field('tcp-listen-port'), '993');
+		await tick();
+		expect(screen.queryByTestId('tcp-listen-port-err')).toBeNull();
+		expect(field('tcp-listen-port').getAttribute('aria-invalid')).toBeNull();
+
+		await userEvent.click(screen.getByText('Save'));
+		await waitFor(() => expect(api.createTCPService).toHaveBeenCalledTimes(1));
+		expect(api.createTCPService.mock.calls[0][0]).toMatchObject({ name: 'imaps', listenPort: 993 });
+	});
+
+	it('saves a valid form without complaint', async () => {
+		api.createTCPService.mockResolvedValue(service());
+		await openNewForm();
+		await fillValidForm();
+		await userEvent.click(screen.getByText('Save'));
+
+		await waitFor(() => expect(api.createTCPService).toHaveBeenCalledTimes(1));
+		expect(document.querySelector('[aria-invalid="true"]')).toBeNull();
+	});
+
+	// The server knows things the form cannot: whether the port is free
+	// on this host, whether another relay already holds it.
+	it('puts a refusal about the listening port next to that port', async () => {
+		api.createTCPService.mockRejectedValue(
+			new ApiError(
+				'cannot listen on 0.0.0.0:993: address already in use',
+				400,
+				'validation',
+				undefined,
+				'listen_port_taken',
+				{ addr: '0.0.0.0:993' }
+			)
+		);
+		await openNewForm();
+		await fillValidForm();
+		await userEvent.click(screen.getByText('Save'));
+
+		const err = await screen.findByTestId('tcp-listen-port-err');
+		// Translated from the code, not the server's English.
+		expect(err.textContent).toMatch(/something else on this host already holds it/);
+		expect(err.textContent).toContain('0.0.0.0:993');
+		expect(field('tcp-listen-port').getAttribute('aria-invalid')).toBe('true');
+		expect(screen.queryByTestId('tcp-form-error')).toBeNull();
+		await waitFor(() => expect(document.activeElement).toBe(field('tcp-listen-port')));
+	});
+
+	it('maps a port conflict with another relay to the listening port', async () => {
+		api.createTCPService.mockRejectedValue(
+			new ApiError('tcp service "imaps": port 443 is used by Arenet HTTPS routes', 400)
+		);
+		await openNewForm();
+		await fillValidForm();
+		await userEvent.click(screen.getByText('Save'));
+
+		const err = await screen.findByTestId('tcp-listen-port-err');
+		expect(err.textContent).toContain('Arenet HTTPS routes');
+		expect(screen.queryByTestId('tcp-form-error')).toBeNull();
 	});
 });
 
