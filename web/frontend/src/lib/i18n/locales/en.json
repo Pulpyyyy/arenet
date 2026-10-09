@@ -2705,7 +2705,12 @@
 		"errMismatch": "Passwords do not match",
 		"errIncorrectCurrent": "Incorrect current password",
 		"errUnexpected": "Unexpected error",
-		"toastChanged": "Password changed successfully. Other sessions have been signed out."
+		"toastChanged": "Password changed successfully. Other sessions have been signed out.",
+		"lengthCounter": "{count}/{min} characters",
+		"showPassword": "Show",
+		"showCurrentAria": "Show current password",
+		"showNewAria": "Show new password",
+		"showConfirmAria": "Show new password confirmation"
 	},
 	"observability": {
 		"latencyTitle": "Latency (ms)",

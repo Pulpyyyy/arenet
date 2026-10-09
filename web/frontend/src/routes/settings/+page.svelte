@@ -813,11 +813,20 @@
 						</dd>
 					</dl>
 
-					<div class="mt-6">
-						<Button variant="secondary" onclick={() => (changePasswordOpen = true)}>
-							{language.current && t('settings.changePassword')}
-						</Button>
-					</div>
+					<!-- OIDC users have no local password to change (they
+					     rotate it at the IdP, and the server refuses the
+					     call), so the button is not offered to them. -->
+					{#if auth.user?.authSource !== 'oidc'}
+						<div class="mt-6">
+							<Button
+								variant="secondary"
+								onclick={() => (changePasswordOpen = true)}
+								data-testid="settings-change-password"
+							>
+								{language.current && t('settings.changePassword')}
+							</Button>
+						</div>
+					{/if}
 				</Card>
 
 				<!-- APPEARANCE SECTION -->

@@ -2705,7 +2705,12 @@
 		"errMismatch": "Les mots de passe ne correspondent pas",
 		"errIncorrectCurrent": "Mot de passe actuel incorrect",
 		"errUnexpected": "Erreur inattendue",
-		"toastChanged": "Mot de passe changé. Tes autres sessions ont été déconnectées."
+		"toastChanged": "Mot de passe changé. Tes autres sessions ont été déconnectées.",
+		"lengthCounter": "{count}/{min} caractères",
+		"showPassword": "Afficher",
+		"showCurrentAria": "Afficher ton mot de passe actuel",
+		"showNewAria": "Afficher ton nouveau mot de passe",
+		"showConfirmAria": "Afficher la confirmation de ton nouveau mot de passe"
 	},
 	"observability": {
 		"latencyTitle": "Latence (ms)",
