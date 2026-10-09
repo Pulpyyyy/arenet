@@ -5,6 +5,8 @@
 -->
 <script lang="ts" generics="T extends { id: string }">
 	import type { Snippet } from 'svelte';
+	import { t } from '$lib/i18n';
+	import { language } from '$lib/stores/language.svelte';
 
 	interface Props {
 		headers: string[];
@@ -80,7 +82,7 @@
 						colspan={headers.length}
 						class="px-4 py-6 text-center text-secondary text-sm"
 					>
-						No items.
+						{language.current && t('common.noItems')}
 					</td>
 				</tr>
 			{/if}

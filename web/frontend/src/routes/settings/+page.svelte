@@ -155,7 +155,8 @@
 			const res = await authApi.listSessions();
 			sessions = res.sessions;
 		} catch (err) {
-			sessionsError = err instanceof Error ? err.message : 'Failed to load sessions';
+			sessionsError =
+				err instanceof Error ? err.message : t('settings.sessions.loadFailedFallback');
 		} finally {
 			sessionsLoading = false;
 		}
@@ -185,11 +186,11 @@
 			// rarely diverges in the ~50 ms window between delete and
 			// next request.
 			sessions = sessions.filter((x) => x.id !== target.id);
-			pushToast('Session revoked', 'success');
+			pushToast(t('settings.sessions.toastRevoked'), 'success');
 			revokeConfirmOpen = false;
 			revokeTarget = null;
 		} catch (_) {
-			pushToast('Failed to revoke session', 'danger');
+			pushToast(t('settings.sessions.toastRevokeFailed'), 'danger');
 			// Re-fetch on error to recover the truth — the delete might
 			// have partially succeeded or the local list might be stale.
 			// Keep the dialog open so the user can retry if they want.
@@ -286,7 +287,7 @@
 			credsSaved = credsKey();
 		} catch (err) {
 			automationLoadError =
-				err instanceof Error ? err.message : 'Failed to load automation config';
+				err instanceof Error ? err.message : t('settings.automation.loadFailedFallback');
 		} finally {
 			automationLoading = false;
 		}
@@ -301,7 +302,7 @@
 			await settingsApi.putAutomationRules({
 				rules: { rules: rulesDraft }
 			});
-			pushToast('Automation rules saved', 'success');
+			pushToast(t('settings.automation.toastRulesSaved'), 'success');
 			await loadAutomation();
 		} catch (err) {
 			rulesFormError = err instanceof ApiError ? err.message : String(err);
@@ -322,8 +323,8 @@
 			automationCreds = res;
 			pushToast(
 				res.configured
-					? 'Automation credentials saved'
-					: 'Automation credentials cleared',
+					? t('settings.automation.toastCredsSaved')
+					: t('settings.automation.toastCredsCleared'),
 				'success'
 			);
 			credsForm.password = '';
@@ -372,12 +373,12 @@
 	type RuleDurationField = 'window_ns' | 'duration_ns' | 'cooldown_ns';
 	const RULE_DURATION_FIELDS: readonly {
 		key: RuleDurationField;
-		label: string;
+		ariaKey: string;
 		placeholder: string;
 	}[] = [
-		{ key: 'window_ns', label: 'Window', placeholder: '60s' },
-		{ key: 'duration_ns', label: 'Duration', placeholder: '4h' },
-		{ key: 'cooldown_ns', label: 'Cooldown', placeholder: '24h' }
+		{ key: 'window_ns', ariaKey: 'settings.automation.ariaWindow', placeholder: '60s' },
+		{ key: 'duration_ns', ariaKey: 'settings.automation.ariaDuration', placeholder: '4h' },
+		{ key: 'cooldown_ns', ariaKey: 'settings.automation.ariaCooldown', placeholder: '24h' }
 	];
 	function setRuleDuration(s: AutomationSource, field: RuleDurationField, text: string): void {
 		const key = `${s}.${field}`;
@@ -447,7 +448,7 @@
 			fwdAuthList = await settingsApi.listForwardAuthProviders();
 		} catch (err) {
 			fwdAuthListError =
-				err instanceof Error ? err.message : 'Failed to load forward-auth providers';
+				err instanceof Error ? err.message : t('settings.forwardAuth.loadFailedFallback');
 		} finally {
 			fwdAuthLoading = false;
 		}
@@ -509,10 +510,10 @@
 			};
 			if (fwdAuthEditingName === null) {
 				await settingsApi.createForwardAuthProvider(req);
-				pushToast('Forward-auth provider created', 'success');
+				pushToast(t('settings.forwardAuth.toastCreated'), 'success');
 			} else {
 				await settingsApi.updateForwardAuthProvider(fwdAuthEditingName, req);
-				pushToast('Forward-auth provider updated', 'success');
+				pushToast(t('settings.forwardAuth.toastUpdated'), 'success');
 			}
 			fwdAuthFormOpen = false;
 			await loadForwardAuthProviders();
@@ -527,7 +528,7 @@
 		fwdAuthDeleteError = null;
 		try {
 			await settingsApi.deleteForwardAuthProvider(name);
-			pushToast('Forward-auth provider deleted', 'success');
+			pushToast(t('settings.forwardAuth.toastDeleted'), 'success');
 			await loadForwardAuthProviders();
 		} catch (err) {
 			fwdAuthDeleteError = err instanceof ApiError ? err.message : String(err);
@@ -613,6 +614,27 @@
 	function tl(key: string, params?: Record<string, string | number>): string {
 		void language.current;
 		return t(key, params);
+	}
+
+	// A few help sentences carry markup (<code>, <em>) in the middle.
+	// The translation keeps the whole sentence with {name} placeholders
+	// (t() leaves unknown placeholders untouched), and the template
+	// renders each placeholder as its own element — so a translator
+	// can move the markup wherever the sentence needs it, without
+	// {@html}.
+	type RichPart = { text: string; ph: string | null };
+	function richParts(text: string): RichPart[] {
+		const parts: RichPart[] = [];
+		const re = /\{(\w+)\}/g;
+		let last = 0;
+		let m: RegExpExecArray | null;
+		while ((m = re.exec(text)) !== null) {
+			if (m.index > last) parts.push({ text: text.slice(last, m.index), ph: null });
+			parts.push({ text: m[0], ph: m[1] });
+			last = m.index + m[0].length;
+		}
+		if (last < text.length) parts.push({ text: text.slice(last), ph: null });
+		return parts;
 	}
 
 	// --- v2.50 access log ------------------------------------------
@@ -836,7 +858,7 @@
 </script>
 
 <svelte:head>
-	<title>Settings — Arenet</title>
+	<title>{tl('settings.headTitle')}</title>
 </svelte:head>
 
 <div class="mx-auto max-w-5xl">
@@ -884,13 +906,13 @@
 					</header>
 
 					<dl class="grid grid-cols-[10rem_1fr] gap-x-4 gap-y-3 text-sm">
-						<dt class="text-secondary">Display name</dt>
+						<dt class="text-secondary">{tl('settings.account.displayName')}</dt>
 						<dd class="text-primary">{auth.user?.displayName ?? '—'}</dd>
 
-						<dt class="text-secondary">Username</dt>
+						<dt class="text-secondary">{tl('settings.account.username')}</dt>
 						<dd class="text-primary font-mono">{auth.user?.username ?? '—'}</dd>
 
-						<dt class="text-secondary">Password security</dt>
+						<dt class="text-secondary">{tl('settings.account.passwordSecurity')}</dt>
 						<dd>
 							<!-- Discreet inline indicator — the compromised banner
 							     in +layout.svelte handles the urgent attention
@@ -899,15 +921,15 @@
 							     Chunk 6.4: wording switched from HIBP jargon to
 							     user-friendly equivalents. -->
 							{#if auth.user?.passwordCompromised}
-								<span class="text-down">Found in known breaches — change required</span>
+								<span class="text-down">{tl('settings.account.breachFound')}</span>
 							{:else if auth.user?.hibpCheckStatus === 'clean'}
-								<span class="text-up">Not found in known breaches</span>
+								<span class="text-up">{tl('settings.account.breachClean')}</span>
 							{:else if auth.user?.hibpCheckStatus === 'pending'}
-								<span class="text-muted">Verification in progress</span>
+								<span class="text-muted">{tl('settings.account.breachPending')}</span>
 							{:else if auth.user?.hibpCheckStatus === 'skipped'}
-								<span class="text-muted">Verification skipped</span>
+								<span class="text-muted">{tl('settings.account.breachSkipped')}</span>
 							{:else}
-								<span class="text-muted">Status unknown</span>
+								<span class="text-muted">{tl('settings.account.breachUnknown')}</span>
 							{/if}
 						</dd>
 					</dl>
@@ -984,13 +1006,13 @@
 
 					{#if sessionsLoading}
 						<div class="flex items-center gap-2 py-4 text-secondary text-sm">
-							<Spinner size="sm" /> Loading sessions…
+							<Spinner size="sm" /> {tl('settings.sessions.loading')}
 						</div>
 					{:else if sessionsError}
 						<div class="py-4 text-sm" role="alert">
-							<p class="text-down">Failed to load sessions: {sessionsError}</p>
+							<p class="text-down">{tl('settings.sessions.loadFailed', { err: sessionsError })}</p>
 							<div class="mt-3">
-								<Button variant="ghost" size="sm" onclick={loadSessions}>Retry</Button>
+								<Button variant="ghost" size="sm" onclick={loadSessions}>{tl('settings.sessions.retry')}</Button>
 							</div>
 						</div>
 					{:else}
@@ -1000,7 +1022,14 @@
 						     + tabindex + hover-rail + focus-ring when interactive
 						     is false. -->
 						<DataTable
-							headers={['Issued', 'Last activity', 'IP', 'Browser', 'Status', '']}
+							headers={[
+								tl('settings.sessions.colIssued'),
+								tl('settings.sessions.colLastActivity'),
+								tl('settings.sessions.colIp'),
+								tl('settings.sessions.colBrowser'),
+								tl('settings.sessions.colStatus'),
+								''
+							]}
 							items={sessions}
 							interactive={false}
 						>
@@ -1017,7 +1046,7 @@
 								</td>
 								<td class="px-4 py-3 text-sm">
 									{#if s.isCurrent}
-										<Badge variant="current">Current</Badge>
+										<Badge variant="current">{tl('settings.sessions.current')}</Badge>
 									{/if}
 								</td>
 								<td class="px-4 py-3 text-sm text-right">
@@ -1027,7 +1056,7 @@
 										disabled={s.isCurrent}
 										onclick={() => onRevokeClick(s)}
 									>
-										Revoke
+										{tl('settings.sessions.revoke')}
 									</Button>
 								</td>
 							{/snippet}
@@ -1212,32 +1241,32 @@
 				<Card padding="p-6">
 					<header class="flex items-center justify-between border-b border-border-subtle pb-3 mb-4">
 						<div>
-							<h2 class="text-xl font-semibold">Security Automation</h2>
+							<h2 class="text-xl font-semibold">{tl('settings.automation.title')}</h2>
 							<UnsavedMarker dirty={automationDirty} testid="automation-unsaved" />
 							<p class="text-xs text-muted mt-1">
-								Push CrowdSec bans to LAPI automatically when WAF / throttle / auth-failure events cross operator-configured thresholds. Decisions appear in the CrowdSec dashboard with scenario prefix <code>arenet/</code>.
+								{#each richParts(tl('settings.automation.subtitle')) as part, i (i)}{#if part.ph === 'prefix'}<code>arenet/</code>{:else}{part.text}{/if}{/each}
 							</p>
 						</div>
 						{#if automationLoading}
 							<Spinner size="sm" />
 						{:else if automationCreds.configured}
-							<Badge variant="status-up">Configured</Badge>
+							<Badge variant="status-up">{tl('settings.automation.badgeConfigured')}</Badge>
 						{:else}
-							<Badge variant="status-warn">Not configured</Badge>
+							<Badge variant="status-warn">{tl('settings.automation.badgeNotConfigured')}</Badge>
 						{/if}
 					</header>
 
 					{#if automationLoadError}
 						<p class="text-sm text-down mb-3" role="alert">
-							Failed to load automation config: {automationLoadError}
+							{tl('settings.automation.loadFailed', { err: automationLoadError })}
 						</p>
 					{/if}
 
 					<!-- Watcher credentials sub-form -->
 					<section class="mb-6">
-						<h3 class="text-base font-medium text-primary mb-2">Watcher credentials</h3>
+						<h3 class="text-base font-medium text-primary mb-2">{tl('settings.automation.credsTitle')}</h3>
 						<p class="text-xs text-muted mb-3">
-							Run <code>cscli machines add arenet-writer</code> on your CrowdSec host and paste the resulting credentials here. Distinct from the read-side bouncer key (Step N): writes to LAPI require a watcher per CrowdSec's auth model.
+							{#each richParts(tl('settings.automation.credsHint')) as part, i (i)}{#if part.ph === 'cmd'}<code>cscli machines add arenet-writer</code>{:else}{part.text}{/if}{/each}
 						</p>
 						<form
 							class="grid grid-cols-1 md:grid-cols-2 gap-4"
@@ -1248,7 +1277,7 @@
 						>
 							<div class="md:col-span-2">
 								<label for="auto-lapi-url" class="text-sm font-medium text-secondary block mb-1">
-									LAPI URL
+									{tl('settings.automation.lapiUrl')}
 								</label>
 								<input
 									id="auto-lapi-url"
@@ -1261,7 +1290,7 @@
 							</div>
 							<div>
 								<label for="auto-machine-id" class="text-sm font-medium text-secondary block mb-1">
-									Machine ID
+									{tl('settings.automation.machineId')}
 								</label>
 								<input
 									id="auto-machine-id"
@@ -1274,14 +1303,14 @@
 							</div>
 							<div>
 								<label for="auto-password" class="text-sm font-medium text-secondary block mb-1">
-									Password
+									{tl('settings.automation.password')}
 								</label>
 								<input
 									id="auto-password"
 									type="password"
 									autocomplete="off"
 									bind:value={credsForm.password}
-									placeholder={automationCreds.configured ? '••• set (leave blank to keep)' : ''}
+									placeholder={automationCreds.configured ? tl('settings.automation.passwordKeepPlaceholder') : ''}
 									class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono"
 								/>
 							</div>
@@ -1321,9 +1350,11 @@
 
 					<!-- Per-category rule toggles -->
 					<section>
-						<h3 class="text-base font-medium text-primary mb-2">Trigger rules</h3>
+						<h3 class="text-base font-medium text-primary mb-2">{tl('settings.automation.rulesTitle')}</h3>
+						<!-- The emphasised words are the column headings below,
+						     so the sentence and the table name things the same way. -->
 						<p class="text-xs text-muted mb-3">
-							Each category is disabled by default. When enabled, Arenet bans a source IP after <em>threshold</em> events in <em>window</em>, for <em>duration</em>, with a <em>cooldown</em> after an operator unban that suppresses re-ban for that long.
+							{#each richParts(tl('settings.automation.rulesHint')) as part, i (i)}{#if part.ph === 'threshold'}<em>{tl('settings.automation.colThreshold').toLowerCase()}</em>{:else if part.ph === 'window'}<em>{tl('settings.automation.colWindow').toLowerCase()}</em>{:else if part.ph === 'duration'}<em>{tl('settings.automation.colDuration').toLowerCase()}</em>{:else if part.ph === 'cooldown'}<em>{tl('settings.automation.colCooldown').toLowerCase()}</em>{:else}{part.text}{/if}{/each}
 						</p>
 						<p id="automation-duration-hint" class="text-xs text-muted mb-3">
 							{tl('settings.automationRules.durationHint')}
@@ -1338,12 +1369,12 @@
 								<table class="w-full text-sm">
 									<thead>
 										<tr class="text-left text-xs text-secondary uppercase">
-											<th class="py-2 pr-3">Category</th>
-											<th class="py-2 px-2">Enabled</th>
-											<th class="py-2 px-2">Threshold</th>
-											<th class="py-2 px-2">Window</th>
-											<th class="py-2 px-2">Duration</th>
-											<th class="py-2 px-2">Cooldown</th>
+											<th class="py-2 pr-3">{tl('settings.automation.colCategory')}</th>
+											<th class="py-2 px-2">{tl('settings.automation.colEnabled')}</th>
+											<th class="py-2 px-2">{tl('settings.automation.colThreshold')}</th>
+											<th class="py-2 px-2">{tl('settings.automation.colWindow')}</th>
+											<th class="py-2 px-2">{tl('settings.automation.colDuration')}</th>
+											<th class="py-2 px-2">{tl('settings.automation.colCooldown')}</th>
 										</tr>
 									</thead>
 									<tbody>
@@ -1356,7 +1387,7 @@
 														checked={getRule(src).enabled}
 														onchange={(e) =>
 															setRuleField(src, 'enabled', (e.target as HTMLInputElement).checked)}
-														aria-label={`Enable ${AUTOMATION_SOURCE_LABELS[src]}`}
+														aria-label={tl('settings.automation.ariaEnable', { source: AUTOMATION_SOURCE_LABELS[src] })}
 													/>
 												</td>
 												<td class="py-2 px-2">
@@ -1367,7 +1398,7 @@
 														oninput={(e) =>
 															setRuleField(src, 'threshold', Number((e.target as HTMLInputElement).value))}
 														class="w-16 bg-surface border border-border-default rounded-md px-2 py-1 text-sm font-mono"
-														aria-label={`Threshold for ${AUTOMATION_SOURCE_LABELS[src]}`}
+														aria-label={tl('settings.automation.ariaThreshold', { source: AUTOMATION_SOURCE_LABELS[src] })}
 													/>
 												</td>
 												{#each RULE_DURATION_FIELDS as f (f.key)}
@@ -1384,7 +1415,7 @@
 															class="w-20 bg-surface border rounded-md px-2 py-1 text-sm font-mono"
 															class:border-down={unreadable}
 															class:border-border-default={!unreadable}
-															aria-label={`${f.label} for ${AUTOMATION_SOURCE_LABELS[src]}`}
+															aria-label={tl(f.ariaKey, { source: AUTOMATION_SOURCE_LABELS[src] })}
 															aria-invalid={unreadable ? 'true' : undefined}
 															aria-describedby={unreadable
 																? `${errorId} automation-duration-hint`
@@ -1423,12 +1454,12 @@
 									aria-describedby={unreadableCount > 0 ? 'automation-rules-unreadable' : undefined}
 									data-testid="automation-rules-save"
 								>
-									{rulesSubmitting ? 'Saving…' : 'Save rules'}
+									{rulesSubmitting ? tl('settings.automation.saving') : tl('settings.automation.saveRules')}
 								</Button>
 							</div>
 						</form>
 						<p class="text-xs text-muted mt-2">
-							Cooldown defaults reflect category mistake-distribution: AUTH 7 days (operator unbans typically reflect real users), WAF SQLi/RCE/XSS/LFI 24 hours (suspected false positives), PROTOCOL/OTHER/Throttle 4 hours (maintenance-action unbans). Tune per-row.
+							{tl('settings.automation.cooldownHint')}
 						</p>
 					</section>
 				</Card>
@@ -1443,27 +1474,26 @@
 				<Card padding="p-6">
 					<header class="flex items-center justify-between border-b border-border-subtle pb-3 mb-4">
 						<div>
-							<h2 class="text-xl font-semibold">Forward-auth providers</h2>
+							<h2 class="text-xl font-semibold">{tl('settings.forwardAuth.title')}</h2>
 							<UnsavedMarker dirty={fwdAuthDirty} testid="fwdauth-unsaved" />
 							<p class="text-xs text-muted mt-1">
-								Configure identity providers (Authelia / Authentik /
-								Keycloak / generic) that routes delegate auth to.
+								{tl('settings.forwardAuth.subtitle')}
 							</p>
 						</div>
-						<Button onclick={openFwdAuthCreate}>+ Add provider</Button>
+						<Button onclick={openFwdAuthCreate}>{tl('settings.forwardAuth.addButton')}</Button>
 					</header>
 
 					{#if fwdAuthLoading}
 						<div class="flex items-center gap-2 py-4 text-secondary text-sm">
-							<Spinner size="sm" /> Loading providers…
+							<Spinner size="sm" /> {tl('settings.forwardAuth.loading')}
 						</div>
 					{:else if fwdAuthListError}
 						<p class="text-sm text-down mb-3" role="alert">
-							Failed to load forward-auth providers: {fwdAuthListError}
+							{tl('settings.forwardAuth.loadFailed', { err: fwdAuthListError })}
 						</p>
 					{:else if fwdAuthList.length === 0 && !fwdAuthFormOpen}
 						<p class="text-sm text-secondary py-2">
-							No forward-auth provider configured yet.
+							{tl('settings.forwardAuth.empty')}
 						</p>
 					{:else}
 						<div class="flex flex-col gap-2 mb-3">
@@ -1474,18 +1504,18 @@
 										<span class="text-xs text-muted">
 											{p.kind} · {p.verifyUrl}
 											{#if p.clientSecretSet}
-												· <span class="text-up">secret set</span>
+												· <span class="text-up">{tl('settings.forwardAuth.secretSet')}</span>
 											{:else}
-												· <span class="text-secondary">no secret</span>
+												· <span class="text-secondary">{tl('settings.forwardAuth.noSecret')}</span>
 											{/if}
 										</span>
 									</div>
 									<div class="flex items-center gap-1">
 										<Button variant="ghost" size="sm" onclick={() => openFwdAuthEdit(p)}>
-											Edit
+											{tl('settings.forwardAuth.edit')}
 										</Button>
 										<Button variant="ghost" size="sm" onclick={() => deleteFwdAuth(p.name)}>
-											Delete
+											{tl('settings.forwardAuth.delete')}
 										</Button>
 									</div>
 								</div>
@@ -1507,7 +1537,7 @@
 						>
 							<div>
 								<label for="fwdauth-name" class="text-sm font-medium text-secondary block mb-1">
-									Name (slug)
+									{tl('settings.forwardAuth.nameLabel')}
 								</label>
 								<input
 									id="fwdauth-name"
@@ -1519,14 +1549,14 @@
 								/>
 								{#if fwdAuthEditingName !== null}
 									<p class="text-xs text-muted mt-1">
-										Name is immutable after creation.
+										{tl('settings.forwardAuth.nameImmutable')}
 									</p>
 								{/if}
 							</div>
 
 							<div>
 								<label for="fwdauth-kind" class="text-sm font-medium text-secondary block mb-1">
-									Kind
+									{tl('settings.forwardAuth.kindLabel')}
 								</label>
 								<select
 									id="fwdauth-kind"
@@ -1544,7 +1574,7 @@
 									for="fwdauth-verify-url"
 									class="text-sm font-medium text-secondary block mb-1"
 								>
-									Verify URL
+									{tl('settings.forwardAuth.verifyUrlLabel')}
 								</label>
 								<input
 									id="fwdauth-verify-url"
@@ -1560,7 +1590,7 @@
 									for="fwdauth-auth-request-uri"
 									class="text-sm font-medium text-secondary block mb-1"
 								>
-									Auth request URI
+									{tl('settings.forwardAuth.authRequestUriLabel')}
 								</label>
 								<input
 									id="fwdauth-auth-request-uri"
@@ -1576,7 +1606,7 @@
 									for="fwdauth-copy-headers"
 									class="text-sm font-medium text-secondary block mb-1"
 								>
-									Copy headers (comma-separated)
+									{tl('settings.forwardAuth.copyHeadersLabel')}
 								</label>
 								<input
 									id="fwdauth-copy-headers"
@@ -1592,7 +1622,7 @@
 									for="fwdauth-client-secret"
 									class="text-sm font-medium text-secondary block mb-1"
 								>
-									Client secret (optional)
+									{tl('settings.forwardAuth.clientSecretLabel')}
 								</label>
 								<input
 									id="fwdauth-client-secret"
@@ -1600,7 +1630,7 @@
 									autocomplete="off"
 									bind:value={fwdAuthForm.clientSecret}
 									placeholder={fwdAuthEditingSecretSet
-										? '••• set (leave blank to keep)'
+										? tl('settings.forwardAuth.secretKeepPlaceholder')
 										: ''}
 									class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono"
 								/>
@@ -1611,7 +1641,7 @@
 									for="fwdauth-passthrough"
 									class="text-sm font-medium text-secondary block mb-1"
 								>
-									Auth passthrough prefix (optional)
+									{tl('settings.forwardAuth.passthroughLabel')}
 								</label>
 								<input
 									id="fwdauth-passthrough"
@@ -1621,16 +1651,7 @@
 									class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono"
 								/>
 								<p class="text-xs text-muted mt-1">
-									Path prefix served by the IdP itself on the
-									application's host (e.g. <code class="font-mono">/outpost.goauthentik.io</code> for
-									Authentik embedded outpost, <code class="font-mono">/oauth2</code> for
-									oauth2-proxy). Requests under this prefix bypass
-									the forward_auth gate and are reverse-proxied
-									directly to the verify URL host, carrying the same
-									Host as the verify sub-request so a reverse proxy in
-									front of the IdP routes both the same way. Leave
-									empty for providers that don't need it (Authelia
-									standalone, generic).
+									{#each richParts(tl('settings.forwardAuth.passthroughHint')) as part, i (i)}{#if part.ph === 'outpostPath'}<code class="font-mono">/outpost.goauthentik.io</code>{:else if part.ph === 'oauth2Path'}<code class="font-mono">/oauth2</code>{:else}{part.text}{/if}{/each}
 								</p>
 							</div>
 
@@ -1642,16 +1663,9 @@
 										class="mt-0.5 rounded border-border-default bg-surface text-cyan focus:ring-cyan"
 									/>
 									<span>
-										Rewrite Host of verify sub-request to verify URL host
+										{tl('settings.forwardAuth.rewriteHostLabel')}
 										<span class="block text-xs font-normal text-muted mt-0.5">
-											Depends on your network, not on which IdP you run.
-											Check it when something between Arenet and the IdP
-											routes by Host — typically a reverse proxy in front
-											of the IdP, such as Authentik behind Traefik or
-											nginx. Leave it unchecked when Arenet reaches the IdP
-											directly. Either way the IdP still identifies the
-											application from X-Forwarded-Host, which Arenet sends
-											from the original request.
+											{tl('settings.forwardAuth.rewriteHostHint')}
 										</span>
 									</span>
 								</label>
@@ -1663,14 +1677,14 @@
 
 							<div class="md:col-span-2 flex justify-end gap-2">
 								<Button variant="ghost" onclick={() => (fwdAuthFormOpen = false)} type="button">
-									Cancel
+									{tl('settings.forwardAuth.cancel')}
 								</Button>
 								<Button type="submit" disabled={fwdAuthSubmitting}>
 									{fwdAuthSubmitting
-										? 'Saving…'
+										? tl('settings.forwardAuth.saving')
 										: fwdAuthEditingName === null
-											? 'Create'
-											: 'Save'}
+											? tl('settings.forwardAuth.create')
+											: tl('settings.forwardAuth.save')}
 								</Button>
 							</div>
 						</form>
@@ -1737,14 +1751,14 @@
 			<!-- ROW 3 — About, full-width (footer-meta, intentionally aerated) -->
 			<Card padding="p-6">
 				<header class="border-b border-border-subtle pb-3 mb-4">
-					<h2 class="text-xl font-semibold">About</h2>
+					<h2 class="text-xl font-semibold">{tl('settings.about.title')}</h2>
 				</header>
 
 				<dl class="grid grid-cols-[10rem_1fr] gap-x-4 gap-y-3 text-sm">
-					<dt class="text-secondary">Version</dt>
+					<dt class="text-secondary">{tl('settings.about.version')}</dt>
 					<dd class="text-primary font-mono" data-testid="about-version">{displayVersion}</dd>
 
-					<dt class="text-secondary">License</dt>
+					<dt class="text-secondary">{tl('settings.about.license')}</dt>
 					<dd>
 						<a
 							href="https://github.com/barto95100/arenet/blob/{licenseRef}/LICENSE"
@@ -1756,7 +1770,7 @@
 						</a>
 					</dd>
 
-					<dt class="text-secondary">Source</dt>
+					<dt class="text-secondary">{tl('settings.about.source')}</dt>
 					<dd>
 						<a
 							href="https://github.com/barto95100/arenet"

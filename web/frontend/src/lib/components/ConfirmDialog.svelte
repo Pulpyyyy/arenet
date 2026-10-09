@@ -27,8 +27,8 @@
     open           — boolean (bindable)
     title          — string (required, dialog header)
     message        — string (required, body paragraph)
-    confirmLabel   — string (default 'Confirm')
-    cancelLabel    — string (default 'Cancel')
+    confirmLabel   — string (default t('common.confirm'))
+    cancelLabel    — string (default t('common.cancel'))
     confirmVariant — Button variant ('primary'|'secondary'|'ghost'|'danger'),
                      default 'danger' since the common case is destructive
     onConfirm      — () => void | Promise<void>
@@ -36,6 +36,8 @@
 <script lang="ts">
 	import Modal from './Modal.svelte';
 	import Button from './Button.svelte';
+	import { t } from '$lib/i18n';
+	import { language } from '$lib/stores/language.svelte';
 
 	type ConfirmVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
@@ -53,11 +55,17 @@
 		open = $bindable(),
 		title,
 		message,
-		confirmLabel = 'Confirm',
-		cancelLabel = 'Cancel',
+		confirmLabel,
+		cancelLabel,
 		confirmVariant = 'danger',
 		onConfirm
 	}: Props = $props();
+
+	// No string defaults in the destructuring: a default is evaluated
+	// once, in whatever language was active at mount. Resolving here
+	// keeps the fallback labels following a language switch.
+	const confirmText = $derived(confirmLabel ?? (language.current && t('common.confirm')));
+	const cancelText = $derived(cancelLabel ?? (language.current && t('common.cancel')));
 
 	let submitting = $state(false);
 
@@ -86,10 +94,10 @@
 		{/snippet}
 		{#snippet footer()}
 			<Button variant="ghost" onclick={onClose} disabled={submitting}>
-				{cancelLabel}
+				{cancelText}
 			</Button>
 			<Button variant={confirmVariant} onclick={handleConfirm} loading={submitting}>
-				{confirmLabel}
+				{confirmText}
 			</Button>
 		{/snippet}
 	</Modal>

@@ -20,6 +20,7 @@
 
 import { authApi } from '$lib/api/auth';
 import { pushToast } from './toast';
+import { t } from '$lib/i18n';
 
 export type Theme = 'dark' | 'light';
 
@@ -57,7 +58,7 @@ class ThemeStore {
 			// linger on the wrong value.
 			this.applyLocally(previous);
 			this.persistLocally(previous);
-			pushToast('Failed to save theme preference', 'danger');
+			pushToast(t('settings.themeSaveFailed'), 'danger');
 			throw err;
 		} finally {
 			this.isApplying = false;
