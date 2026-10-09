@@ -28,6 +28,7 @@ receives whatever points its caller chose to show.
 
 <script lang="ts">
 	import type { TimeseriesPoint } from '$lib/api/types';
+	import { chartClock, chartDayTime } from '$lib/utils/chart-time';
 
 	interface Props {
 		points: TimeseriesPoint[];
@@ -120,21 +121,15 @@ receives whatever points its caller chose to show.
 
 	// X axis: pick three timestamps to label — first / middle /
 	// last. Format depends on the spread: < 48h shows HH:MM,
-	// longer spreads show MM-DD HH:MM. Empty input → no labels.
+	// longer spreads add the day and month, ordered for the app
+	// language. Empty input → no labels.
 	const xTicks = $derived.by(() => {
 		if (points.length === 0) return [] as { x: number; label: string }[];
 		const firstTs = new Date(points[0].ts);
 		const lastTs = new Date(points[points.length - 1].ts);
 		const spanMs = lastTs.getTime() - firstTs.getTime();
 		const compact = spanMs < 48 * 3600 * 1000;
-		const fmtTs = (d: Date) => {
-			const hh = String(d.getHours()).padStart(2, '0');
-			const mm = String(d.getMinutes()).padStart(2, '0');
-			if (compact) return `${hh}:${mm}`;
-			const m = String(d.getMonth() + 1).padStart(2, '0');
-			const dd = String(d.getDate()).padStart(2, '0');
-			return `${m}-${dd} ${hh}:${mm}`;
-		};
+		const fmtTs = (d: Date) => (compact ? chartClock(d) : chartDayTime(d));
 		const midIdx = Math.floor(points.length / 2);
 		return [
 			{ x: xAt(0), label: fmtTs(firstTs) },
@@ -164,14 +159,9 @@ receives whatever points its caller chose to show.
 	const tooltip = $derived.by(() => {
 		if (hoverIdx === null) return null;
 		const p = points[hoverIdx];
-		const d = new Date(p.ts);
-		const hh = String(d.getHours()).padStart(2, '0');
-		const mm = String(d.getMinutes()).padStart(2, '0');
-		const m = String(d.getMonth() + 1).padStart(2, '0');
-		const dd = String(d.getDate()).padStart(2, '0');
 		return {
 			x: xAt(hoverIdx),
-			tsLabel: `${m}-${dd} ${hh}:${mm}`,
+			tsLabel: chartDayTime(new Date(p.ts)),
 			valueLabel: p.value === null ? '—' : fmt(p.value),
 			hasValue: p.value !== null
 		};

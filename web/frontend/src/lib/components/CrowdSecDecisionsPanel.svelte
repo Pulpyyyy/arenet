@@ -33,6 +33,9 @@
 	import { pushToast } from '$lib/stores/toast';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
+	import { copyText } from '$lib/utils/clipboard';
+	import { relativeTime } from '$lib/utils/audit-format';
+	import { recentTime, relativeTimeShort } from '$lib/utils/relative-time';
 
 	// Step CS.3 Commit D — admin gate for the "Bannir une IP"
 	// button. Mirrors the backend RequireAdminMiddleware on
@@ -309,12 +312,11 @@
 	let copyToast = $state<string | null>(null);
 	let copyToastTimer: ReturnType<typeof setTimeout> | null = null;
 	async function copyToClipboard(text: string): Promise<void> {
-		try {
-			await navigator.clipboard.writeText(text);
-			copyToast = t('crowdsecDecisions.copyToast');
-		} catch {
-			copyToast = t('crowdsecDecisions.copyUnavailable');
-		}
+		// copyText has the execCommand fallback: navigator.clipboard
+		// does not exist on the plain-HTTP origins homelabs often use.
+		copyToast = (await copyText(text))
+			? t('crowdsecDecisions.copyToast')
+			: t('crowdsecDecisions.copyFailed');
 		if (copyToastTimer !== null) clearTimeout(copyToastTimer);
 		copyToastTimer = setTimeout(() => {
 			copyToast = null;
@@ -358,39 +360,15 @@
 		return i >= 0 ? s.slice(i + 1) : s;
 	}
 
-	function relativeTs(iso: string): string {
-		const then = new Date(iso).getTime();
-		const now = Date.now();
-		const secs = Math.max(0, Math.floor((now - then) / 1000));
-		if (secs < 60) return `${secs}s ago`;
-		const mins = Math.floor(secs / 60);
-		if (mins < 60) return `${mins}m ago`;
-		const d = new Date(iso);
-		const hh = String(d.getHours()).padStart(2, '0');
-		const mm = String(d.getMinutes()).padStart(2, '0');
-		return `${hh}:${mm}`;
-	}
+	const relativeTs = (iso: string): string => recentTime(iso);
 
 	function formatExpiry(iso: string): string {
 		if (!iso) return '—';
-		const target = new Date(iso).getTime();
-		const now = Date.now();
-		const diffSecs = Math.floor((target - now) / 1000);
-		if (diffSecs <= 0) {
-			const past = Math.abs(diffSecs);
-			if (past < 60) return `expired ${past}s ago`;
-			if (past < 3600) return `expired ${Math.floor(past / 60)}m ago`;
-			if (past < 86400) return `expired ${Math.floor(past / 3600)}h ago`;
-			return `expired ${Math.floor(past / 86400)}d ago`;
-		}
-		if (diffSecs < 60) return `in ${diffSecs}s`;
-		if (diffSecs < 3600) return `in ${Math.floor(diffSecs / 60)}m`;
-		if (diffSecs < 86400) {
-			const h = Math.floor(diffSecs / 3600);
-			const m = Math.floor((diffSecs % 3600) / 60);
-			return m > 0 ? `in ${h}h ${m}m` : `in ${h}h`;
-		}
-		return `in ${Math.floor(diffSecs / 86400)}d`;
+		const now = new Date();
+		const when = relativeTimeShort(iso, now);
+		return new Date(iso).getTime() <= now.getTime()
+			? t('crowdsecDecisions.expiredAgo', { when })
+			: when;
 	}
 
 	// CS.3 Commit B — per-tab counts computed from the FULL
@@ -510,11 +488,10 @@
 
 	function lastFetchedLabel(ts: number | null): string {
 		if (ts === null) return '';
-		const ago = Math.floor((Date.now() - ts) / 1000);
-		if (ago < 5) return 'just now';
-		if (ago < 60) return `${ago}s ago`;
-		const mins = Math.floor(ago / 60);
-		return `${mins}m ago`;
+		const fetched = new Date(ts);
+		// Under 5 s, numeric:'auto' at zero distance says "now" / "maintenant".
+		if (Date.now() - ts < 5000) return relativeTime(fetched.toISOString(), fetched);
+		return relativeTimeShort(fetched.toISOString());
 	}
 
 	onMount(() => {

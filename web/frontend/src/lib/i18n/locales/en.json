@@ -1,5 +1,7 @@
 {
 	"common": {
+		"redirectingHeadTitle": "Redirecting · Arenet",
+		"redirectingTo": "Redirecting to",
 		"save": "Save",
 		"cancel": "Cancel",
 		"delete": "Delete",
@@ -11,6 +13,7 @@
 		"signedInAs": "Signed in as {name}"
 	},
 	"auth": {
+		"signInHeadTitle": "Sign in — Arenet",
 		"loginButton": "Sign in",
 		"logoutButton": "Sign out",
 		"passwordLabel": "Password",
@@ -985,6 +988,7 @@
 		"refusedTooltip": "Connections closed by a guard before the backend. Not counted as connections: they never reached the relay."
 	},
 	"map": {
+		"headTitle": "Map · Arenet",
 		"emptyTitle": "No security event yet",
 		"emptyBody": "Arcs are drawn as WAF, rate-limit, CrowdSec and authentication decisions happen. A quiet map means nothing has been blocked since this page was opened.",
 		"eyebrow": "Traffic · Map",
@@ -1023,6 +1027,7 @@
 		"wafRules": "WAF rules"
 	},
 	"dashboard": {
+		"headTitle": "Dashboard · Arenet",
 		"subtitle": "Real-time traffic across your {count} routes, recent WAF events and upstream services. Window {window}.",
 		"disabledTitle": "Metrics unavailable",
 		"disabledBody": "The observability subsystem failed to start. The proxy is still serving traffic; only the metric history is missing. Check the Arenet logs for the root cause.",
@@ -1491,6 +1496,7 @@
 		"colIp": "IP"
 	},
 	"setup": {
+		"headTitle": "Initial setup — Arenet",
 		"subtitle": "Create the initial administrator account.",
 		"infoBannerTitle": "Setup token required.",
 		"infoBannerBody": "Look in the Arenet server logs for a line starting with",
@@ -1898,7 +1904,8 @@
 	},
 	"crowdsecDecisions": {
 		"copyToast": "Copied ✓",
-		"copyUnavailable": "Copy unavailable",
+		"copyFailed": "Couldn't copy — select the command and press Ctrl+C",
+		"expiredAgo": "expired {when}",
 		"panelSubtitle": "Arenet-side snapshot of the decisions received from LAPI.",
 		"mirrorNotConfiguredTitle": "CrowdSec mirror not configured",
 		"mirrorNotConfiguredBody": "The CrowdSec bouncer on the Caddy side and the StreamBouncer consumer on the Arenet side share the same LAPI key.",
@@ -2481,6 +2488,7 @@
 		}
 	},
 	"logs": {
+		"headTitle": "Logs · Arenet",
 		"pageEyebrow": "Traffic · Logs",
 		"pageTitle": "Activity log",
 		"pageSubtitle": "Real-time stream of WAF events, throttling, authentication failures and certificate lifecycle. Full 2xx/3xx traffic capture is deferred — see backlog.",
@@ -2571,6 +2579,7 @@
 		"action": "Change my password"
 	},
 	"observability": {
+		"headTitle": "Observability · Arenet",
 		"latencyTitle": "Latency (ms)",
 		"latencySeriesTtfb": "server",
 		"latencySeriesTotal": "with transfer",

@@ -12,8 +12,9 @@
 // math is tested via direct fireEvent.mouseMove with a
 // known clientX.
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
+import { language } from '$lib/stores/language.svelte';
 import Chart from './MultiSeriesTimelineChart.svelte';
 
 const sampleData = [
@@ -239,5 +240,36 @@ describe('MultiSeriesTimelineChart — nullAsGap', () => {
 		const path = screen.queryByTestId('series-path-ttfb');
 		const d = path?.getAttribute('d') ?? '';
 		expect(d).toBe('');
+	});
+});
+
+// --- axis dates ------------------------------------------------------------
+//
+// The axis used a hand-rolled "MM-DD", month-first in every language.
+// Buckets are built from local dates so the labels hold in any zone.
+
+describe('MultiSeriesTimelineChart — axis dates', () => {
+	const octData = [5, 6, 7].map((day) => ({
+		bucketStart: new Date(2026, 9, day).toISOString(),
+		issued: day,
+		renewed: 0,
+		failed: 0
+	}));
+
+	afterEach(() => {
+		language.applyLocally('en');
+	});
+
+	it('labels the x axis day-first in French', () => {
+		language.applyLocally('fr');
+		render(Chart, { props: { data: octData, series: certSeries, label: 'Cert events' } });
+		expect(screen.getByText('05/10')).toBeTruthy();
+		expect(screen.getByText('07/10')).toBeTruthy();
+		expect(screen.queryByText('10-05')).toBeNull();
+	});
+
+	it('labels the x axis month-first in English', () => {
+		render(Chart, { props: { data: octData, series: certSeries, label: 'Cert events' } });
+		expect(screen.getByText('10/05')).toBeTruthy();
 	});
 });

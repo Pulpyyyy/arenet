@@ -1,5 +1,7 @@
 {
 	"common": {
+		"redirectingHeadTitle": "Redirection · Arenet",
+		"redirectingTo": "Redirection vers",
 		"save": "Enregistrer",
 		"cancel": "Annuler",
 		"delete": "Supprimer",
@@ -11,6 +13,7 @@
 		"signedInAs": "Connecté en tant que {name}"
 	},
 	"auth": {
+		"signInHeadTitle": "Connexion — Arenet",
 		"loginButton": "Se connecter",
 		"logoutButton": "Se déconnecter",
 		"passwordLabel": "Mot de passe",
@@ -985,6 +988,7 @@
 		"refusedTooltip": "Connexions fermées par une garde avant le backend. Non comptées comme connexions : elles n'ont jamais atteint le relai."
 	},
 	"map": {
+		"headTitle": "Carte · Arenet",
 		"emptyTitle": "Aucun événement de sécurité",
 		"emptyBody": "Les arcs se tracent au fil des décisions WAF, limitation de débit, CrowdSec et authentification. Une carte calme signifie que rien n'a été bloqué depuis l'ouverture de la page.",
 		"eyebrow": "Trafic · Carte",
@@ -1023,6 +1027,7 @@
 		"wafRules": "Règles WAF"
 	},
 	"dashboard": {
+		"headTitle": "Tableau de bord · Arenet",
 		"subtitle": "Trafic en temps réel sur tes {count} routes, événements WAF récents et services en amont. Fenêtre {window}.",
 		"disabledTitle": "Métriques indisponibles",
 		"disabledBody": "Le sous-système d'observabilité n'a pas démarré. Le proxy sert toujours le trafic ; seul l'historique des métriques manque. Regarde les journaux d'Arenet pour la cause.",
@@ -1491,6 +1496,7 @@
 		"colIp": "IP"
 	},
 	"setup": {
+		"headTitle": "Configuration initiale — Arenet",
 		"subtitle": "Crée le compte administrateur initial.",
 		"infoBannerTitle": "Jeton de setup requis.",
 		"infoBannerBody": "Cherche dans les logs serveur Arenet une ligne commençant par",
@@ -1898,7 +1904,8 @@
 	},
 	"crowdsecDecisions": {
 		"copyToast": "Copié ✓",
-		"copyUnavailable": "Copie indisponible",
+		"copyFailed": "Copie impossible — sélectionne la commande et fais Ctrl+C",
+		"expiredAgo": "expirée {when}",
 		"panelSubtitle": "Snapshot Arenet-side des decisions reçues du LAPI.",
 		"mirrorNotConfiguredTitle": "CrowdSec mirror non configuré",
 		"mirrorNotConfiguredBody": "Le bouncer CrowdSec côté Caddy et le consommateur StreamBouncer côté Arenet partagent la même clé LAPI.",
@@ -2481,6 +2488,7 @@
 		}
 	},
 	"logs": {
+		"headTitle": "Journaux · Arenet",
 		"pageEyebrow": "Trafic · Journaux",
 		"pageTitle": "Journal d'activité",
 		"pageSubtitle": "Flux en temps réel des événements WAF, throttling, échecs d'authentification et cycle de vie des certificats. La capture complète du trafic 2xx/3xx est différée — voir backlog.",
@@ -2571,6 +2579,7 @@
 		"action": "Changer mon mot de passe"
 	},
 	"observability": {
+		"headTitle": "Observabilité · Arenet",
 		"latencyTitle": "Latence (ms)",
 		"latencySeriesTtfb": "serveur",
 		"latencySeriesTotal": "avec transfert",

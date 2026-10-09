@@ -164,7 +164,7 @@
 </script>
 
 <svelte:head>
-	<title>Map · Arenet</title>
+	<title>{language.current && t('map.headTitle')}</title>
 </svelte:head>
 
 <PageHeader

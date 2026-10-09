@@ -33,6 +33,8 @@ baseline.
 -->
 
 <script lang="ts">
+	import { chartDay, chartDayTime } from '$lib/utils/chart-time';
+
 	// Phase 5 — the generic constraint we'd like to express is
 	// "T extends { bucketStart: string } AND key ∈ keyof T",
 	// but Svelte's `generics=` declaration doesn't currently
@@ -200,11 +202,7 @@ baseline.
 
 	const xTicks = $derived.by(() => {
 		if (data.length === 0) return [] as { x: number; label: string }[];
-		const fmtTs = (d: Date) => {
-			const m = String(d.getMonth() + 1).padStart(2, '0');
-			const dd = String(d.getDate()).padStart(2, '0');
-			return `${m}-${dd}`;
-		};
+		const fmtTs = (d: Date) => chartDay(d);
 		const midIdx = Math.floor(data.length / 2);
 		return [
 			{ x: xAt(0), label: fmtTs(new Date(data[0].bucketStart)) },
@@ -234,17 +232,13 @@ baseline.
 		if (hoverIdx === null) return null;
 		const row = data[hoverIdx];
 		const d = new Date(row.bucketStart);
-		const m = String(d.getMonth() + 1).padStart(2, '0');
-		const dd = String(d.getDate()).padStart(2, '0');
-		const hh = String(d.getHours()).padStart(2, '0');
-		const mi = String(d.getMinutes()).padStart(2, '0');
 		// Tooltip shows date only if every bucket starts at
 		// midnight (daily granularity); otherwise add the time.
 		const sameTime = data.every((r) => {
 			const t = new Date(r.bucketStart);
 			return t.getHours() === 0 && t.getMinutes() === 0;
 		});
-		const tsLabel = sameTime ? `${m}-${dd}` : `${m}-${dd} ${hh}:${mi}`;
+		const tsLabel = sameTime ? chartDay(d) : chartDayTime(d);
 		// Captured so the narrowing from the hoverIdx === null guard
 		// above survives into the closure.
 		const idx = hoverIdx;

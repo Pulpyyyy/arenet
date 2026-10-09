@@ -184,19 +184,6 @@ Viewer-accessible per AC #12 (same gate as M.2 endpoints).
 
 	const fmtCount = (v: number) => Math.round(v).toString();
 
-	function relativeTs(iso: string): string {
-		const then = new Date(iso).getTime();
-		const now = Date.now();
-		const secs = Math.max(0, Math.floor((now - then) / 1000));
-		if (secs < 60) return `${secs}s ago`;
-		const mins = Math.floor(secs / 60);
-		if (mins < 60) return `${mins}m ago`;
-		const d = new Date(iso);
-		const hh = String(d.getHours()).padStart(2, '0');
-		const mm = String(d.getMinutes()).padStart(2, '0');
-		return `${hh}:${mm}`;
-	}
-
 	// Phase Y — single source of truth via lib/utils/waf-category.
 	// Category colour mapping mirrors the dashboard widgets so a
 	// category visually identified on /security stays the same
