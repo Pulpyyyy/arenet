@@ -1548,6 +1548,10 @@
 		"errUnexpected": "Unexpected error."
 	},
 	"errorPages": {
+		"discardTitle": "Discard your changes?",
+		"discardMessage": "This template has unsaved changes. Leaving the editor drops them.",
+		"discardConfirm": "Discard changes",
+		"discardCancel": "Keep editing",
 		"headTitle": "Error pages · Arenet",
 		"eyebrow": "Settings · Error pages",
 		"titleList": "Custom error pages",
@@ -1600,7 +1604,6 @@
 		"varsHelp": "These placeholders are substituted by Caddy at request time (not in the preview, which uses fake values).",
 		"deleteModalTitle": "Delete template?",
 		"deleteModalBody": "Deleting \"{name}\" is irreversible. Routes that reference it will revert to the Arenet branded default.",
-		"btnDeleting": "Deleting…",
 		"toastDuplicated": "Template \"{name}\" created",
 		"toastCreated": "Template \"{name}\" created",
 		"toastUpdated": "Template \"{name}\" updated",

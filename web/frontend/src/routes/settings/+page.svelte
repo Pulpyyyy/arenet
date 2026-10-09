@@ -679,6 +679,23 @@
 
 	let activeTab = $state<SettingsTab>('account');
 
+	// A tab is mounted the first time it is opened and then kept,
+	// hidden, instead of being unmounted on every switch. The OIDC,
+	// CrowdSec, GeoIP, DNS and backup sections hold their form state
+	// inside the component and reload it on mount, so switching tab
+	// threw away whatever the operator had typed and not yet saved.
+	// Unvisited tabs are still not rendered.
+	let visited = $state<Record<SettingsTab, boolean>>({
+		account: false,
+		security: false,
+		network: false,
+		backups: false,
+		system: false
+	});
+	$effect(() => {
+		visited[activeTab] = true;
+	});
+
 	const settingsTabs = $derived(
 		TAB_IDS.map((id) => ({
 			id,
@@ -751,7 +768,8 @@
 	<Tabs bind:value={activeTab} tabs={settingsTabs} ariaLabel={language.current && t('settings.tabsAria')} onChange={onTabChange} />
 
 	<div class="mt-6">
-		{#if activeTab === 'account'}
+		{#if activeTab === 'account' || visited.account}
+		<div hidden={activeTab !== 'account'}>
 			<!-- ROW 1 — Account + Appearance (2-col on lg+, 1-col below) -->
 			<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
 				<!-- ACCOUNT SECTION -->
@@ -914,9 +932,11 @@
 					{/if}
 				</Card>
 			</div>
+		</div>
 		{/if}
 
-		{#if activeTab === 'security'}
+		{#if activeTab === 'security' || visited.security}
+		<div hidden={activeTab !== 'security'}>
 			<!-- ROW 2.7 — Security Automation (Step P.4 / spec D8.A).
 			     New top-level Settings section, sibling of SSL /
 			     Certificates. Two forms in one Card: per-category
@@ -1552,9 +1572,11 @@
 			     position #2 implication (country_block fires first)
 			     is documented in docs/setup/crowdsec.md. -->
 			<CrowdSecSettingsSection />
+		</div>
 		{/if}
 
-		{#if activeTab === 'network'}
+		{#if activeTab === 'network' || visited.network}
+		<div hidden={activeTab !== 'network'}>
 			<!-- ROW 2.5 — DNS providers (v2.12). Self-contained collection
 			     component: table + add/edit modal + delete. Replaces the
 			     pre-v2.12 singleton OVH credentials form. The section root
@@ -1573,16 +1595,20 @@
 			     form with [-90, 90] / [-180, 180] inline validation,
 			     Re-détecter button driving the POST :redetect path. -->
 			<ServerPositionSection />
+		</div>
 		{/if}
 
-		{#if activeTab === 'backups'}
+		{#if activeTab === 'backups' || visited.backups}
+		<div hidden={activeTab !== 'backups'}>
 			<!-- ROW 2.9 — Backup & restore (Step K.3 §5.3). -->
 			<BackupSection />
 			<!-- ROW 2.91 — Scheduled backups (v2.33): folder / NAS / email. -->
 			<ScheduledBackupsSection />
+		</div>
 		{/if}
 
-		{#if activeTab === 'system'}
+		{#if activeTab === 'system' || visited.system}
+		<div hidden={activeTab !== 'system'}>
 			<!-- v2.45 — the machine under Arenet, refreshed live. It
 			     sits first because it answers the question an operator
 			     opens this tab with: is the host healthy? -->
@@ -1624,6 +1650,7 @@
 					</dd>
 				</dl>
 			</Card>
+		</div>
 		{/if}
 
 	</div>

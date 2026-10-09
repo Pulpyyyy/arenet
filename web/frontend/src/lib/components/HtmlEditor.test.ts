@@ -71,4 +71,31 @@ describe('HtmlEditor', () => {
 		const wrap = container.querySelector('.html-editor');
 		expect(wrap?.getAttribute('data-placeholder')).toBe('Type HTML…');
 	});
+
+	// The gate used to be applied at mount only, so a page that kept the
+	// editor mounted while flipping `readonly` (built-in preview →
+	// "Duplicate to customise") left the editable copy read-only.
+	// CodeMirror reflects EditorView.editable as contenteditable on
+	// .cm-content and EditorState.readOnly as aria-readonly.
+	it('follows a post-mount `readonly` change both ways', async () => {
+		const { container, rerender } = render(HtmlEditor, {
+			props: { value: '<h1>x</h1>', label: 'ro', readonly: true }
+		});
+		const content = () => container.querySelector('.cm-content');
+		await vi.waitFor(() => {
+			expect(content()?.getAttribute('contenteditable')).toBe('false');
+		});
+		expect(content()?.getAttribute('aria-readonly')).toBe('true');
+
+		await rerender({ readonly: false });
+		await vi.waitFor(() => {
+			expect(content()?.getAttribute('contenteditable')).toBe('true');
+		});
+		expect(content()?.hasAttribute('aria-readonly')).toBe(false);
+
+		await rerender({ readonly: true });
+		await vi.waitFor(() => {
+			expect(content()?.getAttribute('contenteditable')).toBe('false');
+		});
+	});
 });

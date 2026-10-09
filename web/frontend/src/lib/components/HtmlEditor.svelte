@@ -33,7 +33,7 @@
 
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { EditorState } from '@codemirror/state';
+	import { Compartment, EditorState, type Extension } from '@codemirror/state';
 	import { EditorView, keymap, lineNumbers, drawSelection } from '@codemirror/view';
 	import { html } from '@codemirror/lang-html';
 	import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
@@ -77,8 +77,20 @@
 	// The flag suppresses the push-back side of one cycle.
 	let updatingFromEditor = false;
 
+	// The read-only gate lives in a Compartment so a `readonly` change
+	// after mount is applied in place. The page flips it on the same
+	// editor when "Duplicate to customise" turns the built-in preview
+	// into the editable copy; a mount-time-only gate left that copy
+	// read-only.
+	const readonlyGate = new Compartment();
+	let appliedReadonly = false;
+	function readonlyExtensions(ro: boolean): Extension {
+		return [EditorView.editable.of(!ro), EditorState.readOnly.of(ro)];
+	}
+
 	onMount(() => {
 		if (!containerEl) return;
+		appliedReadonly = readonly;
 		const state = EditorState.create({
 			doc: value,
 			extensions: [
@@ -89,14 +101,10 @@
 				keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
 				EditorView.lineWrapping,
 				// Phase 2.1 — read-only gate. EditorView.editable
-				// is a compartment-style facet that controls the
-				// contenteditable attribute on the .cm-content
-				// element. Static at construction time ; if the
-				// caller toggles `readonly` post-mount they'd need
-				// a reconfigure pass (V2 if real demand). For the
-				// builtin-vs-DB-template UX, the mount is always
-				// fresh (state-driven view toggle).
-				EditorView.editable.of(!readonly),
+				// drives the contenteditable attribute on .cm-content;
+				// EditorState.readOnly blocks commands that edit.
+				// Reconfigured by the $effect below.
+				readonlyGate.of(readonlyExtensions(appliedReadonly)),
 				EditorView.theme({
 					'&': { height: '100%', minHeight: `${minHeight}px` },
 					'.cm-scroller': {
@@ -147,6 +155,15 @@
 		view.dispatch({
 			changes: { from: 0, to: current.length, insert: value }
 		});
+	});
+
+	// Apply a post-mount `readonly` change. `readonly` is read before the
+	// guard so the effect tracks it even when it first runs unmounted.
+	$effect(() => {
+		const ro = readonly;
+		if (!view || ro === appliedReadonly) return;
+		appliedReadonly = ro;
+		view.dispatch({ effects: readonlyGate.reconfigure(readonlyExtensions(ro)) });
 	});
 
 	/**

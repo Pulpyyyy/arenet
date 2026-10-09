@@ -30,6 +30,7 @@
 	import Spinner from '$lib/components/Spinner.svelte';
 	import HtmlEditor from '$lib/components/HtmlEditor.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import {
 		errorTemplatesApi,
 		BUILTIN_TEMPLATE_ID,
@@ -147,6 +148,27 @@
 		editPages[activeCode] = activeBuffer;
 	});
 
+	// Unsaved edits: Cancel used to drop the name, the flags and all
+	// eight status-code bodies without asking. The editor is
+	// snapshotted when it opens; Cancel asks when anything differs.
+	// Empty bodies are dropped on both sides, as save does, so moving
+	// between code tabs alone is not an edit.
+	function editState(): string {
+		const pages = Object.entries(editPages)
+			.filter(([, body]) => body.trim() !== '')
+			.sort(([a], [b]) => Number(a) - Number(b));
+		return JSON.stringify([
+			editName,
+			editDescription,
+			editIsCatchallDefault,
+			editIsRouteDefault,
+			pages
+		]);
+	}
+	let editSnapshot = $state('');
+	const editDirty = $derived(view === 'edit' && !editingBuiltin && editState() !== editSnapshot);
+	let confirmDiscardOpen = $state(false);
+
 	function startCreate(): void {
 		editingId = null;
 		editingBuiltin = false;
@@ -159,6 +181,7 @@
 		activeBuffer = '';
 		previewHtml = '';
 		view = 'edit';
+		editSnapshot = editState();
 	}
 
 	function startEdit(t: ErrorTemplate): void {
@@ -179,6 +202,7 @@
 		activeBuffer = pages[403] ?? '';
 		previewHtml = '';
 		view = 'edit';
+		editSnapshot = editState();
 	}
 
 	// Step R Phase 2.1 — duplicate flow.
@@ -237,6 +261,15 @@
 	}
 
 	function cancelEdit(): void {
+		if (editDirty) {
+			confirmDiscardOpen = true;
+			return;
+		}
+		leaveEdit();
+	}
+
+	function leaveEdit(): void {
+		confirmDiscardOpen = false;
 		view = 'list';
 		previewHtml = '';
 	}
@@ -292,27 +325,28 @@
 
 	// --- Delete with confirmation -------------------------
 
+	// ConfirmDialog owns Escape, the focus trap and focus restore, and
+	// keeps itself open (busy) while the delete is in flight. On failure
+	// it stays open so the operator can retry or cancel.
 	let deleteTarget = $state<ErrorTemplate | null>(null);
-	let deleting = $state(false);
+	let confirmDeleteOpen = $state(false);
 
 	function askDelete(t: ErrorTemplate): void {
 		deleteTarget = t;
+		confirmDeleteOpen = true;
 	}
 
 	async function confirmDelete(): Promise<void> {
 		if (!deleteTarget) return;
 		const target = deleteTarget;
-		deleting = true;
 		try {
 			await errorTemplatesApi.delete(target.id);
 			pushToast(t('errorPages.toastDeleted', { name: target.name }), 'success');
-			deleteTarget = null;
+			confirmDeleteOpen = false;
 			await loadTemplates();
 		} catch (err) {
 			const msg = err instanceof ApiError ? err.message : t('errorPages.errFailedDelete');
 			pushToast(msg, 'danger');
-		} finally {
-			deleting = false;
 		}
 	}
 
@@ -1051,41 +1085,27 @@
 {/if}
 
 <!-- Delete confirmation -->
-{#if deleteTarget}
-	<div class="modal-backdrop" onclick={() => (deleteTarget = null)} role="presentation">
-		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<div
-			class="modal"
-			role="dialog"
-			aria-modal="true"
-			aria-labelledby="delete-modal-title"
-			tabindex="-1"
-			onclick={(e) => e.stopPropagation()}
-		>
-			<h3 id="delete-modal-title">{language.current && t('errorPages.deleteModalTitle')}</h3>
-			<p>
-				{language.current && t('errorPages.deleteModalBody', { name: deleteTarget.name })}
-			</p>
-			<div class="modal-actions">
-				<Button
-					variant="secondary"
-					onclick={() => (deleteTarget = null)}
-					disabled={deleting}
-				>
-					{language.current && t('errorPages.btnCancel')}
-				</Button>
-				<Button
-					variant="danger"
-					onclick={() => void confirmDelete()}
-					disabled={deleting}
-					loading={deleting}
-				>
-					{language.current && (deleting ? t('errorPages.btnDeleting') : t('errorPages.btnDelete'))}
-				</Button>
-			</div>
-		</div>
-	</div>
-{/if}
+<ConfirmDialog
+	bind:open={confirmDeleteOpen}
+	title={language.current && t('errorPages.deleteModalTitle')}
+	message={language.current &&
+		t('errorPages.deleteModalBody', { name: deleteTarget?.name ?? '' })}
+	confirmLabel={language.current && t('errorPages.btnDelete')}
+	cancelLabel={language.current && t('errorPages.btnCancel')}
+	confirmVariant="danger"
+	onConfirm={confirmDelete}
+/>
+
+<!-- Cancel with unsaved edits asks first. -->
+<ConfirmDialog
+	bind:open={confirmDiscardOpen}
+	title={language.current && t('errorPages.discardTitle')}
+	message={language.current && t('errorPages.discardMessage')}
+	confirmLabel={language.current && t('errorPages.discardConfirm')}
+	cancelLabel={language.current && t('errorPages.discardCancel')}
+	confirmVariant="danger"
+	onConfirm={leaveEdit}
+/>
 
 <style>
 	.card {
@@ -1432,40 +1452,5 @@
 		outline: none;
 		border-color: var(--accent-cyan);
 		box-shadow: 0 0 0 1px var(--accent-cyan);
-	}
-
-
-	/* Modal */
-	.modal-backdrop {
-		position: fixed;
-		inset: 0;
-		background: rgba(0, 0, 0, 0.5);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 1000;
-	}
-	.modal {
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: var(--radius);
-		padding: 24px;
-		max-width: 480px;
-		width: 90%;
-	}
-	.modal h3 {
-		font-size: 16px;
-		margin: 0 0 12px;
-		color: var(--fg);
-	}
-	.modal p {
-		font-size: 13px;
-		color: var(--fg-dim);
-		margin: 0 0 20px;
-	}
-	.modal-actions {
-		display: flex;
-		justify-content: flex-end;
-		gap: 8px;
 	}
 </style>

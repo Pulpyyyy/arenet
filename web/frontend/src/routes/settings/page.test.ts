@@ -94,11 +94,31 @@ describe('Settings page — v2.41 categories', () => {
 		await waitFor(() => expect(screen.getByText('Security Automation')).toBeInTheDocument());
 		expect(window.location.hash).toBe('#security');
 
-		// Back to the first category: the security cards are gone,
-		// not merely scrolled out of sight.
+		// Back to the first category: the security cards are hidden,
+		// not merely scrolled out of sight. They stay mounted so an
+		// unsaved edit in them survives the switch (next test).
 		await userEvent.click(tab('account'));
-		expect(screen.queryByText('Security Automation')).toBeNull();
+		expect(screen.getByText('Security Automation')).not.toBeVisible();
 		expect(window.location.hash).toBe('#account');
+	});
+
+	// The OIDC, CrowdSec, GeoIP, DNS and backup sections hold their form
+	// state inside the component and reload it on mount: unmounting a
+	// tab on every switch threw away whatever the operator had typed
+	// and not saved. The same node surviving the round trip is the
+	// proof the component was not remounted.
+	it('keeps a visited tab mounted across a switch', async () => {
+		render(Page);
+		await userEvent.click(tab('security'));
+		await waitFor(() => expect(document.getElementById('oidc-config')).not.toBeNull());
+		const oidc = document.getElementById('oidc-config')!;
+
+		await userEvent.click(tab('network'));
+		expect(oidc).not.toBeVisible();
+		await userEvent.click(tab('security'));
+
+		expect(document.getElementById('oidc-config')).toBe(oidc);
+		expect(oidc).toBeVisible();
 	});
 
 	it('opens the tab named by the URL hash', async () => {

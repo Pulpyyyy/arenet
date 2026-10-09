@@ -1548,6 +1548,10 @@
 		"errUnexpected": "Erreur inattendue."
 	},
 	"errorPages": {
+		"discardTitle": "Abandonner tes modifications ?",
+		"discardMessage": "Ce modèle a des modifications non enregistrées. Quitter l'éditeur les perd.",
+		"discardConfirm": "Abandonner",
+		"discardCancel": "Continuer à modifier",
 		"headTitle": "Pages d'erreur · Arenet",
 		"eyebrow": "Réglages · Pages d'erreur",
 		"titleList": "Pages d'erreur personnalisées",
@@ -1600,7 +1604,6 @@
 		"varsHelp": "Ces placeholders sont remplacés par Caddy au moment de la requête (pas dans la prévisualisation, qui utilise des valeurs fictives).",
 		"deleteModalTitle": "Supprimer le template ?",
 		"deleteModalBody": "Supprimer « {name} » est irréversible. Les routes qui le référencent reviendront au défaut Arenet branded.",
-		"btnDeleting": "Suppression…",
 		"toastDuplicated": "Template \"{name}\" créé",
 		"toastCreated": "Template \"{name}\" créé",
 		"toastUpdated": "Template \"{name}\" mis à jour",
