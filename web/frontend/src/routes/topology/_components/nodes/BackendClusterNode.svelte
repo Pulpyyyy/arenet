@@ -330,8 +330,11 @@
                 gap: 6px;
                 padding: 8px 12px;
                 border-top: 1px solid var(--border, oklch(28% 0.009 250));
-                background: oklch(22% 0.007 250 / 0.65);
-                color: var(--status-warn);
+                /* Same as the old oklch(22% … / 0.65) literal in dark, but
+                   follows the theme: the literal put the amber warning on
+                   a muddy grey in light mode. */
+                background: color-mix(in oklch, var(--bg-surface) 65%, transparent);
+                color: var(--status-warn-fg);
                 font-size: 11px;
                 line-height: 1.4;
                 border-bottom-left-radius: 8px;

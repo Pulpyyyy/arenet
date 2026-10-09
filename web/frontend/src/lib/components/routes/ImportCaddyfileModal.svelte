@@ -332,7 +332,7 @@
 		color: var(--text-muted);
 	}
 	.badge.warn {
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 		border-color: var(--status-warn);
 	}
 	.sub {
@@ -345,7 +345,7 @@
 		align-items: center;
 		gap: 5px;
 		font-size: 12px;
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 	}
 	details summary {
 		cursor: pointer;

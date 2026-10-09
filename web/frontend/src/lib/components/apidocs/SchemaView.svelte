@@ -145,7 +145,7 @@
 		color: var(--text-muted);
 	}
 	.flag.req {
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 	}
 	.enum {
 		margin-left: 6px;

@@ -180,7 +180,7 @@
 	.bell { position: relative; display: inline-flex; }
 	.label { flex: 1; }
 	.count {
-		background: var(--danger, #d9534f); color: #fff; font-size: 10.5px;
+		background: var(--status-down); color: var(--text-inverse); font-size: 10.5px;
 		font-weight: 700; border-radius: 20px; padding: 1px 7px; min-width: 16px;
 		text-align: center;
 	}
@@ -208,5 +208,5 @@
 	.panel-empty a, .panel-foot a { color: var(--accent); font-size: 11.5px; text-decoration: none; }
 	.panel-foot { padding: 10px 14px; border-top: 1px solid var(--border); text-align: center; }
 	.panel-msg { padding: 14px; font-size: 12px; color: var(--fg-muted); text-align: center; }
-	.panel-msg.error { color: var(--danger, #d9534f); }
+	.panel-msg.error { color: var(--status-down); }
 </style>

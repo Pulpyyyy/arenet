@@ -464,7 +464,7 @@ Viewer-accessible — relies on the API gate (AC #17).
 	}
 
 	.quantile-toggle button.active {
-		background: var(--surface-raised);
+		background: var(--bg-hover);
 		color: var(--text-primary);
 		border-color: var(--text-muted);
 	}

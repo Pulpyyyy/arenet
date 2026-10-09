@@ -795,7 +795,7 @@
 	}
 
 	.live-indicator.reconnecting {
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 		background: color-mix(in oklch, var(--status-warn) 14%, transparent);
 	}
 

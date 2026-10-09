@@ -152,9 +152,9 @@
 		{#if checking}
 			<span class="text-muted">{language.current && t('wafSecLang.checking')}</span>
 		{:else if errors.length > 0}
-			<span class="text-status-down">{language.current && t('wafSecLang.problems', { count: errors.length })}</span>
+			<span class="text-down">{language.current && t('wafSecLang.problems', { count: errors.length })}</span>
 		{:else if checked}
-			<span class="text-status-up">{language.current && t('wafSecLang.valid')}</span>
+			<span class="text-up">{language.current && t('wafSecLang.valid')}</span>
 		{/if}
 	</p>
 	{#if errors.length > 0}
@@ -212,7 +212,7 @@
 				></textarea>
 			</div>
 			{#if testError}
-				<p class="text-xs text-status-down" role="alert" data-testid="tester-error">{testError}</p>
+				<p class="text-xs text-down" role="alert" data-testid="tester-error">{testError}</p>
 			{/if}
 			{#if result}
 				<div class="result" class:blocked={result.blocked} data-testid="tester-result">
@@ -225,7 +225,7 @@
 						{/if}
 					</strong>
 					{#if result.blocked && result.mode !== 'block'}
-						<span class="text-xs text-status-warn">{language.current && t(`wafSecLang.tester.mode.${result.mode}`)}</span>
+						<span class="text-xs text-warn">{language.current && t(`wafSecLang.tester.mode.${result.mode}`)}</span>
 					{/if}
 					{#if result.matches.length > 0}
 						<ul>
@@ -241,7 +241,7 @@
 		{/if}
 	</div>
 	{#if wafMode === 'off'}
-		<p class="text-xs text-status-warn">{language.current && t('wafRules.wafOff')}</p>
+		<p class="text-xs text-warn">{language.current && t('wafRules.wafOff')}</p>
 	{/if}
 </details>
 

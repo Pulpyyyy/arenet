@@ -356,7 +356,7 @@
         }
 
         .tier-warn {
-                color: var(--status-warn);
+                color: var(--status-warn-fg);
                 filter: drop-shadow(0 0 1.5px currentColor);
         }
 
@@ -451,7 +451,7 @@
 
         .topflux-line-2 .badge {
                 flex: 0 0 auto;
-                color: var(--status-warn);
+                color: var(--status-warn-fg);
         }
 
         .topflux-row[data-tier='bad'] .topflux-line-2 .badge {

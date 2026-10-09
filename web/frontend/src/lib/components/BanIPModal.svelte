@@ -422,7 +422,7 @@
 	.warn {
 		margin: 0.25rem 0 0 0;
 		font-size: var(--text-xs, 11px);
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 	}
 	.error-block {
 		padding: 0.6rem 0.75rem;

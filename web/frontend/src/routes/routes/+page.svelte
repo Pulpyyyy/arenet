@@ -5508,7 +5508,7 @@
 								{/if}
 							</div>
 							{#if formData.wafDisableCRS}
-								<p class="text-xs text-status-warn mb-2" data-testid="waf-exceptions-crs-off">
+								<p class="text-xs text-warn mb-2" data-testid="waf-exceptions-crs-off">
 									{language.current && t('routes.form.wafExcludeRulesCRSDisabledWarning')}
 								</p>
 							{/if}
@@ -5532,7 +5532,7 @@
 										class="w-full bg-elevated border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono disabled:opacity-50 disabled:cursor-not-allowed"
 									></textarea>
 									{#if errors.wafExcludeRules}
-										<p data-field-error class="text-xs text-status-down mt-1" data-testid="waf-exclude-rules-error">
+										<p data-field-error class="text-xs text-down mt-1" data-testid="waf-exclude-rules-error">
 											{errors.wafExcludeRules}
 										</p>
 									{/if}
@@ -5580,7 +5580,7 @@
 										{/each}
 									</datalist>
 									{#if errors.wafExcludeTags}
-										<p data-field-error class="text-xs text-status-down mt-1" data-testid="waf-exclude-tags-error">
+										<p data-field-error class="text-xs text-down mt-1" data-testid="waf-exclude-tags-error">
 											{errors.wafExcludeTags}
 										</p>
 									{/if}

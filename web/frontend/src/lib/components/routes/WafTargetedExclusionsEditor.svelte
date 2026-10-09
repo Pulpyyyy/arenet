@@ -187,10 +187,10 @@
 		</button>
 	</div>
 	{#if error}
-		<p class="text-xs text-status-down mt-1" role="alert" data-testid="waf-targeted-error">{error}</p>
+		<p class="text-xs text-down mt-1" role="alert" data-testid="waf-targeted-error">{error}</p>
 	{/if}
 	{#if crsDisabled}
-		<p class="text-xs text-status-warn mt-1">
+		<p class="text-xs text-warn mt-1">
 			{language.current && t('routes.form.wafExcludeRulesCRSDisabledWarning')}
 		</p>
 	{/if}

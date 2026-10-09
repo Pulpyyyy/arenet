@@ -90,7 +90,10 @@
 	/* Text */
 	--text-primary: oklch(96% 0.005 250);
 	--text-secondary: oklch(68% 0.012 250);
-	--text-muted: oklch(54% 0.011 250);
+	/* 62% (was 54%, ~3.4:1 on --bg-surface): muted text is mostly
+	 * 10-11px, so it has to clear WCAG AA 4.5:1 on every surface it
+	 * sits on — base 5.4, elevated 5.1, surface 4.8. */
+	--text-muted: oklch(62% 0.011 250);
 	--text-inverse: oklch(15% 0.005 250);
 
 	/* Signature accent — Step R shift from cyan (#00d9ff) to purple-blue
@@ -162,7 +165,9 @@
 	/* Text */
 	--text-primary: oklch(18% 0.006 250);
 	--text-secondary: oklch(38% 0.010 250);
-	--text-muted: oklch(60% 0.012 250);
+	/* 52% (was 60%, ~3.5:1 on --bg-surface): base 5.2, elevated
+	 * 5.5, surface 4.9 — WCAG AA for the 10-11px muted text. */
+	--text-muted: oklch(52% 0.012 250);
 	--text-inverse: oklch(100% 0 0);
 
 	/* Signature */

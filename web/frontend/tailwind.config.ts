@@ -17,6 +17,13 @@ import type { Config } from 'tailwindcss';
 // Tailwind utilities and the var(--...) references read identical.
 const config: Config = {
 	content: ['./src/**/*.{html,js,ts,svelte}'],
+	// `dark:` follows the app's theme, not the OS. Without this Tailwind
+	// defaults to `media` (prefers-color-scheme), so an operator who
+	// picked the light theme on a dark-mode OS got the `dark:` amber
+	// on white. app.html sets data-theme on <html> before first paint.
+	// Tailwind 3.4 `selector` strategy → `&:where([data-theme="dark"],
+	// [data-theme="dark"] *)` (corePlugins.js darkVariants, v3.4.19).
+	darkMode: ['selector', '[data-theme="dark"]'],
 	theme: {
 		extend: {
 			// v2.58.4 — `base` lives here and NOT in `colors`, on purpose.
@@ -39,6 +46,12 @@ const config: Config = {
 			// goes back to meaning a font size.
 			backgroundColor: {
 				base: 'var(--bg-base)'
+			},
+			// `text-warn` reads the text amber (--status-warn-fg); `bg-warn`,
+			// `border-warn` etc. keep the fill below. The light-theme fill
+			// is only ~3.5:1 as text on white — see tokens.css.
+			textColor: {
+				warn: 'var(--status-warn-fg)'
 			},
 			colors: {
 				// Background surfaces (§2.1) — `base` is in backgroundColor

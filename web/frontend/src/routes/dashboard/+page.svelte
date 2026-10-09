@@ -749,7 +749,7 @@
 	}
 	.pill.bad { background: color-mix(in oklch, var(--status-down) 18%, transparent); color: var(--status-down); }
 	/* #R-WAF-EVENT-LABEL-INCONSISTENT — amber detect badge, parallel to the .bad red block badge. */
-	.pill.warn { background: color-mix(in oklch, var(--status-warn) 18%, transparent); color: var(--status-warn); }
+	.pill.warn { background: color-mix(in oklch, var(--status-warn) 18%, transparent); color: var(--status-warn-fg); }
 
 	table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 	th, td { padding: 7px 8px; text-align: left; }
@@ -768,7 +768,7 @@
 		color: var(--accent);
 		border-bottom-color: var(--accent);
 	}
-	.warn-text { color: var(--status-warn); }
+	.warn-text { color: var(--status-warn-fg); }
 	.bad-text { color: var(--status-down); }
 	.empty-row { color: var(--fg-muted); font-size: 12px; padding: 12px 0; text-align: center; font-style: italic; }
 

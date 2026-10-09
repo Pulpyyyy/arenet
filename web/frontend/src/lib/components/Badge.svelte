@@ -74,7 +74,7 @@
 	.badge[data-variant='status-warn'] {
 		background: var(--badge-warning-bg);
 		border-color: var(--badge-warning-border);
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 	}
 	.badge[data-variant='status-down'] {
 		background: var(--badge-danger-bg);

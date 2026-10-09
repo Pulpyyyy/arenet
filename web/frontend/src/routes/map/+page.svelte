@@ -430,7 +430,7 @@
 	}
 	.ws-pill--connecting,
 	.ws-pill--reconnecting {
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 	}
 	.ws-pill--connecting .ws-pill__dot,
 	.ws-pill--reconnecting .ws-pill__dot {

@@ -162,7 +162,7 @@
 	.seg[data-tone='watch'].active {
 		background: var(--badge-warning-bg);
 		box-shadow: inset 0 0 0 1px var(--badge-warning-border);
-		color: var(--status-warn);
+		color: var(--status-warn-fg);
 	}
 	.seg[data-tone='block'].active {
 		background: var(--badge-danger-bg);

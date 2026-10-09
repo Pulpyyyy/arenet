@@ -512,7 +512,7 @@
 		font-size: 12px;
 		line-height: 1.5;
 	}
-	.ro-notice svg { flex: none; color: var(--status-warn); margin-top: 2px; }
+	.ro-notice svg { flex: none; color: var(--status-warn-fg); margin-top: 2px; }
 
 	/* Phase Y — family block grouping. Each fam-block wraps a
 	   list of category rows in the same operator family
@@ -602,7 +602,7 @@
 	.cat-meta-val { color: var(--fg); font-size: 16px; font-weight: 500; }
 	/* #R-DASHBOARD-WAF-COUNTERS-ZERO — colour-code BLOCK red and DETECT amber so the split is recognisable at a glance. */
 	.cat-meta-val.cat-meta-block { color: var(--status-down); }
-	.cat-meta-val.cat-meta-detect { color: var(--status-warn); }
+	.cat-meta-val.cat-meta-detect { color: var(--status-warn-fg); }
 	.cat-meta-foot { color: var(--fg-dim); font-size: 10.5px; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
 
 	/* Phase Y — drill-down expand-below-the-head pane. Same
