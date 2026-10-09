@@ -933,11 +933,15 @@
 	// J.1/J.2 fields. formError remains as a top-of-form banner
 	// for non-field-attributable messages.
 	let errors = $state<Record<string, string>>({});
+	// The post-apply check of the last save said the route does not
+	// answer. Shown next to Save while the panel stays on the route.
+	let saveCheckFailure = $state<string | null>(null);
 
 	function resetFormErrors() {
 		formError = null;
 		errors = {};
 		secLangSaveErrors = [];
+		saveCheckFailure = null;
 	}
 
 	// Sections holding a field error open and carry a marker (see
@@ -2223,8 +2227,13 @@
 	// drift surfaced at all.
 	type SectionBadge = { badge: string; posture: Posture | undefined };
 
+	// The TLS state leads: the TLS section starts closed and new routes
+	// default to HTTP (deliberately — a LAN host often cannot get a
+	// certificate), so Essentials, the one section open on arrival, is
+	// where the operator sees which one they are saving.
 	const summaryEssentials = $derived(
 		[
+			formData.tlsEnabled ? 'HTTPS' : tl('routes.form.summaryTLSOff'),
 			tl('routes.form.summaryUpstreams', { count: formData.upstreams.filter((u) => u.url.trim() !== '').length }),
 			formData.aliases.filter((a) => a.trim() !== '').length > 0
 				? tl('routes.form.summaryAliases', { count: formData.aliases.filter((a) => a.trim() !== '').length })
@@ -3337,14 +3346,41 @@
 			if (formData.cert_source === 'manual') {
 				payload.cert_id = formData.cert_id;
 			}
-			if (formMode === 'create') {
-				const saved = await createRoute(payload);
-				pushToast(t('routes.toasts.created'), 'success');
-				reportRouteCheck(saved.check);
+			const created = formMode === 'create';
+			let saved: Route | undefined;
+			if (created) {
+				saved = await createRoute(payload);
 			} else if (editingId) {
-				const saved = await updateRoute(editingId, payload);
-				pushToast(t('routes.toasts.updated'), 'success');
-				reportRouteCheck(saved.check);
+				saved = await updateRoute(editingId, payload);
+			}
+			const check = saved?.check;
+			// One message per save. The check messages already say the
+			// route is saved, so "Route updated" next to them was the
+			// same news twice — and, beside a red "does not answer",
+			// a contradiction.
+			if (check?.status === 'failed' || check?.status === 'pending_certificate') {
+				reportRouteCheck(check);
+			} else {
+				pushToast(t(created ? 'routes.toasts.created' : 'routes.toasts.updated'), 'success');
+			}
+			if (saved && check?.status === 'failed') {
+				// Saved but not answering: the operator's next move is
+				// to fix this route, so the panel stays on it (a new
+				// route reopens in edit mode) with the result next to
+				// Save, where it outlives the toast.
+				const id = saved.id;
+				await loadRoutes();
+				const fresh = routes.find((r) => r.id === id);
+				if (fresh) {
+					openEdit(fresh);
+					saveCheckFailure = t('routes.check.failed', {
+						host: check.host ?? '',
+						detail: check.detail ?? ''
+					});
+				} else {
+					closePanel();
+				}
+				return;
 			}
 			// Bug 1 fix (C11 Pack A polish round 3, 2026-06-06):
 			// Save MUST clear editingId so the route-row-selected
@@ -6210,6 +6246,9 @@
 				     formOpen via the existing path; on validation
 				     errors the panel stays open with field-level
 				     messages. -->
+				<!-- Sticky like the header: with the WAF or health-check
+				     sections open, Save was a long scroll away. -->
+				<div class="sticky bottom-0 z-10 bg-elevated border-t border-border-subtle" data-testid="panel-footer">
 				<!-- The refusal is repeated next to Save: the banner sits at the
 				     top of the form, out of sight from here. The banner is the
 				     one announced (role="alert"); this copy is for the eye. -->
@@ -6218,7 +6257,12 @@
 						{formError}
 					</p>
 				{/if}
-				<div class="px-5 pb-5 pt-2 flex items-center justify-between gap-2 border-t border-border-subtle">
+				{#if saveCheckFailure}
+					<p class="px-5 pt-3 text-xs text-down" data-testid="save-check-failure">
+						{saveCheckFailure}
+					</p>
+				{/if}
+				<div class="px-5 pb-5 pt-2 flex items-center justify-between gap-2">
 					{#if formMode === 'edit' && editingId}
 						<div class="delete-slot">
 							<Button
@@ -6246,6 +6290,7 @@
 						{language.current && (formMode === 'create' ? t('routes.form.create') : t('routes.form.save'))}
 					</Button>
 					</div>
+				</div>
 				</div>
 			{/if}
 
