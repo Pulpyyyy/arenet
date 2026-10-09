@@ -571,17 +571,20 @@
 					{/if}
 				</div>
 
-				<!-- Task 6 (per-path upstream routing) — collapsed-by-default
-				     disclosure mirroring the route-level health-check <details>
-				     idiom. Only forced open when the rule already carries a
-				     non-empty pool on mount (mirrors open={formData.healthCheck.enabled}
-				     at routes/+page.svelte:4189). -->
-				<details
+				<!-- Task 6 (per-path upstream routing). This was a third
+				     nested disclosure — the route section, the path-rules
+				     <details>, then this pool behind its own summary — so a
+				     per-path backend sat three clicks deep and the pool was
+				     easy to miss on a rule that had one. It is a labelled
+				     group now, like the rule's other blocks; it is short
+				     until a backend is added. -->
+				<div
+					role="group"
+					aria-labelledby="path-rule-upstream-title-{i}"
 					class="rounded border border-border-subtle"
-					open={(rule.upstreams?.length ?? 0) > 0}
 					data-testid="path-rule-upstream-disclosure-{i}"
 				>
-					<summary class="px-3 py-2 text-sm text-secondary cursor-pointer select-none">
+					<div id="path-rule-upstream-title-{i}" class="px-3 py-2 text-sm text-secondary">
 						{language.current && t('routes.pathRules.upstreamLabel')}
 						{#if rule.upstreams && rule.upstreams.length > 0}
 							<span
@@ -594,7 +597,7 @@
 									})}
 							</span>
 						{/if}
-					</summary>
+					</div>
 					<div class="p-3 flex flex-col gap-3 border-t border-border-subtle">
 						<p class="text-xs text-muted">
 							{language.current && t('routes.pathRules.upstreamInheritHint')}
@@ -732,7 +735,7 @@
 							</label>
 						{/if}
 					</div>
-				</details>
+				</div>
 			</div>
 		{/each}
 

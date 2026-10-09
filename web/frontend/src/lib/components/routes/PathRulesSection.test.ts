@@ -56,20 +56,23 @@ describe('PathRulesSection', () => {
 		expect((value[0].basicAuth as unknown as Record<string, unknown>).passwordHash).toBeUndefined();
 	});
 
-	// Task 6 (path-based-rules, per-path upstream routing) — the
-	// "Upstream spécifique" disclosure is collapsed by default: the
-	// <details> exists per rule, but its inner fields (url repeater,
-	// add-backend button) are not rendered/visible until the
-	// disclosure is opened, mirroring the route-level health-check
-	// <details> idiom (open={...}, collapsed unless there's already
-	// content).
-	it('renders a collapsed "Upstream spécifique" disclosure per rule', async () => {
+	// Task 6 (path-based-rules, per-path upstream routing) — the pool
+	// was a third nested <details> (route section → path rules → pool).
+	// It is a labelled group now: no disclosure of its own, its add
+	// button reachable without opening anything.
+	it('renders the per-path upstream pool as a labelled group, not a nested disclosure', async () => {
 		const value: PathRule[] = [{ pathPrefix: '/docs' }];
 		const { getByTestId, queryByTestId } = render(PathRulesSection, { value });
 
-		const disclosure = getByTestId('path-rule-upstream-disclosure-0') as HTMLDetailsElement;
-		expect(disclosure).toBeTruthy();
-		expect(disclosure.open).toBe(false);
+		const group = getByTestId('path-rule-upstream-disclosure-0');
+		expect(group.tagName).toBe('DIV');
+		expect(group.querySelector('details, summary')).toBeNull();
+		expect(group.getAttribute('role')).toBe('group');
+		const title = document.getElementById(group.getAttribute('aria-labelledby') ?? '');
+		expect(title?.textContent).toMatch(/Specific upstream/);
+		expect(getByTestId('path-rule-upstream-add-0')).toBeTruthy();
+		// The whole section holds exactly one disclosure: its own.
+		expect(getByTestId('path-rules-section').querySelectorAll('details')).toHaveLength(0);
 		// No backends badge yet — pool is empty.
 		expect(queryByTestId('path-rule-backends-badge-0')).toBeNull();
 	});
