@@ -10,8 +10,8 @@
   uses of the native confirm() dialog with a styled surface that
   matches the rest of the app.
 
-  Pattern is intentionally minimal — no form fields, no async
-  state, just a yes/no question. For destructive flows, the
+  Pattern is intentionally minimal — no form fields (beyond the
+  optional typed confirmation below), just a yes/no question. For destructive flows, the
   caller sets `confirmVariant="danger"` so the affirmative button
   reads as a red CTA.
 
@@ -32,12 +32,21 @@
     confirmVariant — Button variant ('primary'|'secondary'|'ghost'|'danger'),
                      default 'danger' since the common case is destructive
     onConfirm      — () => void | Promise<void>
+    requireText    — string (optional). When set, the dialog shows a
+                     text field and Confirm stays disabled until the
+                     operator types exactly this word. Reserved for the
+                     actions a stray click must not trigger (a restore
+                     that can leave nobody able to sign in).
+    requireTextLabel — string (optional), label of that field; it
+                     defaults to the word itself so the field is never
+                     unlabelled.
 -->
 <script lang="ts">
 	import Modal from './Modal.svelte';
 	import Button from './Button.svelte';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
+	import Input from './Input.svelte';
 
 	type ConfirmVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
@@ -49,6 +58,8 @@
 		cancelLabel?: string;
 		confirmVariant?: ConfirmVariant;
 		onConfirm: () => void | Promise<void>;
+		requireText?: string;
+		requireTextLabel?: string;
 	}
 
 	let {
@@ -58,7 +69,9 @@
 		confirmLabel,
 		cancelLabel,
 		confirmVariant = 'danger',
-		onConfirm
+		onConfirm,
+		requireText,
+		requireTextLabel
 	}: Props = $props();
 
 	// No string defaults in the destructuring: a default is evaluated
@@ -68,6 +81,14 @@
 	const cancelText = $derived(cancelLabel ?? (language.current && t('common.cancel')));
 
 	let submitting = $state(false);
+	let typed = $state('');
+
+	// A word typed once must not carry over: every opening asks again.
+	$effect(() => {
+		if (!open) typed = '';
+	});
+
+	const confirmBlocked = $derived(!!requireText && typed.trim() !== requireText);
 
 	function onClose(): void {
 		// Don't allow close while submitting — avoids racing the
@@ -91,12 +112,28 @@
 	<Modal {open} {title} {onClose}>
 		{#snippet children()}
 			<p class="text-sm text-secondary">{message}</p>
+			{#if requireText}
+				<div class="mt-4">
+					<Input
+						bind:value={typed}
+						label={requireTextLabel || requireText}
+						autocomplete="off"
+						spellcheck={false}
+						disabled={submitting}
+					/>
+				</div>
+			{/if}
 		{/snippet}
 		{#snippet footer()}
 			<Button variant="ghost" onclick={onClose} disabled={submitting}>
 				{cancelText}
 			</Button>
-			<Button variant={confirmVariant} onclick={handleConfirm} loading={submitting}>
+			<Button
+				variant={confirmVariant}
+				onclick={handleConfirm}
+				loading={submitting}
+				disabled={confirmBlocked}
+			>
 				{confirmText}
 			</Button>
 		{/snippet}
