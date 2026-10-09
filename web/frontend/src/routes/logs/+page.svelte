@@ -176,6 +176,49 @@
 		{ value: '204', label: '204 · No Content' },
 		{ value: '200', label: '200 · OK' }
 	];
+
+	// The filters live in the URL (?q=…&route=…&code=…&level=…) so a
+	// filtered view survives a refresh and other pages can link to "this
+	// route's log" or "this rule's log". Read at init rather than in
+	// onMount: the effect below would otherwise run first with the
+	// defaults and wipe the incoming params. A value the page doesn't
+	// know falls back to its default instead of silently hiding every row.
+	const LEVEL_FILTERS: ReadonlyArray<'all' | LevelTag> = ['all', 'block', 'detect', 'warn', 'info'];
+	function readFiltersFromURL(): void {
+		if (typeof window === 'undefined') return;
+		const params = new URLSearchParams(window.location.search);
+		search = params.get('q') ?? '';
+		// Not checked against routeMap: it isn't loaded yet, and a deleted
+		// route's id still matches its past events.
+		routeFilter = params.get('route') ?? '';
+		const code = params.get('code') ?? '';
+		codeFilter = httpCodeOptions.some((o) => o.value === code) ? code : '';
+		const level = params.get('level');
+		levelFilter = LEVEL_FILTERS.find((l) => l === level) ?? 'all';
+	}
+	readFiltersFromURL();
+
+	// replaceState, not pushState (same as /security's ?tab): refining a
+	// filter shouldn't fill the back button. Defaults are omitted so the
+	// plain /logs stays plain, and SvelteKit's own history.state is kept
+	// so its back/forward bookkeeping survives.
+	$effect(() => {
+		const url = new URL(window.location.href);
+		const next: Record<string, string> = {
+			q: search.trim(),
+			route: routeFilter,
+			code: codeFilter,
+			level: levelFilter === 'all' ? '' : levelFilter
+		};
+		for (const [key, value] of Object.entries(next)) {
+			if (value) url.searchParams.set(key, value);
+			else url.searchParams.delete(key);
+		}
+		if (url.href !== window.location.href) {
+			window.history.replaceState(window.history.state, '', url);
+		}
+	});
+
 	let paused = $state(false);
 	let pollId: ReturnType<typeof setInterval> | null = null;
 
@@ -281,7 +324,10 @@
 				// match across more fields ; the structured
 				// `status:` / `route:` / `ip:` syntax is
 				// V2 backlog.
-				const hay = `${r.source} ${r.method} ${r.code} ${r.path} ${r.srcIp} ${r.detail}`.toLowerCase();
+				// The WAF rule id is indexed on its own: a guided rule's
+				// detail shows its name, not its id, and /waf links here
+				// with ?q=<ruleId>.
+				const hay = `${r.source} ${r.method} ${r.code} ${r.path} ${r.srcIp} ${r.detail} ${r.wafEvent?.ruleId ?? ''}`.toLowerCase();
 				if (!hay.includes(q)) return false;
 			}
 			return true;

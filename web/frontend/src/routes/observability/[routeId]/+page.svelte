@@ -258,6 +258,8 @@ Viewer-accessible — relies on the API gate (AC #17).
 			class:active={window === '30d'}
 			onclick={() => switchWindow('30d')}>{tl('observability.window30d')}</button
 		>
+		<!-- The numbers say something happened; the log says what. -->
+		<a class="logs-link" href="/logs?route={encodeURIComponent(routeId)}">{tl('logs.viewInLogs')}</a>
 	</div>
 
 	<!-- Four independent charts. AC #3: req / 4xx / 5xx / p95
@@ -427,6 +429,16 @@ Viewer-accessible — relies on the API gate (AC #17).
 		background: var(--accent-cyan);
 		color: var(--text-inverse);
 		border-color: var(--accent-cyan);
+	}
+	.logs-link {
+		margin-left: auto;
+		align-self: center;
+		font-size: var(--text-sm);
+		color: var(--accent-cyan);
+		text-decoration: none;
+	}
+	.logs-link:hover {
+		text-decoration: underline;
 	}
 	.chart-grid {
 		display: grid;

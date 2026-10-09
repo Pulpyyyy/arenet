@@ -412,6 +412,7 @@
 													<th>{language.current && t('waf.drillColCategory')}</th>
 													<th class="num">{language.current && t('waf.drillColCount')}</th>
 													<th>{language.current && t('waf.drillColLastSeen')}</th>
+													<th></th>
 												</tr>
 											</thead>
 											<tbody>
@@ -421,6 +422,15 @@
 														<td class="mono">{rule.category}</td>
 														<td class="num">{rule.count.toLocaleString(language.current)}</td>
 														<td class="mono">{new Date(rule.lastSeen).toLocaleString(language.current)}</td>
+														<!-- The log's search indexes the rule id, so this
+														     lands on this rule's recent events. -->
+														<td class="logs-cell">
+															<a
+																href="/logs?q={encodeURIComponent(rule.ruleId)}"
+																data-testid="rule-logs-{rule.ruleId}"
+																>{language.current && t('logs.viewInLogs')}</a
+															>
+														</td>
 													</tr>
 												{/each}
 											</tbody>
@@ -639,6 +649,17 @@
 	}
 	.rule-table td.mono {
 		font-family: var(--font-mono);
+	}
+	.rule-table td.logs-cell {
+		text-align: right;
+		white-space: nowrap;
+	}
+	.rule-table td.logs-cell a {
+		color: var(--accent-cyan);
+		text-decoration: none;
+	}
+	.rule-table td.logs-cell a:hover {
+		text-decoration: underline;
 	}
 
 	.link-list {

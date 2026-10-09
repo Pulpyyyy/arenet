@@ -178,7 +178,7 @@ describe('observability route page: count units follow the bucket', () => {
 		mocks.fetchTimeseries.mockImplementation((_r: string, metric: string) =>
 			Promise.resolve({ ...series(100), metric, window: '30d', bucketSizeSeconds: 3600 })
 		);
-		await fireEvent.click(screen.getByRole('button', { name: '30j' }));
+		await fireEvent.click(screen.getByRole('button', { name: '30d' }));
 
 		await waitFor(() =>
 			expect(screen.getByTestId('obs-title-req')).toHaveTextContent('Requests / h')
@@ -186,3 +186,10 @@ describe('observability route page: count units follow the bucket', () => {
 	});
 });
 
+describe('observability route page: the way to the log', () => {
+	it('links to the activity log filtered on this route', async () => {
+		render(Page);
+		const link = await screen.findByRole('link', { name: /View in logs/ });
+		expect(link).toHaveAttribute('href', `/logs?route=${ROUTE_ID}`);
+	});
+});
