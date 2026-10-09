@@ -71,8 +71,10 @@ Checklist in priority order:
 
 1. **The admin port is loopback-bound by default.** From a LAN
    machine, `curl http://<host>:8001/healthz` will fail.
-   Either SSH-tunnel or set `ARENET_ADMIN_BIND=0.0.0.0:8001`
-   (see `docs/install/docker-quickstart.md`).
+   Either SSH-tunnel, or open it to the LAN: publish
+   `8001:8001` instead of `127.0.0.1:8001:8001` (Docker), or
+   set `ARENET_ADMIN_BIND=0.0.0.0:8001` (systemd). See
+   `docs/install/docker-quickstart.md`.
 2. **Healthcheck reports unhealthy in `docker compose ps`?**
    Check the logs:
    ```bash

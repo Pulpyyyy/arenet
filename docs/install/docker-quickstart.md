@@ -152,10 +152,14 @@ on the homelab box:
 ports:
   - "80:80"
   - "443:443"
+  - "443:443/udp"
   - "8001:8001"                    # was: "127.0.0.1:8001:8001"
-environment:
-  ARENET_ADMIN_BIND: 0.0.0.0:8001  # was: 127.0.0.1:8001
 ```
+
+The port mapping is the only change: inside the container the
+admin always listens on `:8001` (Docker forwards published ports
+to the container's network interface, not its loopback), so
+`ARENET_ADMIN_BIND` stays unset in Docker installs.
 
 Then `docker compose up -d` to apply. Now anyone on your LAN can
 reach the admin port over plain HTTP — put a TLS terminator

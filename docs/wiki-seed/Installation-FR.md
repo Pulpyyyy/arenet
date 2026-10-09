@@ -149,7 +149,7 @@ Pareil que l'étape 4 du chemin Docker — `http://<your-host>:8001`, colle le t
 
 Par défaut l'UI d'admin bind sur `127.0.0.1:8001` (loopback uniquement) par sécurité. Pour y accéder depuis ton LAN :
 
-**Docker** : le `docker-compose.yml` publie déjà `8001:8001` donc c'est reachable sur `http://<docker-host>:8001` depuis ton LAN. Restreins via des policies Docker network ou ton firewall.
+**Docker** : le `docker-compose.yml` de référence publie `127.0.0.1:8001:8001`. Remplace cette ligne par `8001:8001` pour joindre `http://<docker-host>:8001` depuis ton LAN — ne touche pas à `ARENET_ADMIN_BIND`, dans le conteneur l'admin doit rester sur `:8001`. Restreins via des policies Docker network ou ton firewall.
 
 **systemd** : édite `/etc/systemd/system/arenet.service` et set la variable d'env :
 

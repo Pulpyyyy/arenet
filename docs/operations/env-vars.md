@@ -129,9 +129,11 @@ defaults; you'll typically touch 2–3 on a real install.
 
 - **Purpose**: address:port the admin REST API + WebSocket
   binds to.
-- **Default**: `:8001` (binds all interfaces). Docker compose
-  + systemd both override to `127.0.0.1:8001` (loopback only)
-  per spec D6.
+- **Default**: `:8001` (binds all interfaces). systemd
+  overrides to `127.0.0.1:8001` (loopback only) per spec D6.
+  Docker keeps `:8001` inside the container (a loopback bind
+  there is unreachable through a published port) and applies
+  D6 on the host side by publishing `127.0.0.1:8001:8001`.
 - **Format**: `host:port` or just `:port` (binds all
   interfaces). `127.0.0.1:8001` for loopback, `0.0.0.0:8001`
   for explicit all-interfaces, `[::]:8001` for IPv6.

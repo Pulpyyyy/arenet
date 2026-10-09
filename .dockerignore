@@ -42,6 +42,13 @@ web/frontend/.svelte-kit
 # Documentation — useful in the repo, not in the image.
 docs/
 README.md
+README.fr.md
+CLAUDE.md
+
+# Deployment / test scaffolding that never feeds `go build`.
+docker-compose.yml
+packaging/
+test-upstream/
 
 # Existing CI / GitHub config.
 .github/

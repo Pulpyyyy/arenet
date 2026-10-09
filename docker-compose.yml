@@ -39,16 +39,22 @@ services:
     #     Then open http://localhost:8001 in your browser.
     #
     #   Option 2 — Bind admin to LAN (less secure, plaintext):
-    #     Replace the line below with:
+    #     Replace the 8001 line below with:
     #       - "8001:8001"
-    #     AND set ARENET_ADMIN_BIND=0.0.0.0:8001 in `environment:`.
+    #     Nothing else to change: the loopback restriction lives
+    #     in this port mapping, not in ARENET_ADMIN_BIND (inside
+    #     the container the admin always listens on :8001).
     #     Anyone on your LAN can now reach the admin port over
     #     plain HTTP — put a TLS terminator in front (Caddy,
     #     Nginx, Cloudflare Tunnel) before relying on this for
     #     anything sensitive.
+    #
+    # 443/udp carries HTTP/3 (QUIC). Without it, browsers are told
+    # h3 is available, fail over UDP, then fall back to TCP.
     ports:
       - "80:80"
       - "443:443"
+      - "443:443/udp"
       - "127.0.0.1:8001:8001"
       #
       # TCP / UDP services (v2.42). A layer-4 relay listens INSIDE
@@ -91,11 +97,13 @@ services:
 
     # Step D5 — env vars override the binary's default flags.
     # Precedence: --flag > env > config-file > default.
+    #
+    # ARENET_ADMIN_BIND is deliberately NOT set here: the image
+    # defaults it to :8001, and it must stay on all container
+    # interfaces — Docker forwards published ports to the
+    # container's eth0, so a 127.0.0.1 bind would make the admin
+    # unreachable. Restrict exposure via `ports:` above instead.
     environment:
-      # Default loopback bind. Override to 0.0.0.0:8001 for
-      # LAN-exposed admin (see ports comment above).
-      ARENET_ADMIN_BIND: 127.0.0.1:8001
-
       # Where the binary writes its state. Matches the volume
       # mount; do not change unless you're also changing the
       # `volumes:` mount target.

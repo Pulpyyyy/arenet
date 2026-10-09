@@ -5,13 +5,16 @@
 # Step S.1 — Multi-arch Docker image (linux/amd64 + linux/arm64).
 #
 # Three stages:
-#   1. frontend — Node 20 Alpine builds the SvelteKit SPA into
+#   1. frontend — Node 24 Alpine builds the SvelteKit SPA into
 #      web/frontend/build/. The build is consumed by stage 2 via
 #      COPY --from=frontend.
 #   2. backend — Go 1.26 Alpine compiles the static binary with
 #      CGO_ENABLED=0 (distroless requires it). The frontend build
 #      is copied INTO the source tree before `go build` so the
 #      //go:embed directive at web/embed.go picks it up.
+#   Both build stages run on $BUILDPLATFORM: the SPA output is
+#   arch-independent and Go cross-compiles to $TARGETARCH, so a
+#   multi-arch buildx run never builds under QEMU emulation.
 #   3. runtime — distroless static-debian12:nonroot. No shell, no
 #      package manager, no debug tooling. Operators rely on
 #      `docker logs`, `docker inspect`, `docker stats`, and the
@@ -36,12 +39,15 @@
 # -----------------------------------------------------------------
 # Stage 1 — frontend build (SvelteKit → static HTML+CSS+JS)
 # -----------------------------------------------------------------
-FROM node:24-alpine AS frontend
+FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend
 WORKDIR /src/web/frontend
 
-# Layer-cached deps install: copy lockfiles first.
+# Layer-cached deps install: copy lockfiles first. The npm cache
+# mount only speeds up local rebuilds (the GHA cache backend does
+# not export cache mounts); node_modules still lands in the layer.
 COPY web/frontend/package.json web/frontend/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-audit --no-fund
 
 # Now copy the actual source + build.
 COPY web/frontend ./
@@ -50,7 +56,7 @@ RUN npm run build
 # -----------------------------------------------------------------
 # Stage 2 — Go backend build (static, stripped)
 # -----------------------------------------------------------------
-FROM golang:1.26-alpine AS backend
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS backend
 WORKDIR /src
 
 # go.mod / go.sum first for layer caching.
@@ -70,8 +76,11 @@ ARG VERSION=dev
 # Static binary. CGO_ENABLED=0 is mandatory for distroless/static
 # (no libc). -ldflags "-s -w" strips debug symbols; -trimpath
 # removes local paths from stack traces. The version string is
-# injected at -X main.version.
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+# injected at -X main.version. The go-build cache mount only
+# speeds up local rebuilds; modules stay in the `go mod download`
+# layer above so CI layer-cache hits still skip the download.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build \
       -ldflags "-s -w -X main.version=${VERSION}" \
       -trimpath \
@@ -86,6 +95,18 @@ RUN mkdir -p /out/data
 # Stage 3 — distroless runtime
 # -----------------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot
+
+# OCI metadata. REVISION is the git commit SHA, passed by the
+# release workflow (.git is excluded from the build context, so
+# the image cannot derive it itself).
+ARG VERSION=dev
+ARG REVISION=unknown
+LABEL org.opencontainers.image.title="Arenet" \
+      org.opencontainers.image.description="Homelab-friendly reverse proxy with integrated security" \
+      org.opencontainers.image.source="https://github.com/barto95100/arenet" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}"
 
 # The distroless `nonroot` user is uid:gid 65532:65532. The Go
 # binary lives at /usr/local/bin/arenet; the data directory at
@@ -110,8 +131,9 @@ COPY --from=backend --chown=nonroot:nonroot --chmod=700 /out/data /var/lib/arene
 
 # Data plane ports + admin port. The container EXPOSE is purely
 # informational — Docker doesn't open ports without an explicit
-# `-p` / compose `ports:` directive.
-EXPOSE 80 443 8001
+# `-p` / compose `ports:` directive. 443/udp carries HTTP/3
+# (QUIC), which Caddy serves by default next to 443/tcp.
+EXPOSE 80 443 443/udp 8001
 
 # TLS cert storage path fix. certmagic stores certs under
 # caddy.AppDataDir() = $HOME/.local/share/caddy on Linux. The
@@ -137,8 +159,28 @@ ENV HOME=/var/lib/arenet
 USER nonroot:nonroot
 WORKDIR /var/lib/arenet
 
+# Runtime defaults as ENV, NOT as CMD flags. Flags sit at the
+# top of the precedence stack (flag > env > file > default, see
+# internal/config/config.go), so a CMD carrying --admin-port /
+# --data-dir would silently shadow every ARENET_ADMIN_BIND /
+# ARENET_DATA_DIR an operator sets in compose or `docker run -e`.
+#
+# The admin listens on all container interfaces on purpose:
+# Docker forwards a published port to the container's eth0, never
+# to its loopback, so a 127.0.0.1 bind here would make the admin
+# unreachable. Loopback-only exposure is done on the HOST side by
+# publishing "127.0.0.1:8001:8001" (see docker-compose.yml).
+ENV ARENET_ADMIN_BIND=:8001 \
+    ARENET_DATA_DIR=/var/lib/arenet
+
+# In-binary probe (distroless has no curl/wget). Baked into the
+# image so `docker run` / Portainer installs get a health status
+# too, not only the reference compose. If ARENET_ADMIN_BIND moves
+# the admin off :8001, override the healthcheck to match.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["/usr/local/bin/arenet", "--healthcheck=http://127.0.0.1:8001/healthz"]
+
 # Distroless has no shell, so the entrypoint is the binary
 # directly (no `sh -c` wrapping). Operators pass flags via
 # compose `command:` or env vars.
 ENTRYPOINT ["/usr/local/bin/arenet"]
-CMD ["--admin-port=:8001", "--data-dir=/var/lib/arenet"]

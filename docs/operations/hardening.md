@@ -25,8 +25,9 @@ curl -m 3 http://<homelab-LAN-IP>:8001/healthz
 # expected: connection refused / timeout, NOT a 401
 ```
 
-If you've intentionally opened admin to LAN (`ARENET_ADMIN_BIND=
-0.0.0.0:8001`), apply items 2 + 3 below.
+If you've intentionally opened admin to LAN (published
+`8001:8001` in Docker, or `ARENET_ADMIN_BIND=0.0.0.0:8001` on
+systemd), apply items 2 + 3 below.
 
 ## 2. Put TLS in front of LAN-exposed admin
 
