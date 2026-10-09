@@ -2516,7 +2516,10 @@
 		"emptyNoEvents": "No events in the current window.",
 		"emptyNoMatch": "No events match the filters.",
 		"histogramHeader": "Activity timeline · 24h · 5m buckets",
-		"histogramAriaLabel": "Activity timeline histogram (24h, 5-minute buckets)"
+		"histogramAriaLabel": "Activity timeline histogram (24h, 5-minute buckets)",
+		"histogramHeaderFitted": "Activity timeline · since {since} · listed events only",
+		"histogramAriaLabelFitted": "Activity timeline histogram of the listed events, since {since}",
+		"truncatedNotice": "Showing the {shown} most recent events. Older events exist but aren't loaded: the filters and the timeline cover these {shown} only."
 	},
 	"system": {
 		"title": "Host",

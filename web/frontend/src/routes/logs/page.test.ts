@@ -19,6 +19,7 @@ import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import type { AfterNavigate } from '@sveltejs/kit';
 import { afterNavigate } from '$app/navigation';
+import { auth } from '$lib/stores/auth.svelte';
 import type {
 	AuthFailureRecentEvent,
 	CertEvent,
@@ -1645,5 +1646,71 @@ describe('/logs — Phase Z.5.3 SOURCE IP country enrichment', () => {
 		expect(screen.queryByText(/198\.51\.100\.x · \?/)).not.toBeInTheDocument();
 		// And no toast (silent degraded).
 		expect(toastMock.pushToast).not.toHaveBeenCalled();
+	});
+});
+
+describe('/logs — the row cap is said, and Exclude stays in reach', () => {
+	// `count` WAF rows, one second apart, newest first.
+	function wafEvents(count: number): WafEvent[] {
+		return Array.from({ length: count }, (_, i): WafEvent => ({
+			id: i + 1,
+			ts: isoOffset(-i),
+			routeId: 'r-1',
+			ruleId: '942100',
+			category: 'SQLi',
+			severity: 4,
+			srcIp: '1.2.3.4',
+			requestMethod: 'GET',
+			requestPath: '/?id=1',
+			payloadSample: 'id=1',
+			action: 'BLOCK',
+			statusCode: 403
+		}));
+	}
+
+	afterEach(() => {
+		auth.user = null;
+	});
+
+	it('says how many rows it shows when more than 200 were merged', async () => {
+		// 150 WAF + 60 throttle = 210 merged, cut to 200.
+		securityMock.fetchEvents.mockResolvedValue({ events: wafEvents(150) });
+		securityMock.fetchThrottleEvents.mockResolvedValue({
+			events: Array.from({ length: 60 }, (_, i): ThrottleEvent => ({
+				id: i + 1,
+				ts: isoOffset(-200 - i),
+				tier: 1,
+				srcIp: '5.6.7.8',
+				attemptedUsername: 'admin',
+				blockedUntil: isoOffset(700 - i),
+				blockDurationSeconds: 900
+			}))
+		});
+		render(Page);
+		const notice = await screen.findByTestId('logs-truncated');
+		expect(notice.textContent).toContain('200');
+		expect(document.querySelectorAll('.log-row')).toHaveLength(200);
+	});
+
+	it('says nothing when everything merged fits', async () => {
+		securityMock.fetchEvents.mockResolvedValue({ events: wafEvents(200) });
+		render(Page);
+		await waitFor(() => expect(document.querySelectorAll('.log-row')).toHaveLength(200));
+		expect(screen.queryByTestId('logs-truncated')).not.toBeInTheDocument();
+	});
+
+	it('keeps the Exclude button out of the ellipsised message', async () => {
+		auth.user = {
+			username: 'admin',
+			displayName: 'Admin',
+			role: 'admin',
+			mfa: 'none',
+			passwordCompromised: false
+		} as never;
+		securityMock.fetchEvents.mockResolvedValue({ events: wafEvents(1) });
+		render(Page);
+		const btn = await screen.findByTestId('waf-exclude-open');
+		expect(btn.closest('.log-msg')).toBeNull();
+		expect(btn.closest('.log-row')).not.toBeNull();
 	});
 });

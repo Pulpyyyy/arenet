@@ -2516,7 +2516,10 @@
 		"emptyNoEvents": "Aucun événement dans la fenêtre actuelle.",
 		"emptyNoMatch": "Aucun événement ne correspond aux filtres.",
 		"histogramHeader": "Chronologie d'activité · 24h · buckets 5 min",
-		"histogramAriaLabel": "Histogramme chronologique d'activité (24h, buckets 5 minutes)"
+		"histogramAriaLabel": "Histogramme chronologique d'activité (24h, buckets 5 minutes)",
+		"histogramHeaderFitted": "Chronologie d'activité · depuis {since} · événements listés uniquement",
+		"histogramAriaLabelFitted": "Histogramme chronologique des événements listés, depuis {since}",
+		"truncatedNotice": "Affichage des {shown} événements les plus récents. Des événements plus anciens existent mais ne sont pas chargés : les filtres et la chronologie ne portent que sur ces {shown}."
 	},
 	"system": {
 		"title": "Hôte",
