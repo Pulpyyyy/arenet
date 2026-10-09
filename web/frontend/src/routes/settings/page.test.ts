@@ -68,6 +68,8 @@ vi.mock('$app/navigation', () => ({
 
 import { goto } from '$app/navigation';
 import Page from './+page.svelte';
+import { auth } from '$lib/stores/auth.svelte';
+import type { User } from '$lib/api/auth';
 
 function tab(id: string): HTMLElement {
 	return screen.getByTestId(`settings-tab-${id}`);
@@ -218,6 +220,38 @@ describe('Settings page — leaving with unsaved edits', () => {
 		await userEvent.click(enabled);
 		expect(screen.queryByTestId('access-log-unsaved')).toBeNull();
 		expect(leave()).not.toHaveBeenCalled();
+// An OIDC account has no local password — the server answers
+// no_local_password — so the account card must not offer to change it.
+describe('settings — change password button', () => {
+	function signInAs(authSource: User['authSource']): void {
+		auth.user = {
+			id: 'u1',
+			username: 'alice',
+			displayName: 'Alice',
+			locked: false,
+			passwordCompromised: false,
+			hibpCheckStatus: 'clean',
+			themePreference: '',
+			languagePreference: '',
+			role: 'admin',
+			authSource
+		};
+	}
+
+	afterEach(() => {
+		auth.user = null;
+	});
+
+	it('is offered to a local account', () => {
+		signInAs('local');
+		render(Page);
+		expect(screen.getByTestId('settings-change-password')).toBeInTheDocument();
+	});
+
+	it('is hidden from an OIDC account', () => {
+		signInAs('oidc');
+		render(Page);
+		expect(screen.queryByTestId('settings-change-password')).toBeNull();
 	});
 });
 
