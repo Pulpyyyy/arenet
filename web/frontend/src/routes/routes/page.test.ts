@@ -3058,7 +3058,7 @@ describe('Routes page — Step X Option (c) wafExcludeRules textarea', () => {
 		await userEvent.type(textarea, '99999');
 
 		const errorNode = screen.getByTestId('waf-exclude-rules-error');
-		expect(errorNode.textContent ?? '').toMatch(/6 chiffres|range/i);
+		expect(errorNode.textContent ?? '').toMatch(/6-digit/i);
 	});
 
 	it('loads the persisted exclusion list into the textarea on edit', async () => {
