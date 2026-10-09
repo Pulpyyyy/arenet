@@ -114,14 +114,17 @@
 		"navTCPServices": "Services TCP / UDP",
 		"navLogs": "Journaux",
 		"navWAF": "WAF",
-		"navSecurity": "Sécurité",
+		"navSecurity": "Menaces",
 		"navCertificates": "Certificats",
 		"navAlerting": "Alertes",
 		"navUsers": "Utilisateurs",
 		"navSettings": "Paramètres",
 		"navErrorPages": "Pages d'erreur",
 		"navAuditLog": "Journal d'audit",
-		"navApiDocs": "Documentation API"
+		"navApiDocs": "Documentation API",
+		"crumbObservability": "Métriques",
+		"crumbRoute": "Route",
+		"navLabel": "Navigation principale"
 	},
 	"topbar": {
 		"statusHealthy": "Passerelle saine",
@@ -129,6 +132,9 @@
 		"statusUnhealthy": "Passerelle en panne",
 		"statusUnknown": "État de la passerelle inconnu",
 		"statusUnknownTitle": "Le rapport de santé (/system/health) n'a pas pu être lu."
+	},
+	"a11y": {
+		"skipToContent": "Aller au contenu"
 	},
 	"settings": {
 		"languageLabel": "Langue",
@@ -420,6 +426,8 @@
 		"updateAvailable": "Mise à jour {version} disponible",
 		"ariaOpen": "Ouvrir les notifications",
 		"ariaClose": "Fermer les notifications",
+		"ariaUnreadOne": "{action}, 1 non lue",
+		"ariaUnreadMany": "{action}, {count} non lues",
 		"loadError": "Impossible de charger les notifications"
 	},
 	"toast": {
@@ -1042,7 +1050,8 @@
 		"perfPivot": "Voir le détail de performance (requêtes / latence) →"
 	},
 	"security": {
-		"eyebrow": "Sécurité · Posture",
+		"headTitle": "Menaces · Arenet",
+		"eyebrow": "Sécurité · Menaces",
 		"subtitle": "Vue d'ensemble de la posture, plus le détail CrowdSec (instantané, LAPI en direct, scénarios).",
 		"tabsAria": "Sections de sécurité",
 		"tabOverview": "Vue d'ensemble",
@@ -1725,6 +1734,9 @@
 		"discardCancel": "Continuer à modifier",
 		"headTitle": "Pages d'erreur · Arenet",
 		"eyebrow": "Réglages · Pages d'erreur",
+		"settingsCardTitle": "Pages d'erreur",
+		"settingsCardDescription": "Les pages HTML que Caddy sert pour les erreurs 4xx et 5xx, avec tes propres modèles par route.",
+		"settingsCardLink": "Gérer les pages d'erreur →",
 		"titleList": "Pages d'erreur personnalisées",
 		"titleBuiltinPreview": "Aperçu : Arenet default",
 		"titleEdit": "Modifier le template",

@@ -98,10 +98,17 @@
 	 * existing components keep rendering; the hue is what changes. */
 	--accent-cyan: oklch(68% 0.21 255);
 	--accent-cyan-d: oklch(62% 0.22 255);
+	/* Accent as TEXT on an accent-tinted surface (--accent-soft), e.g.
+	 * the active sidebar item. Lighter than --accent here so it reads
+	 * on the dark tint (~6:1); the light theme flips it darker. */
+	--accent-fg: oklch(82% 0.16 255);
 
 	/* Status — OKLCH equivalents of the mock's --ok/--warn/--bad/--info. */
 	--status-up: oklch(72% 0.16 150);
 	--status-warn: oklch(80% 0.14 85);
+	/* Warn as emphasised TEXT on a warn-tinted surface (the read-only
+	 * banner's <b>). Same role as --accent-fg, for the warn hue. */
+	--status-warn-fg: oklch(86% 0.14 85);
 	--status-down: oklch(66% 0.20 25);
 	--status-info: oklch(72% 0.12 230);
 	--status-meta: oklch(62% 0.012 250);
@@ -161,10 +168,15 @@
 	/* Signature */
 	--accent-cyan: oklch(52% 0.18 255);
 	--accent-cyan-d: oklch(46% 0.20 255);
+	/* Darker than --accent: ~5.5:1 on --accent-soft over --bg-sidebar.
+	 * The dark value (82%) is ~1.4:1 here — that was the bug. */
+	--accent-fg: oklch(46% 0.18 255);
 
 	/* Status */
 	--status-up: oklch(55% 0.16 150);
 	--status-warn: oklch(62% 0.16 85);
+	/* ~5.8:1 on the banner's 10% warn tint over --bg-base. */
+	--status-warn-fg: oklch(48% 0.12 85);
 	--status-down: oklch(54% 0.20 25);
 	--status-info: oklch(54% 0.16 290);
 	--status-meta: oklch(55% 0.012 250);

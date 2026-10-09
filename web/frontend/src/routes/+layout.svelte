@@ -135,6 +135,17 @@
 	{@render children?.()}
 	<ToastContainer />
 {:else}
+	<!-- Skip link: first stop for Tab, hidden until focused. Focuses
+	     <main> by hand rather than following the #main hash, which
+	     would overwrite a hash the page uses (/alerting#history). -->
+	<a
+		href="#main"
+		class="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[1001] focus:rounded-md focus:border focus:border-border-strong focus:bg-elevated focus:px-3 focus:py-2 focus:text-sm focus:text-primary"
+		onclick={(e) => {
+			e.preventDefault();
+			document.getElementById('main')?.focus();
+		}}>{language.current && t('a11y.skipToContent')}</a
+	>
 	<!-- authenticated or locked: full layout. Compromised-password
 	     banner above; LockScreen overlay on locked. -->
 	<!-- v2.48 — an account created by an administrator cannot be used
@@ -209,7 +220,11 @@
 					>
 				</div>
 			{/if}
-			<main class="app-main" aria-busy={$loading} aria-live="polite">
+			<!-- No aria-live here: it made the whole page a live region, so
+			     every 1 s metrics push and re-render was read out. Route
+			     changes are already announced by SvelteKit's own announcer
+			     (it reads document.title after each navigation). -->
+			<main id="main" tabindex="-1" class="app-main focus:outline-none" aria-busy={$loading}>
 				{#if $loading}
 					<div class="loading-bar">
 						<div class="loading-shimmer"></div>
@@ -279,7 +294,7 @@
 		font-size: 12.5px;
 	}
 	.ro-banner svg { flex: none; }
-	.ro-banner b { color: oklch(86% 0.14 85); font-weight: 500; }
+	.ro-banner b { color: var(--status-warn-fg); font-weight: 500; }
 
 	.loading-bar {
 		position: absolute;

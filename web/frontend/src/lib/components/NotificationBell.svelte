@@ -29,6 +29,18 @@
 
 	const count = $derived(notificationsStore.unreadCount);
 	const badge = $derived(count > 99 ? '99+' : String(count));
+	// The aria-label replaces the button's content as its name, so the
+	// badge is never read out: the count has to be in the label. The
+	// real number, not the 99+ cap. Two keys for singular / plural.
+	const triggerLabel = $derived(
+		language.current &&
+			(() => {
+				const action = t(open ? 'notifications.ariaClose' : 'notifications.ariaOpen');
+				if (count === 0) return action;
+				const key = count === 1 ? 'notifications.ariaUnreadOne' : 'notifications.ariaUnreadMany';
+				return t(key, { action, count });
+			})()
+	);
 
 	function subjectOf(ev: AlertEvent): string {
 		if (ev.eventId === SYNTHETIC_UPDATE_ID) {
@@ -95,7 +107,7 @@
 		data-testid="notif-trigger"
 		aria-haspopup="dialog"
 		aria-expanded={open}
-		aria-label={language.current && t(open ? 'notifications.ariaClose' : 'notifications.ariaOpen')}
+		aria-label={triggerLabel}
 		onclick={toggle}
 	>
 		<span class="bell" aria-hidden="true">
