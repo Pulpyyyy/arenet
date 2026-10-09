@@ -25,9 +25,9 @@ import "testing"
 // Adding or removing actions without updating the spec / decisions
 // doc is a process violation; this test forces the conversation.
 func TestAllActions_Count(t *testing.T) {
-	const wantCount = 77
+	const wantCount = 78
 	if got := len(AllActions()); got != wantCount {
-		t.Fatalf("AllActions count drift: got %d, want %d (D7=15 + J.4=1 + v2.11-dns=2 + K.1=2 + K.2=7 + K.3=3 + O.3=2 + P.3=2 + V.4=2 + CS.1=2 + CS.2=1 + CS.3=1 + CS.3-fu=1 + users-page=1 + Phase4=3 + AL.1.a=3 + AL.3b=3 + R=3 + MaxMind=2 + route-toggle=2 + route-maintenance=2 + cert-delete=1 + external-cert=3 + external-cert-csr=1 + scheduled-backups=2 + route-check=2 + tcp-services=3 + local-users=1 + access-log=1 + probes=3)", got, wantCount)
+		t.Fatalf("AllActions count drift: got %d, want %d (D7=15 + J.4=1 + v2.11-dns=2 + K.1=2 + K.2=7 + K.3=3 + O.3=2 + P.3=2 + V.4=2 + CS.1=2 + CS.2=1 + CS.3=1 + crowdsec-unban=1 + CS.3-fu=1 + users-page=1 + Phase4=3 + AL.1.a=3 + AL.3b=3 + R=3 + MaxMind=2 + route-toggle=2 + route-maintenance=2 + cert-delete=1 + external-cert=3 + external-cert-csr=1 + scheduled-backups=2 + route-check=2 + tcp-services=3 + local-users=1 + access-log=1 + probes=3)", got, wantCount)
 	}
 }
 
@@ -139,6 +139,9 @@ func TestAllActions_ExactSet(t *testing.T) {
 		// Automation machine creds; encodes
 		// "manual:<username>|<reason>" into Decision.scenario.
 		"crowdsec_decision_create": true,
+		// Unban (+1) — DELETE of one LAPI decision from the
+		// Live LAPI table; the counterpart of the manual ban.
+		"crowdsec_decision_delete": true,
 		// Step CS.3 follow-up (+1) — operator-pressed
 		// "Reset Security Automation" button on Settings
 		// UI. Mirror of crowdsec_reset: distinct from

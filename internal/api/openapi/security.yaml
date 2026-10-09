@@ -424,12 +424,17 @@ paths:
         `manual:<username>|<reason>` and its origin `manual`. A bare IP gets
         scope `Ip`, a CIDR scope `Range` (normalised, e.g. `10.0.0.1/8` →
         `10.0.0.0/8`). Recorded in the audit log (`crowdsec_decision_create`).
-        There is no un-ban endpoint in the API; remove the decision with
-        `cscli decisions delete`.
+        Undo it with `DELETE /security/crowdsec/decisions/{id}`.
 
-        Errors: 400 validation; 412 Security Automation (machine
-        credentials) not configured; 502 LAPI unreachable or credentials
-        rejected.
+        Self-ban guard: a value that is, or contains, the requesting
+        client's own IP (as recorded in the audit log, X-Forwarded-For
+        aware behind trusted proxies) is refused with 409 and code
+        `crowdsec_self_ban` (params `value`, `clientIp`) unless
+        `confirmSelfBan` is `true`.
+
+        Errors: 400 validation; 409 self-ban; 412 Security Automation
+        (machine credentials) not configured; 502 LAPI unreachable or
+        credentials rejected.
       tags: [Security]
       x-arenet-role: admin
       requestBody:
@@ -455,6 +460,10 @@ paths:
                   type: string
                   maxLength: 256
                   description: Free text, required, no control characters (tab allowed).
+                confirmSelfBan:
+                  type: boolean
+                  default: false
+                  description: Override the self-ban guard (ban a value that covers the caller's own IP).
       responses:
         '201':
           description: Decision accepted by LAPI.
@@ -474,6 +483,11 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: '`crowdsec_self_ban`: the value covers the caller''s own IP and `confirmSelfBan` was not set.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '412':
           description: Security Automation machine credentials not configured.
           content:
@@ -482,6 +496,57 @@ paths:
         '500': { $ref: '#/components/responses/ServerError' }
         '502':
           description: LAPI unreachable or machine credentials rejected.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /security/crowdsec/decisions/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: LAPI decision id (the `id` of a row from `GET /security/crowdsec/decisions`).
+        schema: { type: integer, minimum: 1 }
+    delete:
+      summary: Unban (expire one CrowdSec decision)
+      description: |
+        Expires one LAPI decision through `DELETE /v1/decisions/{id}`
+        with the Security Automation machine credentials: LAPI only
+        accepts that route from a machine, never from the bouncer key.
+        LAPI expires the decision rather than deleting it, so it drops
+        out of the live list and the bouncer releases it on its next
+        poll. Recorded in the audit log (`crowdsec_decision_delete`,
+        target = the decision id).
+
+        Errors: 400 id not a positive integer; 404 LAPI has no such
+        decision; 412 Security Automation not configured; 502 LAPI
+        unreachable, credentials rejected, or any other LAPI error
+        (CrowdSec 1.6 answers 500, not 404, for an unknown id).
+      tags: [Security]
+      x-arenet-role: admin
+      responses:
+        '200':
+          description: Decision expired.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, nbDeleted]
+                properties:
+                  id: { type: integer }
+                  nbDeleted: { type: integer, description: 'Number of decisions LAPI expired.' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412':
+          description: Security Automation machine credentials not configured.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/ServerError' }
+        '502':
+          description: LAPI unreachable, machine credentials rejected, or an unexpected LAPI status.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

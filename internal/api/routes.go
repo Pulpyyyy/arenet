@@ -584,6 +584,12 @@ func NewRouter(h *Handler, dev bool, ipExtractor *auth.IPExtractor, ws *WSTopolo
 				// crowdsec_manual_ban.go for the LAPI Alert
 				// payload shape + validation rules.
 				r.Post("/security/crowdsec/decisions", h.addManualBan)
+				// Unban — expires one LAPI decision by id
+				// with the same machine creds (LAPI only
+				// accepts DELETE /v1/decisions/:id from a
+				// machine JWT). See
+				// crowdsec_decision_delete.go.
+				r.Delete("/security/crowdsec/decisions/{id}", h.deleteCrowdSecDecision)
 				// Step AL.1.b — alerting channel CRUD + /test.
 				// Admin-only (channel config carries SMTP
 				// passwords + webhook auth headers — secret
