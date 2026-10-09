@@ -1023,7 +1023,7 @@
 		"wafRules": "WAF rules"
 	},
 	"dashboard": {
-		"subtitle": "Real-time traffic across your {count} routes, recent WAF events and upstream services. Window {window}.",
+		"subtitle": "Traffic across your {count} routes, recent WAF events and upstream services. Window {window}, refreshed every minute.",
 		"disabledTitle": "Metrics unavailable",
 		"disabledBody": "The observability subsystem failed to start. The proxy is still serving traffic; only the metric history is missing. Check the Arenet logs for the root cause.",
 		"noRoutesTitle": "No routes configured yet",
@@ -1051,9 +1051,15 @@
 		"kpiCertFailedFootZero": "no issuance error",
 		"kpiCertFailedFootInvestigate": "investigate",
 		"trafficCardTitle": "Traffic — {window} window",
-		"trafficBtnReq": "Req/s",
+		"trafficBtnReq": "Requests",
 		"trafficBtnLatency": "Latency",
-		"trafficBtnErrors": "Errors",
+		"trafficBtnErrors": "5xx",
+		"chartUnitRequests": "requests / {per}",
+		"chartUnit5xx": "5xx responses / {per}",
+		"chartUnitLatency": "p95, ms",
+		"chartLoadFailed": "The series could not be loaded.",
+		"updatedAt": "Updated at {time}",
+		"updatedAtFailed": "Refresh failed · data from {time}",
 		"recentWafCardTitle": "Recent WAF events",
 		"recentWafCardMeta": "last 5",
 		"recentWafEmpty": "No recent WAF events in the window.",
@@ -2571,6 +2577,9 @@
 		"action": "Change my password"
 	},
 	"observability": {
+		"chartRequests": "Requests / {per}",
+		"chart4xx": "4xx / {per}",
+		"chart5xx": "5xx / {per}",
 		"latencyTitle": "Latency (ms)",
 		"latencySeriesTtfb": "server",
 		"latencySeriesTotal": "with transfer",

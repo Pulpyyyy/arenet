@@ -24,7 +24,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { tick } from 'svelte';
-import { render, screen } from '@testing-library/svelte';
+import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
 
 const { metricsMock, securityMock, clientMock, certificatesMock, toastMock } = vi.hoisted(() => ({
 	metricsMock: {
@@ -380,3 +380,45 @@ describe('Dashboard — Phase 5 cert KPI tiles', () => {
 		expect(screen.getByTestId('kpi-cert-expiring').textContent).toContain('0');
 	});
 });
+
+// The traffic chart said "Req/s" over counts per minute, kept the
+// previous metric's points when a fetch failed, and the page said
+// "real-time" over data read once.
+describe('Dashboard — traffic chart units and freshness', () => {
+	it('labels the series per bucket, from the response', async () => {
+		metricsMock.fetchSummary.mockResolvedValue(makeSummary());
+		metricsMock.fetchTimeseries.mockResolvedValue({ bucketSizeSeconds: 60, points: [] });
+		render(Page);
+
+		await waitFor(() => expect(screen.getByTestId('chart-unit')).toHaveTextContent('requests / min'));
+		expect(screen.getByRole('button', { name: 'Requests' })).toBeInTheDocument();
+		expect(screen.queryByText('Req/s')).toBeNull();
+	});
+
+	it('shows the failure instead of the previous metric when a switch fails', async () => {
+		metricsMock.fetchSummary.mockResolvedValue(makeSummary());
+		metricsMock.fetchTimeseries.mockResolvedValueOnce({
+			bucketSizeSeconds: 60,
+			points: [
+				{ ts: '2026-06-10T22:00:00Z', value: 12 },
+				{ ts: '2026-06-10T22:01:00Z', value: 14 }
+			]
+		});
+		render(Page);
+		await waitFor(() => expect(screen.getByTestId('chart-unit')).toBeInTheDocument());
+
+		metricsMock.fetchTimeseries.mockRejectedValueOnce(new Error('boom'));
+		await fireEvent.click(screen.getByRole('button', { name: '5xx' }));
+
+		expect(await screen.findByTestId('chart-error')).toBeInTheDocument();
+		expect(screen.getByTestId('chart-unit')).toHaveTextContent('5xx responses / min');
+		expect(toastMock.pushToast).not.toHaveBeenCalled();
+	});
+
+	it('says when the data was last updated', async () => {
+		metricsMock.fetchSummary.mockResolvedValue(makeSummary());
+		render(Page);
+		expect(await screen.findByTestId('dashboard-updated-at')).toHaveTextContent('Updated at');
+	});
+});
+

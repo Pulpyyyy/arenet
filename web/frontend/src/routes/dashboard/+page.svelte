@@ -31,7 +31,7 @@
   - noRoutes (0 routes): clean message + link to /routes.
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { fetchSummary, fetchTimeseries } from '$lib/api/metrics';
 	import { fetchEvents as fetchWafEvents, fetchCertEventsAggregate } from '$lib/api/security';
 	import { certificatesApi } from '$lib/api/certificates';
@@ -45,6 +45,7 @@
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
 	import { relativeTime } from '$lib/utils/audit-format';
+	import { bucketUnit } from '$lib/utils/bucket-unit';
 	import MultiSeriesTimelineChart from '$lib/components/MultiSeriesTimelineChart.svelte';
 	import type {
 		Certificate,
@@ -66,7 +67,22 @@
 	let chartMetric = $state<MetricName>('req_per_sec');
 	let chartPoints = $state<TimeseriesPoint[]>([]);
 	let chartLoading = $state(false);
+	// The series are counts per bucket, not per second: the unit is the
+	// bucket, read from the response (see lib/utils/bucket-unit).
+	let chartBucketSeconds = $state(60);
+	// A failed fetch used to toast and leave the PREVIOUS metric's
+	// points under the new metric's button and colour.
+	let chartError = $state<string | null>(null);
+	// Only the latest request may write: a fast switch could otherwise
+	// land an older metric's answer last.
+	let chartSeq = 0;
 	const window: MetricWindow = '24h';
+
+	// The subtitle said "real-time" over data read once at load. The
+	// page now refreshes quietly and says when it last did.
+	const REFRESH_MS = 60_000;
+	let lastUpdatedAt = $state<Date | null>(null);
+	let refreshFailed = $state(false);
 
 	// Phase 5 — cert lifecycle data. certificates feeds the
 	// total + "expiring in 30d" KPI cards; certBuckets feeds
@@ -198,6 +214,8 @@
 			// Sum failed across the 7d window — one round-trip
 			// to the same aggregate endpoint, no extra surface.
 			certFailed7d = (failed7d.buckets ?? []).reduce((acc, b) => acc + (b.failed ?? 0), 0);
+			lastUpdatedAt = new Date();
+			refreshFailed = false;
 			if (!sum.disabled) {
 				void loadChart();
 			}
@@ -209,21 +227,59 @@
 		}
 	}
 
-	async function loadChart(): Promise<void> {
-		chartLoading = true;
+	async function loadChart(quiet = false): Promise<void> {
+		const seq = ++chartSeq;
+		if (!quiet) chartLoading = true;
 		try {
 			const resp = await fetchTimeseries('all', chartMetric, window);
+			if (seq !== chartSeq) return;
 			// Drop the in-progress last point (#L.2-2 trailing bucket).
 			chartPoints = resp.points.length > 0 ? resp.points.slice(0, -1) : [];
+			chartBucketSeconds = resp.bucketSizeSeconds || chartBucketSeconds;
+			chartError = null;
 		} catch (err) {
-			pushToast(
-				err instanceof ApiError ? err.message : 'failed to load timeseries',
-				'danger'
-			);
+			if (seq !== chartSeq) return;
+			// A quiet refresh keeps the series on screen; the header
+			// says the refresh failed.
+			if (quiet) {
+				refreshFailed = true;
+				return;
+			}
+			chartPoints = [];
+			chartError = err instanceof ApiError ? err.message : t('dashboard.chartLoadFailed');
 		} finally {
-			chartLoading = false;
+			if (seq === chartSeq) chartLoading = false;
 		}
 	}
+
+	// Quiet: no page spinner, and a failure keeps what is on screen
+	// and marks the header instead of replacing the page with an error.
+	async function refresh(): Promise<void> {
+		try {
+			const [rs, sum, evs] = await Promise.all([
+				listRoutes(),
+				fetchSummary(),
+				fetchWafEvents({ limit: 5 }).catch(() => ({ events: recentEvents }))
+			]);
+			routes = rs;
+			summary = sum;
+			recentEvents = evs.events ?? [];
+			lastUpdatedAt = new Date();
+			refreshFailed = false;
+			if (!sum.disabled) void loadChart(true);
+		} catch {
+			refreshFailed = true;
+		}
+	}
+
+	const chartUnitLabel = $derived(
+		language.current &&
+			(chartMetric === 'p95_latency_ms'
+				? t('dashboard.chartUnitLatency')
+				: t(chartMetric === 'five_xx_rate' ? 'dashboard.chartUnit5xx' : 'dashboard.chartUnitRequests', {
+						per: bucketUnit(chartBucketSeconds)
+					}))
+	);
 
 	function switchMetric(m: MetricName): void {
 		if (m === chartMetric) return;
@@ -255,8 +311,16 @@
 		}
 	}
 
+	let refreshId: ReturnType<typeof setInterval> | null = null;
 	onMount(() => {
 		void load();
+		refreshId = setInterval(() => {
+			if (loading || document.visibilityState !== 'visible') return;
+			void refresh();
+		}, REFRESH_MS);
+	});
+	onDestroy(() => {
+		if (refreshId !== null) clearInterval(refreshId);
 	});
 </script>
 
@@ -295,7 +359,18 @@
 		eyebrow={language.current && t('dashboard.eyebrow')}
 		title={language.current && t('pageTitles.dashboard')}
 		subtitle={language.current && t('dashboard.subtitle', { count: routes.length, window })}
-	/>
+	>
+		{#snippet actions()}
+			{#if lastUpdatedAt}
+				<span class="updated-at" class:failed={refreshFailed} data-testid="dashboard-updated-at">
+					{language.current &&
+						t(refreshFailed ? 'dashboard.updatedAtFailed' : 'dashboard.updatedAt', {
+							time: lastUpdatedAt.toLocaleTimeString(language.current)
+						})}
+				</span>
+			{/if}
+		{/snippet}
+	</PageHeader>
 
 	<!-- KPIs -->
 	<!-- v2.41 — the eight tiles were a scoped-CSS copy of StatCard,
@@ -369,7 +444,10 @@
 	<div class="two-col main-row">
 		<div class="card">
 			<div class="card-h">
-				<h3>{language.current && t('dashboard.trafficCardTitle', { window })}</h3>
+				<h3>
+					{language.current && t('dashboard.trafficCardTitle', { window })}
+					<span class="chart-unit" data-testid="chart-unit">{chartUnitLabel}</span>
+				</h3>
 				<div class="seg">
 					<button
 						class:on={chartMetric === 'req_per_sec'}
@@ -388,6 +466,8 @@
 			<div class="chart-wrap">
 				{#if chartLoading}
 					<div class="chart-loading"><Spinner size="sm" /></div>
+				{:else if chartError}
+					<p class="chart-error" role="alert" data-testid="chart-error">{chartError}</p>
 				{:else}
 					<TimelineChart
 						points={chartPoints}
@@ -627,6 +707,10 @@
 
 	.chart-wrap { min-height: 160px; }
 	.chart-loading { display: flex; justify-content: center; padding: 48px; }
+	.chart-error { color: var(--status-down); font-size: 13px; padding: 48px 16px; text-align: center; }
+	.chart-unit { margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--text-secondary); }
+	.updated-at { font-size: 12px; color: var(--text-secondary); }
+	.updated-at.failed { color: var(--status-warn); }
 
 	.stack { display: flex; flex-direction: column; gap: 10px; }
 	.event {
