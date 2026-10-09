@@ -131,6 +131,15 @@
 		"reduceMotionDisabled": "Disabled",
 		"reduceMotionHint": "(system preference)",
 		"changePassword": "Change password",
+		"unsaved": {
+			"marker": "Unsaved changes",
+			"dialogTitle": "Discard your unsaved changes?",
+			"dialogMessage": "Not saved yet: {cards}. Leaving now drops these changes.",
+			"dialogConfirm": "Discard and leave",
+			"dialogCancel": "Keep editing",
+			"cardAutomation": "Security Automation",
+			"cardForwardAuth": "Forward-auth providers"
+		},
 		"dnsProviders": {
 			"title": "DNS Providers",
 			"subtitle": "DNS accounts used to issue wildcard certificates (ACME DNS-01).",

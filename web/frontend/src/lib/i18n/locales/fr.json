@@ -131,6 +131,15 @@
 		"reduceMotionDisabled": "Désactivé",
 		"reduceMotionHint": "(préférence système)",
 		"changePassword": "Changer le mot de passe",
+		"unsaved": {
+			"marker": "Modifications non enregistrées",
+			"dialogTitle": "Abandonner tes modifications non enregistrées ?",
+			"dialogMessage": "Pas encore enregistré : {cards}. Si tu quittes maintenant, ces modifications sont perdues.",
+			"dialogConfirm": "Abandonner et quitter",
+			"dialogCancel": "Continuer à modifier",
+			"cardAutomation": "Security Automation",
+			"cardForwardAuth": "Fournisseurs forward-auth"
+		},
 		"dnsProviders": {
 			"title": "Fournisseurs DNS",
 			"subtitle": "Comptes DNS utilisés pour émettre les certificats wildcard (ACME DNS-01).",

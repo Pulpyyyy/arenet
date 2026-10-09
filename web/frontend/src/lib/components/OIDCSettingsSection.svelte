@@ -35,6 +35,14 @@
 	import Spinner from '$lib/components/Spinner.svelte';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
+	import UnsavedMarker from '$lib/components/settings/UnsavedMarker.svelte';
+
+	interface Props {
+		/** Out: the card holds edits not yet saved (see isDirty). */
+		dirty?: boolean;
+	}
+
+	let { dirty = $bindable(false) }: Props = $props();
 
 	let config = $state<OIDCConfig | null>(null);
 	let allowlist = $state<OIDCAllowedIdentity[]>([]);
@@ -58,6 +66,21 @@
 	let allowlistError = $state('');
 	let allowlistSubmitting = $state(false);
 
+	// Unsaved: the provider form differs from what was last loaded or
+	// saved (the secret is blank then — "keep" — so only a typed one
+	// counts), or an allowlist entry is typed but not yet added.
+	function formKey(): string {
+		return JSON.stringify(form);
+	}
+	let savedKey = $state(formKey());
+	const isDirty = $derived(
+		formKey() !== savedKey ||
+			[newEntry.email, newEntry.displayName, newEntry.sub].some((v) => v.trim() !== '')
+	);
+	$effect(() => {
+		dirty = isDirty;
+	});
+
 	async function load(): Promise<void> {
 		loading = true;
 		loadError = '';
@@ -79,6 +102,7 @@
 			// types it on explicit rotation. The placeholder tells them
 			// what the empty state means.
 			form.clientSecret = '';
+			savedKey = formKey();
 		} catch (err) {
 			loadError = err instanceof Error ? err.message : t('oidcSettings.loadFailed', { err: '' });
 		} finally {
@@ -112,6 +136,7 @@
 			config = saved;
 			form.scopes = (saved.scopes ?? []).join(' ');
 			form.clientSecret = ''; // reset the secret field after save
+			savedKey = formKey();
 			pushToast(t('oidcSettings.toastSaved'), 'success');
 		} catch (err) {
 			if (err instanceof ApiError) {
@@ -176,6 +201,7 @@
 	<header class="flex items-center justify-between border-b border-border-subtle pb-3 mb-4">
 		<div>
 			<h2 class="text-xl font-semibold">{language.current && t('oidcSettings.title')}</h2>
+			<UnsavedMarker dirty={isDirty} testid="oidc-unsaved" />
 			<p class="text-xs text-muted mt-1">
 				{language.current && t('oidcSettings.subtitle')}
 			</p>

@@ -44,6 +44,14 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
+	import UnsavedMarker from '$lib/components/settings/UnsavedMarker.svelte';
+
+	interface Props {
+		/** Out: the form differs from what was last loaded or saved. */
+		dirty?: boolean;
+	}
+
+	let { dirty = $bindable(false) }: Props = $props();
 
 	let settings = $state<CrowdSecSettings | null>(null);
 	// Sticky: set when a save moved the LAPI address, and NOT cleared by
@@ -64,6 +72,17 @@
 	let formError = $state('');
 	let submitting = $state(false);
 
+	// The form as last loaded or saved. The key field is always blank
+	// then ("keep the stored key"), so only a typed key is an edit.
+	function formKey(): string {
+		return JSON.stringify(form);
+	}
+	let savedKey = $state(formKey());
+	const isDirty = $derived(formKey() !== savedKey);
+	$effect(() => {
+		dirty = isDirty;
+	});
+
 	// Test connection state. `testResult` is set after a probe
 	// completes; null when no probe has run yet (or the form
 	// was edited since the last probe — the UI invalidates the
@@ -82,6 +101,7 @@
 			form.bouncerName = cfg.bouncerName || 'arenet';
 			form.timeoutSeconds = cfg.timeoutSeconds || 5;
 			form.apiKey = ''; // never round-trip the secret
+			savedKey = formKey();
 		} catch (err) {
 			loadError = err instanceof Error ? err.message : t('crowdsecSettings.loadFailed', { err: '' });
 		} finally {
@@ -102,6 +122,7 @@
 			settings = next;
 			if (next.restartRequired) restartRequired = true;
 			form.apiKey = ''; // clear so a re-visit doesn't show ghost value
+			savedKey = formKey();
 			pushToast(
 				next.configured
 					? t('crowdsecSettings.saveAppliedToast')
@@ -186,6 +207,7 @@
 			form.bouncerName = next.bouncerName || 'arenet';
 			form.timeoutSeconds = next.timeoutSeconds || 5;
 			form.apiKey = '';
+			savedKey = formKey();
 			testResult = null;
 			pushToast(t('crowdsecSettings.resetToastSuccess'), 'success');
 			resetConfirmOpen = false;
@@ -208,6 +230,7 @@
 		>
 			<div>
 				<h2 class="text-xl font-semibold">{language.current && t('crowdsecSettings.title')}</h2>
+				<UnsavedMarker dirty={isDirty} testid="crowdsec-unsaved" />
 				<p class="text-xs text-muted mt-1">
 					{language.current && t('crowdsecSettings.subtitle')}
 				</p>
