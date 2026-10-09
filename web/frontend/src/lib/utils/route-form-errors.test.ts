@@ -16,7 +16,8 @@ describe('sectionForErrorKey', () => {
 		['healthCheck.expectBody', 'healthCheck'],
 		['pathRules.3', 'pathsHeaders'],
 		['wafExcludeRules', 'waf'],
-		['wafExcludeTags', 'waf']
+		['wafExcludeTags', 'waf'],
+		['wafCustomRules', 'waf']
 	])('%s lives in %s', (key, section) => {
 		expect(sectionForErrorKey(key)).toBe(section);
 	});

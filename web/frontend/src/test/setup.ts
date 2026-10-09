@@ -14,7 +14,10 @@ import '@testing-library/jest-dom/vitest';
 // Stub $app/navigation: goto is a no-op spy that tests can read to
 // verify redirect behavior of the 401 interceptor (spec §6.4).
 vi.mock('$app/navigation', () => ({
-	goto: vi.fn(() => Promise.resolve())
+	goto: vi.fn(() => Promise.resolve()),
+	// lib/utils/navigation-guard registers here; a no-op keeps pages
+	// that use it renderable. Its own test mocks it to drive it.
+	beforeNavigate: vi.fn()
 }));
 
 // jsdom doesn't ship window.matchMedia. Svelte 5's

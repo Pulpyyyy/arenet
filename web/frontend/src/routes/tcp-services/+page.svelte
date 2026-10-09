@@ -31,6 +31,7 @@
 	import SwitchRow from '$lib/components/form/SwitchRow.svelte';
 	import PostureSentence from '$lib/components/form/PostureSentence.svelte';
 	import { serverErrorMessage } from '$lib/api/server-errors';
+	import { guardNavigation } from '$lib/utils/navigation-guard';
 	import { pushToast } from '$lib/stores/toast';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
@@ -88,6 +89,59 @@
 	let fCIDRs = $state('');
 	let fHealthCheck = $state(false);
 	let fDisabled = $state(false);
+
+	// Unsaved changes: the form is snapshotted when it opens, and
+	// anything different afterwards is unsaved work. Cancel, picking
+	// another row, Add, and leaving the page all dropped it unasked.
+	let formSnapshot = $state('');
+	function formState(): string {
+		return JSON.stringify([
+			fName,
+			fProtocol,
+			fAcceptProtocol,
+			fListenAddr,
+			fListenPort,
+			fBackendHost,
+			fBackendPort,
+			fProxyProtocol,
+			fCrowdSec,
+			fRestrict,
+			fCIDRs,
+			fHealthCheck,
+			fDisabled
+		]);
+	}
+	const formDirty = $derived(formOpen && formSnapshot !== '' && formState() !== formSnapshot);
+
+	let confirmDiscardOpen = $state(false);
+	let pendingAfterDiscard: (() => void) | null = null;
+	function guardUnsaved(action: () => void): void {
+		if (formDirty) {
+			pendingAfterDiscard = action;
+			confirmDiscardOpen = true;
+			return;
+		}
+		action();
+	}
+	function onConfirmDiscard(): void {
+		confirmDiscardOpen = false;
+		const action = pendingAfterDiscard;
+		pendingAfterDiscard = null;
+		action?.();
+	}
+	// ConfirmDialog's cancel only flips `open`: drop what was armed.
+	$effect(() => {
+		if (!confirmDiscardOpen) pendingAfterDiscard = null;
+	});
+	// closeForm() makes formDirty false, so the resumed navigation passes.
+	guardNavigation(
+		() => formDirty,
+		(proceed) =>
+			guardUnsaved(() => {
+				closeForm();
+				proceed();
+			})
+	);
 
 	const protocolOptions = $derived([
 		{ value: 'tcp' as const, label: 'TCP', hint: tl('tcpServices.form.protocolTCPHint'), tone: 'neutral' as const },
@@ -224,6 +278,11 @@
 		resetForm();
 		editingId = null;
 		formOpen = true;
+		formSnapshot = formState();
+	}
+
+	function closeForm() {
+		formOpen = false;
 	}
 
 	function openEdit(svc: TCPService) {
@@ -243,6 +302,7 @@
 		fHealthCheck = svc.healthCheck?.enabled ?? false;
 		fDisabled = svc.disabled ?? false;
 		formOpen = true;
+		formSnapshot = formState();
 	}
 
 	function buildPayload(): TCPServiceRequest {
@@ -344,7 +404,7 @@
 	subtitle={tl('tcpServices.subtitle')}
 >
 	{#snippet actions()}
-		<Button onclick={openCreate}>{tl('tcpServices.addButton')}</Button>
+		<Button onclick={() => guardUnsaved(openCreate)}>{tl('tcpServices.addButton')}</Button>
 	{/snippet}
 </PageHeader>
 
@@ -368,7 +428,7 @@
 				title={tl('tcpServices.emptyTitle')}
 				body={tl('tcpServices.emptyBody')}
 				actionLabel={tl('tcpServices.addButton')}
-				onAction={openCreate}
+				onAction={() => guardUnsaved(openCreate)}
 			>
 				<TCPFlowDiagram
 					labels={{
@@ -410,11 +470,11 @@
 								class="border-t border-border-subtle cursor-pointer hover:bg-hover"
 								class:opacity-50={svc.disabled}
 								data-testid="tcp-row-{svc.id}"
-								onclick={() => openEdit(svc)}
+								onclick={() => guardUnsaved(() => openEdit(svc))}
 								onkeydown={(e) => {
 									if (e.key === 'Enter' || e.key === ' ') {
 										e.preventDefault();
-										openEdit(svc);
+										guardUnsaved(() => openEdit(svc));
 									}
 								}}
 								tabindex="0"
@@ -753,7 +813,7 @@
 							<span></span>
 						{/if}
 						<div class="flex gap-2">
-							<Button variant="ghost" type="button" onclick={() => (formOpen = false)}
+							<Button variant="ghost" type="button" onclick={() => guardUnsaved(closeForm)}
 								>{tl('tcpServices.form.cancel')}</Button
 							>
 							<Button type="submit" loading={saving}>{tl('tcpServices.form.save')}</Button>
@@ -765,6 +825,16 @@
 	</div>
 	{/if}
 {/if}
+
+<ConfirmDialog
+	bind:open={confirmDiscardOpen}
+	title={tl('tcpServices.discardDialog.title')}
+	message={tl('tcpServices.discardDialog.message')}
+	confirmLabel={tl('tcpServices.discardDialog.confirmLabel')}
+	cancelLabel={tl('tcpServices.discardDialog.cancelLabel')}
+	confirmVariant="danger"
+	onConfirm={onConfirmDiscard}
+/>
 
 <ConfirmDialog
 	bind:open={confirmDeleteOpen}

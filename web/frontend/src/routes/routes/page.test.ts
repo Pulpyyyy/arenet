@@ -93,7 +93,8 @@ const { toastMock, apiMock, settingsMock, authMock, externalCertsMock } = vi.hoi
 // $app/navigation: only reached if the page redirects (it doesn't
 // here). Stub to avoid the SvelteKit runtime dependency.
 vi.mock('$app/navigation', () => ({
-	goto: vi.fn()
+	goto: vi.fn(),
+	beforeNavigate: vi.fn()
 }));
 
 // $lib/stores/toast: pushToast is called on success / failure
@@ -4253,6 +4254,32 @@ describe('Routes page — v2.37 guided WAF rules', () => {
 			operator: 'is_not',
 			values: ['GET', 'HEAD', 'POST', 'OPTIONS']
 		});
+	});
+});
+
+describe('Routes page — a guided WAF rule left open', () => {
+	// The draft lives in the editor until OK. Save used to ship the
+	// route without it, with a success toast.
+	it('blocks the save and points at the open rule', async () => {
+		const seeded = makeRoute({ id: 'draft-edit', host: 'draft.local', wafMode: 'block' });
+		apiMock.listRoutes.mockResolvedValue([seeded]);
+		apiMock.updateRoute.mockResolvedValue(seeded);
+		render(Page);
+		await userEvent.click((await screen.findByText('draft.local')).closest('tr')!);
+		await tick();
+
+		await userEvent.click(screen.getByTestId('waf-rule-preset-methods'));
+		await tick();
+		// An open draft is unsaved work, even before any other change.
+		expect(screen.getByTestId('form-dirty')).toBeInTheDocument();
+
+		await fireEvent.submit(document.querySelector('form')!);
+		await tick();
+		await tick();
+
+		expect(apiMock.updateRoute).not.toHaveBeenCalled();
+		expect(screen.getByTestId('waf-rule-draft-error')).toBeInTheDocument();
+		expect(screen.getByTestId('section-waf').hasAttribute('data-invalid')).toBe(true);
 	});
 });
 

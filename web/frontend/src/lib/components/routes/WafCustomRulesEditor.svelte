@@ -35,9 +35,20 @@
 		wafMode?: string;
 		/** v2.38 — "→ SecLang": convert rule `index` (parent handles it). */
 		onConvert?: (index: number) => void;
+		/**
+		 * Out: a rule is open in the editor and not yet confirmed with
+		 * OK. The draft is not in `value` until then, so the parent
+		 * treats it as unsaved work and refuses to save over it.
+		 */
+		editing?: boolean;
 	}
 
-	let { value = $bindable(), wafMode = 'detect', onConvert }: Props = $props();
+	let {
+		value = $bindable(),
+		wafMode = 'detect',
+		onConvert,
+		editing = $bindable(false)
+	}: Props = $props();
 
 	// Editor state: index of the rule being edited (-1 = new rule),
 	// the draft, and one textarea string per condition.
@@ -51,6 +62,10 @@
 	}
 	let draft = $state<Draft | null>(null);
 	let error = $state<string | null>(null);
+
+	$effect(() => {
+		editing = draft !== null;
+	});
 
 	function open(rule: WafCustomRule, index: number): void {
 		const conditions = rule.conditions.map((c) => ({ ...c, values: [...(c.values ?? [])] }));

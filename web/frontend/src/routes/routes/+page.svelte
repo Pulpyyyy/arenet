@@ -31,6 +31,7 @@
 	import { manualCertDisplayName } from '$lib/utils/manual-cert-name';
 	import { gateApplies } from '$lib/utils/route-gates';
 	import { invalidSections } from '$lib/utils/route-form-errors';
+	import { guardNavigation } from '$lib/utils/navigation-guard';
 	import type {
 		SecLangError,
 		WafCustomRule,
@@ -2134,9 +2135,15 @@
 	// it opens; anything different afterwards is unsaved work. Compared as
 	// JSON because formData is a plain object of plain values.
 	let formSnapshot = $state('');
+	// A guided WAF rule open in its editor lives in the editor, not in
+	// formData, until its OK: Save shipped the route without it and a
+	// discard dropped it unasked. It counts as unsaved work.
+	let wafRuleEditing = $state(false);
 	const formDirty = $derived(
 		formSnapshot !== '' &&
-			(JSON.stringify(formData) !== formSnapshot || stateChoice !== stateSnapshot)
+			(JSON.stringify(formData) !== formSnapshot ||
+				stateChoice !== stateSnapshot ||
+				wafRuleEditing)
 	);
 
 	// v2.41 — the unsaved marker now protects something: any path
@@ -2172,6 +2179,21 @@
 	$effect(() => {
 		if (!confirmDiscardOpen) pendingAfterDiscard = null;
 	});
+
+	// Every other way out — a sidebar link, the Metrics / Security
+	// pivots in the panel header, the back button — asks the same
+	// question. closePanel() clears the dirty state before the
+	// navigation resumes, so the guard lets it through. (A sidebar
+	// click also trips the click-outside guard on mousedown; this
+	// replaces the action that one armed.)
+	guardNavigation(
+		() => formOpen && formDirty,
+		(proceed) =>
+			guardUnsaved(() => {
+				closePanel();
+				proceed();
+			})
+	);
 
 	function snapshotForm(): void {
 		formSnapshot = JSON.stringify(formData);
@@ -2924,6 +2946,10 @@
 		const reparsedTags = parseExcludeTagsInput(wafExcludeTagsInput);
 		if (reparsedTags.error) {
 			next.wafExcludeTags = reparsedTags.error;
+		}
+
+		if (wafRuleEditing) {
+			next.wafCustomRules = t('routes.form.wafRuleDraftOpen');
 		}
 
 		errors = next;
@@ -5291,11 +5317,22 @@
 						/>
 						<!-- v2.37 — guided WAF rules (block when every condition
 						     matches, follows the route mode). -->
-						<WafCustomRulesEditor
-							bind:value={formData.wafCustomRules}
-							wafMode={formData.wafMode}
-							onConvert={convertGuidedRule}
-						/>
+						<!-- Keyed on the route: the panel stays mounted from one
+						     row to the next, and a draft left open on one route
+						     must not follow the operator onto another. -->
+						{#key editingId}
+							<WafCustomRulesEditor
+								bind:value={formData.wafCustomRules}
+								bind:editing={wafRuleEditing}
+								wafMode={formData.wafMode}
+								onConvert={convertGuidedRule}
+							/>
+						{/key}
+						{#if errors.wafCustomRules}
+							<p data-field-error class="text-xs text-down" data-testid="waf-rule-draft-error">
+								{errors.wafCustomRules}
+							</p>
+						{/if}
 						<!-- v2.38 — expert SecLang + templates + request tester. -->
 						<WafSecLangSection
 							bind:value={formData.wafSecLang}
