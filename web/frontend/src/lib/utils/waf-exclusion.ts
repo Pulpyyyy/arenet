@@ -97,3 +97,38 @@ export function eventExclusionPath(requestPath: string): string {
 	}
 	return isValidExclusionPath(path) ? path : '';
 }
+
+/**
+ * Who triggers a rule on a route, as the exclude dialog shows it.
+ * `hits` comes from the server aggregate (exact over the window);
+ * `distinctIps` is counted over the `sampled` recent events the UI
+ * could load, so it is exact only when `sampled >= hits`.
+ */
+export interface RuleEvidence {
+	hits: number;
+	sampled: number;
+	distinctIps: number;
+}
+
+/**
+ * Builds a RuleEvidence from the window's hit count and a list of
+ * recent events (any rule): keeps the events of `ruleId` at or after
+ * `sinceMs`, and counts their distinct, non-empty source IPs.
+ */
+export function summariseRuleEvidence(
+	ruleId: string,
+	hits: number,
+	events: readonly { ruleId: string; ts: string; srcIp: string }[],
+	sinceMs: number
+): RuleEvidence {
+	const ips = new Set<string>();
+	let sampled = 0;
+	for (const ev of events) {
+		if (ev.ruleId !== ruleId) continue;
+		const ts = Date.parse(ev.ts);
+		if (Number.isNaN(ts) || ts < sinceMs) continue;
+		sampled++;
+		if (ev.srcIp) ips.add(ev.srcIp);
+	}
+	return { hits, sampled, distinctIps: ips.size };
+}

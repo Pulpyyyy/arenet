@@ -73,3 +73,16 @@ export function maskIP(ip: string): string {
 	// the raw value and a regression is visible.
 	return ip;
 }
+
+/**
+ * True when `ip` is a complete IPv4 or IPv6 address, i.e. a row
+ * value worth banning or copying. Rejects the placeholders the
+ * /logs mappers emit for rows without a real source ("?",
+ * "(interne)", "").
+ */
+export function isFullIP(ip: string): boolean {
+	if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
+		return ip.split('.').every((octet) => Number(octet) <= 255);
+	}
+	return ip.includes(':') && /^[0-9a-fA-F:.]+$/.test(ip);
+}

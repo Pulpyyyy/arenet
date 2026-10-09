@@ -31,7 +31,9 @@ selected route.
 <script lang="ts">
 	import type { OwaspCategory, WafEvent } from '$lib/api/types';
 	import WafExcludeDialog from '$lib/components/WafExcludeDialog.svelte';
+	import BanIPModal from '$lib/components/BanIPModal.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
+	import { isFullIP } from '$lib/utils/ipClass';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
 	import { isExcludableRule } from '$lib/utils/waf-exclusion';
@@ -64,6 +66,9 @@ selected route.
 	// authoritative gate). Protected / Arenet rules get no button.
 	const isAdmin = $derived(auth.user?.role === 'admin');
 	let excludeEvent = $state<WafEvent | null>(null);
+	// "Ban…" on a row: the source IP handed to BanIPModal (admins
+	// only, like the CrowdSec panel's ban button).
+	let banIP = $state<string | null>(null);
 
 	// Category badge colours mirror CategoryDistribution.
 	// Phase Y — colour mapping moved to lib/utils/waf-category
@@ -158,6 +163,17 @@ selected route.
 									{language.current && t('wafExclude.action')}
 								</button>
 							{/if}
+							{#if isFullIP(e.srcIp)}
+								<button
+									type="button"
+									class="exclude-btn"
+									onclick={() => (banIP = e.srcIp)}
+									aria-label={language.current && t('banIp.rowActionAria', { ip: e.srcIp })}
+									data-testid="waf-ban-open"
+								>
+									{language.current && t('banIp.rowAction')}
+								</button>
+							{/if}
 						</td>
 					{/if}
 				</tr>
@@ -173,6 +189,10 @@ selected route.
 	onClose={() => (excludeEvent = null)}
 	onSuccess={() => onExcluded?.()}
 />
+
+{#if isAdmin}
+	<BanIPModal open={banIP !== null} initialValue={banIP ?? ''} onClose={() => (banIP = null)} />
+{/if}
 
 <style>
 	table {
@@ -242,6 +262,9 @@ selected route.
 		border-radius: 4px;
 		font-size: var(--text-xs, 11px);
 		cursor: pointer;
+	}
+	.exclude-btn + .exclude-btn {
+		margin-left: 0.3rem;
 	}
 	.exclude-btn:hover {
 		color: var(--accent-cyan);

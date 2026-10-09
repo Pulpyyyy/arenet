@@ -3,7 +3,23 @@
 // Licensed under the GNU AGPL v3 or later. See LICENSE.
 
 import { describe, it, expect } from 'vitest';
-import { formatSourceIP, maskIP } from './ipClass';
+import { formatSourceIP, isFullIP, maskIP } from './ipClass';
+
+describe('isFullIP', () => {
+	it('accepts complete IPv4 and IPv6 addresses', () => {
+		expect(isFullIP('82.65.1.2')).toBe(true);
+		expect(isFullIP('2001:db8::1')).toBe(true);
+		expect(isFullIP('::ffff:192.0.2.1')).toBe(true);
+	});
+
+	it('rejects the /logs placeholders and malformed values', () => {
+		expect(isFullIP('')).toBe(false);
+		expect(isFullIP('?')).toBe(false);
+		expect(isFullIP('(interne)')).toBe(false);
+		expect(isFullIP('82.65.1.x')).toBe(false);
+		expect(isFullIP('300.1.1.1')).toBe(false);
+	});
+});
 
 describe('maskIP', () => {
 	it('masks the trailing octet of an IPv4 address', () => {

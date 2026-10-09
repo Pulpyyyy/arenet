@@ -9,19 +9,28 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { ApiError, type WafEvent, type WafTargetedExclusion } from '$lib/api/types';
 
-const { toastMock, clientMock } = vi.hoisted(() => ({
+const { toastMock, clientMock, securityMock } = vi.hoisted(() => ({
 	toastMock: { pushToast: vi.fn() },
-	clientMock: { addWafExclusion: vi.fn() }
+	clientMock: { addWafExclusion: vi.fn() },
+	securityMock: { fetchEvents: vi.fn(), fetchEventsByRule: vi.fn(), createManualBan: vi.fn() }
 }));
 
 vi.mock('$lib/stores/toast', () => toastMock);
 vi.mock('$lib/api/client', () => clientMock);
+vi.mock('$lib/api/security', () => securityMock);
 
 import WafExcludeDialog from './WafExcludeDialog.svelte';
 import WafEventList from './WafEventList.svelte';
 import WafTargetedExclusionsEditor from './routes/WafTargetedExclusionsEditor.svelte';
 import { auth } from '$lib/stores/auth.svelte';
-import { eventExclusionPath, isExcludableRule, parseWafTarget } from '$lib/utils/waf-exclusion';
+import {
+	eventExclusionPath,
+	isExcludableRule,
+	parseWafTarget,
+	summariseRuleEvidence
+} from '$lib/utils/waf-exclusion';
+
+const HOUR_MS = 60 * 60 * 1000;
 
 function makeEvent(overrides: Partial<WafEvent> = {}): WafEvent {
 	return {
@@ -55,6 +64,10 @@ function asAdmin(): void {
 beforeEach(() => {
 	toastMock.pushToast.mockReset();
 	clientMock.addWafExclusion.mockReset();
+	securityMock.fetchEvents.mockReset();
+	securityMock.fetchEventsByRule.mockReset();
+	securityMock.fetchEvents.mockResolvedValue({ events: [] });
+	securityMock.fetchEventsByRule.mockResolvedValue({ rows: [] });
 	auth.user = null;
 });
 
@@ -88,6 +101,25 @@ describe('waf-exclusion helpers', () => {
 		expect(eventExclusionPath('/a%20b')).toBe('');
 		expect(eventExclusionPath('/bad%E0')).toBe('');
 		expect(eventExclusionPath('')).toBe('');
+	});
+
+	it('counts distinct source IPs of the rule inside the window only', () => {
+		const now = Date.now();
+		const recent = new Date(now - HOUR_MS).toISOString();
+		const old = new Date(now - 48 * HOUR_MS).toISOString();
+		const events = [
+			{ ruleId: '942100', ts: recent, srcIp: '198.51.100.1' },
+			{ ruleId: '942100', ts: recent, srcIp: '198.51.100.1' },
+			{ ruleId: '942100', ts: recent, srcIp: '' },
+			{ ruleId: '942100', ts: old, srcIp: '198.51.100.2' },
+			{ ruleId: '941100', ts: recent, srcIp: '198.51.100.3' },
+			{ ruleId: '942100', ts: 'garbage', srcIp: '198.51.100.4' }
+		];
+		expect(summariseRuleEvidence('942100', 7, events, now - 24 * HOUR_MS)).toEqual({
+			hits: 7,
+			sampled: 3,
+			distinctIps: 1
+		});
 	});
 });
 
@@ -143,7 +175,7 @@ describe('WafExcludeDialog', () => {
 		expect((screen.getByTestId('waf-exclude-submit') as HTMLButtonElement).disabled).toBe(true);
 	});
 
-	it('falls back to the whole route when the event has no field', async () => {
+	it('falls back to the whole route only after an explicit acknowledgement', async () => {
 		clientMock.addWafExclusion.mockResolvedValue({});
 		const onClose = vi.fn();
 		render(WafExcludeDialog, {
@@ -151,9 +183,92 @@ describe('WafExcludeDialog', () => {
 		});
 		expect(screen.getByTestId('waf-exclude-whole-route').textContent).toContain('app.example.com');
 		expect(screen.queryByTestId('waf-exclude-path')).toBeNull();
-		await fireEvent.click(screen.getByTestId('waf-exclude-submit'));
+
+		const submit = screen.getByTestId('waf-exclude-submit') as HTMLButtonElement;
+		expect(submit.className).toContain('bg-down');
+		expect(submit.disabled).toBe(true);
+		await fireEvent.click(submit);
+		expect(clientMock.addWafExclusion).not.toHaveBeenCalled();
+
+		const ack = screen.getByTestId('waf-exclude-whole-route-ack') as HTMLInputElement;
+		expect(ack.checked).toBe(false);
+		expect(ack.closest('label')?.textContent).toContain('942100');
+		await fireEvent.click(ack);
+		expect(submit.disabled).toBe(false);
+		await fireEvent.click(submit);
 		await waitFor(() => expect(onClose).toHaveBeenCalled());
 		expect(clientMock.addWafExclusion).toHaveBeenCalledWith('route-1', { ruleId: 942100 });
+	});
+
+	it('keeps the primary variant and no acknowledgement for a targeted exclusion', () => {
+		render(WafExcludeDialog, { props: { open: true, event: makeEvent(), onClose: vi.fn() } });
+		const submit = screen.getByTestId('waf-exclude-submit') as HTMLButtonElement;
+		expect(submit.className).toContain('bg-cyan');
+		expect(submit.className).not.toContain('bg-down');
+		expect(submit.disabled).toBe(false);
+		expect(screen.queryByTestId('waf-exclude-whole-route-ack')).toBeNull();
+	});
+
+	it('shows the evidence the event carries', () => {
+		render(WafExcludeDialog, {
+			props: { open: true, event: makeEvent({ requestMethod: 'POST' }), onClose: vi.fn() }
+		});
+		expect(screen.getByTestId('waf-exclude-evidence')).toBeInTheDocument();
+		expect(screen.getByTestId('waf-exclude-evidence-payload').textContent).toBe("1' OR '1'='1");
+		expect(screen.getByTestId('waf-exclude-evidence-ip').textContent).toBe('203.0.113.9');
+		expect(screen.getByTestId('waf-exclude-evidence-field').textContent).toContain('ARGS:content');
+		expect(screen.getByTestId('waf-exclude-evidence-request').textContent).toBe('POST /api/save?content=x');
+	});
+
+	it('shows hits and distinct source IPs over 24h when the counts are complete', async () => {
+		const ts = new Date(Date.now() - HOUR_MS).toISOString();
+		securityMock.fetchEventsByRule.mockResolvedValue({
+			rows: [
+				{ ruleId: '942100', category: 'SQLi', count: 3, lastSeen: ts },
+				{ ruleId: '942200', category: 'SQLi', count: 40, lastSeen: ts }
+			]
+		});
+		securityMock.fetchEvents.mockResolvedValue({
+			events: [
+				makeEvent({ id: 1, ts }),
+				makeEvent({ id: 2, ts }),
+				makeEvent({ id: 3, ts }),
+				makeEvent({ id: 4, ts, ruleId: '942200', srcIp: '198.51.100.7' })
+			]
+		});
+		render(WafExcludeDialog, { props: { open: true, event: makeEvent(), onClose: vi.fn() } });
+		await waitFor(() =>
+			expect(screen.getByTestId('waf-exclude-evidence-counts').textContent).toContain('3 hits from 1 IP')
+		);
+		expect(securityMock.fetchEventsByRule).toHaveBeenCalledWith({ route: 'route-1', window: '24h' });
+		expect(securityMock.fetchEvents).toHaveBeenCalledWith({ route: 'route-1', category: 'SQLi', limit: 100 });
+	});
+
+	it('says the IP count covers only the most recent hits when the sample is short', async () => {
+		const ts = new Date(Date.now() - HOUR_MS).toISOString();
+		securityMock.fetchEventsByRule.mockResolvedValue({
+			rows: [{ ruleId: '942100', category: 'SQLi', count: 12, lastSeen: ts }]
+		});
+		securityMock.fetchEvents.mockResolvedValue({
+			events: [makeEvent({ id: 1, ts, srcIp: '198.51.100.1' }), makeEvent({ id: 2, ts, srcIp: '198.51.100.2' })]
+		});
+		render(WafExcludeDialog, { props: { open: true, event: makeEvent(), onClose: vi.fn() } });
+		await waitFor(() =>
+			expect(screen.getByTestId('waf-exclude-evidence-counts').textContent).toContain('12 hits')
+		);
+		expect(screen.getByTestId('waf-exclude-evidence-counts').textContent).toContain(
+			'the 2 most recent come from 2 IPs'
+		);
+	});
+
+	it('says the counts are unavailable when the API fails', async () => {
+		securityMock.fetchEventsByRule.mockRejectedValue(new ApiError('down', 503));
+		render(WafExcludeDialog, { props: { open: true, event: makeEvent(), onClose: vi.fn() } });
+		await waitFor(() =>
+			expect(screen.getByTestId('waf-exclude-evidence-counts').textContent).toContain('unavailable')
+		);
+		// The event's own evidence stays on screen.
+		expect(screen.getByTestId('waf-exclude-evidence-ip').textContent).toBe('203.0.113.9');
 	});
 
 	it('treats 409 as "already exists" and closes', async () => {
