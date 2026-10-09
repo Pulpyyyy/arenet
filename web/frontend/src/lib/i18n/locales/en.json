@@ -25,9 +25,13 @@
 		"ssoOrLocal": "or with a local account",
 		"showPassword": "Show password",
 		"hidePassword": "Hide password",
-		"firstTimePrompt": "First time here?",
-		"createAdminLink": "Create the admin account",
+		"retryIn": "Try again in {time}",
+		"reasons": {
+			"oidcUnlockRequired": "Your session was locked. An SSO account has no local password to unlock it with: sign in again with SSO."
+		},
 		"errors": {
+			"rateLimited": "Too many failed sign-in attempts from this address. Sign-in is paused until the countdown on the button ends.",
+			"rateLimitedLater": "Too many failed sign-in attempts from this address. Try again later.",
 			"identifierRequired": "Identifier is required.",
 			"passwordRequired": "Password is required.",
 			"invalidCredentials": "Invalid identifier or password.",

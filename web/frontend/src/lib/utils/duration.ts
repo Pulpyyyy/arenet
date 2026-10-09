@@ -68,3 +68,14 @@ export function partsToSeconds(value: number, unit: DurationUnit): number {
 	}
 	return Math.floor(value) * DURATION_UNIT_FACTORS[unit];
 }
+
+// formatCountdown renders a remaining wait as m:ss (900 → "15:00",
+// 45 → "0:45"), for a countdown that ticks every second, where words
+// would reflow on every tick. Negatives and non-finite inputs show
+// "0:00"; fractions round up, so a wait never shows 0:00 early.
+export function formatCountdown(seconds: number): string {
+	const whole = Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : 0;
+	const minutes = Math.floor(whole / DURATION_UNIT_FACTORS.minutes);
+	const rest = whole % DURATION_UNIT_FACTORS.minutes;
+	return `${minutes}:${String(rest).padStart(2, '0')}`;
+}

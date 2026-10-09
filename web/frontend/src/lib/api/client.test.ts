@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // clear() and setLocked() without exercising the real store.
 const authMock = {
 	user: null,
-	state: 'authenticated' as 'authenticated' | 'anonymous' | 'locked' | 'unknown',
+	state: 'authenticated' as 'authenticated' | 'anonymous' | 'locked' | 'unknown' | 'error',
 	clear: vi.fn(),
 	setLocked: vi.fn()
 };
@@ -79,12 +79,33 @@ describe('request: credentials always included', () => {
 });
 
 describe('request: 401 interceptor', () => {
-	it('clears auth and navigates to /login', async () => {
+	it('clears auth and navigates to /login, carrying the page as ?next=', async () => {
 		mockFetch(401, { error: 'no active session' });
 		await expect(request('GET', '/routes')).rejects.toMatchObject({ status: 401, kind: 'auth' });
 		expect(authMock.clear).toHaveBeenCalledTimes(1);
-		expect(goto).toHaveBeenCalledWith('/login');
+		expect(goto).toHaveBeenCalledWith('/login?next=%2Froutes');
 	});
+
+	it('keeps the query string of the page in ?next=', async () => {
+		Object.defineProperty(window, 'location', {
+			value: { pathname: '/certs', search: '?tab=acme' },
+			writable: true
+		});
+		mockFetch(401, { error: 'no active session' });
+		await expect(request('GET', '/certs')).rejects.toMatchObject({ status: 401 });
+		expect(goto).toHaveBeenCalledWith('/login?next=%2Fcerts%3Ftab%3Dacme');
+	});
+
+	it.each(['unknown', 'error'] as const)(
+		'does NOT goto during the bootstrap (state %s): the layout owns that redirect',
+		async (state) => {
+			authMock.state = state;
+			mockFetch(401, { error: 'no active session' });
+			await expect(request('GET', '/auth/me')).rejects.toMatchObject({ status: 401 });
+			expect(authMock.clear).toHaveBeenCalledTimes(1);
+			expect(goto).not.toHaveBeenCalled();
+		}
+	);
 
 	it('does NOT goto when already on /login (no redirect loop)', async () => {
 		Object.defineProperty(window, 'location', {

@@ -19,9 +19,10 @@
 
     unknown      → centered Spinner (bootstrap pending)
     error        → centered panel: why /me failed + Retry (no redirect)
-    anonymous    → render children unchanged (so /login and /setup,
-                   which use +layout@.svelte resets, take over)
-                   + redirect non-login/setup paths to /login
+    anonymous    → render children unchanged on /login and /setup
+                   (which use +layout@.svelte resets); anywhere else
+                   a spinner while redirecting to /setup on a fresh
+                   install, /login otherwise, with ?next=<the page>
     authenticated → Sidebar + Topbar + main + optional banner
                     + LockScreen=false
     locked       → Sidebar + Topbar + main + LockScreen overlay (z-1000)
@@ -36,9 +37,9 @@
 	// Country flag SVGs (flag-icons) — served locally, no CDN. Used by the
 	// Flag component in the GeoIP / country-block selector.
 	import 'flag-icons/css/flag-icons.min.css';
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { page } from '$app/state';
+	import { navigating, page } from '$app/state';
 	import favicon from '$lib/assets/arenet-logo.png';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import Topbar from '$lib/components/Topbar.svelte';
@@ -53,6 +54,7 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { idle } from '$lib/stores/idle.svelte';
 	import { authApi } from '$lib/api/auth';
+	import { isEntryPath, withNext } from '$lib/utils/safe-next';
 
 	const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes (spec §6.7)
 
@@ -66,7 +68,7 @@
 	});
 
 	// Shared by mount and the error panel's Retry: whichever bootstrap
-	// succeeds needs the same idle/heartbeat wiring and login redirect.
+	// succeeds needs the same idle/heartbeat wiring.
 	async function startSession(): Promise<void> {
 		// Bootstrap the auth store. This call sets state to one of
 		// authenticated / locked / anonymous, or error when /me failed
@@ -81,15 +83,55 @@
 			startHeartbeat();
 		}
 
-		// Redirect anonymous users to /login unless they are already
-		// on /login or /setup (avoid redirect loops). The /setup path
-		// is discovered via the "First time?" link on /login per
-		// spec §6.7 (no automatic detection).
-		if (auth.state === 'anonymous') {
-			const here = page.url.pathname;
-			if (here !== '/login' && here !== '/setup') {
-				void goto('/login');
+		// An anonymous result is handled by the redirect effect below.
+	}
+
+	// Send an anonymous visitor away from any page but /login and
+	// /setup. An effect rather than a step of startSession, so it also
+	// covers a session cleared later by the 401 interceptor and a Back
+	// navigation onto a protected page: the anonymous branch below
+	// shows a spinner there, and nothing else would move it.
+	$effect(() => {
+		if (auth.state !== 'anonymous') return;
+		// A navigation already under way (LockScreen and sign-out go to
+		// /login themselves, LockScreen with a ?reason=) lands first;
+		// this effect runs again once it has.
+		if (navigating.to) return;
+		const here = page.url.pathname;
+		if (isEntryPath(here)) return;
+		const target = here + page.url.search;
+		// untrack: the request() call reads stores of its own (idle,
+		// auth) that must not become dependencies of this effect.
+		untrack(() => void redirectAnonymous(target));
+	});
+
+	let anonymousRedirectInFlight = false;
+
+	// On a fresh install there is no account to sign in with, so the
+	// visitor goes to /setup instead of /login. Either way the page
+	// asked for rides along as ?next= and is where they land after.
+	async function redirectAnonymous(target: string): Promise<void> {
+		if (anonymousRedirectInFlight) return;
+		anonymousRedirectInFlight = true;
+		try {
+			// A failed probe means "not a fresh install", like on /login:
+			// /login is the page that works in both cases.
+			const fresh = await authApi.setupStatus().then(
+				(s) => s.available,
+				() => false
+			);
+			// Signed in, moved to an entry page, or navigating, meanwhile.
+			// In the last case the effect runs again once that lands.
+			if (auth.state !== 'anonymous' || navigating.to || isEntryPath(page.url.pathname)) {
+				return;
 			}
+			// replaceState: Back must not return to the page that just
+			// bounced the visitor here.
+			await goto(withNext(fresh ? '/setup' : '/login', target), { replaceState: true });
+		} catch (err) {
+			console.warn('anonymous redirect failed:', err);
+		} finally {
+			anonymousRedirectInFlight = false;
 		}
 	}
 
@@ -166,10 +208,17 @@
 		</div>
 	</div>
 {:else if auth.state === 'anonymous'}
-	<!-- /login and /setup own their layout via +layout@.svelte resets.
-	     For any other path we already redirected in onMount; this
-	     branch covers /login and /setup as a passthrough. -->
-	{@render children?.()}
+	<!-- /login and /setup own their layout via +layout@.svelte resets
+	     and render as a passthrough. Any other page is on its way to
+	     one of them (the redirect effect): a spinner rather than a
+	     protected page that would only fire requests to be refused. -->
+	{#if isEntryPath(page.url.pathname)}
+		{@render children?.()}
+	{:else}
+		<div class="flex items-center justify-center min-h-screen bg-base">
+			<Spinner size="lg" />
+		</div>
+	{/if}
 	<ToastContainer />
 {:else}
 	<!-- authenticated or locked: full layout. Compromised-password
