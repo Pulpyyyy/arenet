@@ -288,7 +288,8 @@
 	"toast": {
 		"savedSuccess": "Enregistré avec succès",
 		"savedFailed": "Échec de l'enregistrement",
-		"languageChanged": "Langue mise à jour"
+		"languageChanged": "Langue mise à jour",
+		"dismiss": "Fermer la notification"
 	},
 	"routes": {
 		"check": {

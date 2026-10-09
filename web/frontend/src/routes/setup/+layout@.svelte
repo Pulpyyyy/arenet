@@ -9,7 +9,6 @@
 <script lang="ts">
 	import '../../app.css';
 	import favicon from '$lib/assets/arenet-logo.png';
-	import ToastContainer from '$lib/components/ToastContainer.svelte';
 
 	let { children } = $props();
 </script>
@@ -20,4 +19,6 @@
 </svelte:head>
 
 {@render children?.()}
-<ToastContainer />
+<!-- No ToastContainer here: the root +layout.svelte (which a
+     +layout@ reset still sits under) already mounts one around this
+     page. A second copy showed, and announced, every toast twice. -->
