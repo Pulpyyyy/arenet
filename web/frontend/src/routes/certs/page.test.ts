@@ -600,8 +600,9 @@ describe('/certs — Domaines table (T.4)', () => {
 		const broken = screen
 			.getAllByTestId('cert-row')
 			.find((r) => r.dataset.domain === '*.test.local')!;
-		// No hover / focus: the reason is in the row from the start.
-		expect(broken.querySelector('[role="tooltip"]')).toBeNull();
+		// No hover / focus: the reason is in the row from the start (the
+		// tooltip bubble is in the DOM, but hidden until hover or focus).
+		expect(broken.querySelector('[role="tooltip"]:not([hidden])')).toBeNull();
 		const reason = broken.querySelector('[data-testid="cert-fail-reason"]');
 		expect(reason).not.toBeNull();
 		expect(reason!.textContent ?? '').toContain(
@@ -1118,7 +1119,8 @@ describe('/certs — Cert.B stale-failure badge', () => {
 			}
 		);
 		render(Page);
-		await screen.findByText('recovered.example.com');
+		// The row (the domain is also listed in its SAN list).
+		await screen.findByTestId('cert-row');
 		// Wait one tick for cert events to load + badge derivation.
 		await tick();
 		await tick();
@@ -1159,7 +1161,8 @@ describe('/certs — Cert.B stale-failure badge', () => {
 			}
 		);
 		render(Page);
-		await screen.findByText('fresh-fail.example.com');
+		// The row (the domain is also listed in its SAN list).
+		await screen.findByTestId('cert-row');
 		await tick();
 		await tick();
 		expect(screen.queryByTestId('cert-stale-badge')).toBeNull();
