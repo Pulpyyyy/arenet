@@ -3420,11 +3420,148 @@ describe('/routes — disable/enable', () => {
 		expect(screen.getByTestId('form-dirty')).toBeInTheDocument();
 
 		await fireEvent.submit(form);
-		await tick();
-		await tick();
+		// Disabling a serving route asks first, as the row control
+		// does: no PUT until the operator confirms.
+		expect(await screen.findByText('Disable route?')).toBeInTheDocument();
+		expect(apiMock.updateRoute).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByTestId('route-disable-confirm'));
+		await waitFor(() => expect(apiMock.updateRoute).toHaveBeenCalledTimes(1));
 		expect(apiMock.disableRoute).not.toHaveBeenCalled();
 		const [, payload] = apiMock.updateRoute.mock.calls[0];
 		expect(payload.disabled).toBe(true);
+	});
+
+	it('the form disabling the last HTTPS route warns, and cancelling sends nothing', async () => {
+		const seeded = makeRoute({ id: 'only-tls', host: 'only-tls.example.com', tlsEnabled: true });
+		apiMock.listRoutes.mockResolvedValue([seeded]);
+		render(Page);
+		await userEvent.click((await screen.findByText('only-tls.example.com')).closest('tr')!);
+		await tick();
+
+		const form = document.querySelector('form')!;
+		await userEvent.click(within(form).getByTestId('route-state-disabled'));
+		await fireEvent.submit(form);
+
+		const dialog = await screen.findByRole('dialog', { name: 'Disable the last HTTPS route?' });
+		await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+		await tick();
+		expect(apiMock.updateRoute).not.toHaveBeenCalled();
+		expect(apiMock.disableRoute).not.toHaveBeenCalled();
+		// The form is left as the operator had it.
+		expect(screen.getByTestId('route-state-disabled').getAttribute('aria-checked')).toBe('true');
+		expect(screen.getByTestId('form-dirty')).toBeInTheDocument();
+	});
+});
+
+// A row's state control, found from the row rather than by host text
+// alone: with the panel open the host is on screen twice.
+function rowStateControl(host: string): HTMLElement {
+	const cell = screen.getAllByText(host).find((el) => el.closest('tr'))!;
+	return cell.closest('tr')!.querySelector('[role="radiogroup"]') as HTMLElement;
+}
+
+describe('/routes — a row state change and the open panel', () => {
+	it('a row state change on the open route is not undone by the next Save', async () => {
+		const seeded = makeRoute({ id: 'live', host: 'live.example.com' });
+		const inMaintenance = makeRoute({
+			id: 'live',
+			host: 'live.example.com',
+			maintenanceConfig: { retryAfterSeconds: 600, bypassIps: ['10.0.0.1'] }
+		});
+		apiMock.listRoutes.mockResolvedValueOnce([seeded]).mockResolvedValue([inMaintenance]);
+		apiMock.enterMaintenance.mockResolvedValue(inMaintenance);
+		apiMock.updateRoute.mockResolvedValue(inMaintenance);
+		render(Page);
+		await userEvent.click((await screen.findByText('live.example.com')).closest('tr')!);
+		await tick();
+
+		// An unrelated edit, which the row action must not discard.
+		const url = upstreamURLInputs()[0];
+		await userEvent.clear(url);
+		await userEvent.type(url, 'http://127.0.0.1:9100');
+
+		pickSegment(rowStateControl('live.example.com'), 'maintenance');
+		await waitFor(() => expect(apiMock.enterMaintenance).toHaveBeenCalledWith('live'));
+		await waitFor(() =>
+			expect(screen.getByTestId('route-state-maintenance').getAttribute('aria-checked')).toBe('true')
+		);
+		expect(upstreamURLInputs()[0].value).toBe('http://127.0.0.1:9100');
+
+		await fireEvent.submit(document.querySelector('form')!);
+		await waitFor(() => expect(apiMock.updateRoute).toHaveBeenCalledTimes(1));
+		const [, payload] = apiMock.updateRoute.mock.calls[0];
+		expect(payload.disabled).toBe(false);
+		expect(payload.maintenanceConfig).toMatchObject({ retryAfterSeconds: 600, bypassIps: ['10.0.0.1'] });
+		expect(payload.upstreams[0].url).toBe('http://127.0.0.1:9100');
+	});
+
+	it('a row disabled from the list makes the open form Disabled, with no second confirm on Save', async () => {
+		const seeded = makeRoute({ id: 'cut', host: 'cut.example.com' });
+		const off = makeRoute({ id: 'cut', host: 'cut.example.com', disabled: true });
+		apiMock.listRoutes.mockResolvedValueOnce([seeded]).mockResolvedValue([off]);
+		apiMock.disableRoute.mockResolvedValue({ id: 'cut', disabled: true, lastHttpsRouteAffected: false });
+		apiMock.updateRoute.mockResolvedValue(off);
+		render(Page);
+		await userEvent.click((await screen.findByText('cut.example.com')).closest('tr')!);
+		await tick();
+
+		pickSegment(rowStateControl('cut.example.com'), 'disabled');
+		await fireEvent.click(await screen.findByTestId('route-disable-confirm'));
+		await waitFor(() =>
+			expect(screen.getByTestId('route-state-disabled').getAttribute('aria-checked')).toBe('true')
+		);
+		// The stored state moved with the form's: nothing unsaved.
+		expect(screen.queryByTestId('form-dirty')).toBeNull();
+
+		await fireEvent.submit(document.querySelector('form')!);
+		await waitFor(() => expect(apiMock.updateRoute).toHaveBeenCalledTimes(1));
+		expect(apiMock.updateRoute.mock.calls[0][1].disabled).toBe(true);
+	});
+
+	it('keeps the edit panel mounted across a row action', async () => {
+		const a = makeRoute({ id: 'a', host: 'a.example.com' });
+		const b = makeRoute({ id: 'b', host: 'b.example.com' });
+		apiMock.listRoutes.mockResolvedValue([a, b]);
+		apiMock.enterMaintenance.mockResolvedValue(b);
+		render(Page);
+		await userEvent.click((await screen.findByText('a.example.com')).closest('tr')!);
+		await tick();
+
+		const auth = screen.getByTestId('section-auth') as HTMLDetailsElement;
+		auth.open = true;
+		await tick();
+
+		pickSegment(rowStateControl('b.example.com'), 'maintenance');
+		await waitFor(() => expect(apiMock.listRoutes).toHaveBeenCalledTimes(2));
+		await tick();
+		expect(screen.queryByText('Loading routes…')).toBeNull();
+		expect(auth.isConnected).toBe(true);
+		expect(auth.open).toBe(true);
+	});
+
+	it('disables a row control while its request is in flight', async () => {
+		const seeded = makeRoute({ id: 'slow', host: 'slow.example.com' });
+		apiMock.listRoutes.mockResolvedValue([seeded]);
+		let release: (r: Route) => void = () => {};
+		apiMock.enterMaintenance.mockReturnValue(
+			new Promise<Route>((resolve) => {
+				release = resolve;
+			})
+		);
+		render(Page);
+		await screen.findByText('slow.example.com');
+		const group = rowStateControl('slow.example.com');
+
+		pickSegment(group, 'maintenance');
+		await tick();
+		const segment = group.querySelector('[data-state="maintenance"]') as HTMLButtonElement;
+		expect(segment.disabled).toBe(true);
+		// A second click on the pending row sends nothing more.
+		pickSegment(group, 'maintenance');
+		expect(apiMock.enterMaintenance).toHaveBeenCalledTimes(1);
+
+		release(seeded);
+		await waitFor(() => expect(segment.disabled).toBe(false));
 	});
 });
 

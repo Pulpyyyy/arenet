@@ -69,6 +69,74 @@ describe('RouteStateControl', () => {
 		expect(onchange).toHaveBeenCalledWith('maintenance');
 	});
 
+	// Manual activation: every pick is a live change to a route, so
+	// arrowing across the group must not apply what it passes over.
+	it('moves focus with the arrow keys without calling onchange', async () => {
+		const onchange = vi.fn();
+		const user = userEvent.setup();
+		render(RouteStateControl, { value: 'active', onchange });
+
+		const active = screen.getByRole('radio', { name: 'Active' });
+		const maintenance = screen.getByRole('radio', { name: 'Maintenance' });
+		const disabled = screen.getByRole('radio', { name: 'Disabled' });
+		active.focus();
+
+		await user.keyboard('{ArrowRight}');
+		expect(maintenance).toHaveFocus();
+		// Roving tabindex follows focus; the checked state does not.
+		expect(maintenance).toHaveAttribute('tabindex', '0');
+		expect(active).toHaveAttribute('tabindex', '-1');
+		expect(active).toHaveAttribute('aria-checked', 'true');
+
+		await user.keyboard('{ArrowRight}');
+		expect(disabled).toHaveFocus();
+		await user.keyboard('{ArrowRight}');
+		expect(active).toHaveFocus();
+		await user.keyboard('{End}');
+		expect(disabled).toHaveFocus();
+
+		expect(onchange).not.toHaveBeenCalled();
+	});
+
+	it('commits the focused segment on Enter', async () => {
+		const onchange = vi.fn();
+		const user = userEvent.setup();
+		render(RouteStateControl, { value: 'active', onchange });
+
+		screen.getByRole('radio', { name: 'Active' }).focus();
+		await user.keyboard('{ArrowRight}');
+		await user.keyboard('{Enter}');
+
+		expect(onchange).toHaveBeenCalledTimes(1);
+		expect(onchange).toHaveBeenCalledWith('maintenance');
+	});
+
+	it('commits the focused segment on Space', async () => {
+		const onchange = vi.fn();
+		const user = userEvent.setup();
+		render(RouteStateControl, { value: 'active', onchange });
+
+		screen.getByRole('radio', { name: 'Active' }).focus();
+		await user.keyboard('{ArrowLeft}');
+		await user.keyboard(' ');
+
+		expect(onchange).toHaveBeenCalledTimes(1);
+		expect(onchange).toHaveBeenCalledWith('disabled');
+	});
+
+	it('does nothing while disabled', async () => {
+		const onchange = vi.fn();
+		const user = userEvent.setup();
+		render(RouteStateControl, { value: 'active', onchange, disabled: true });
+
+		const maintenance = screen.getByRole('radio', { name: 'Maintenance' });
+		expect(maintenance).toBeDisabled();
+		await user.click(maintenance);
+		await user.keyboard('{ArrowRight}{Enter}');
+
+		expect(onchange).not.toHaveBeenCalled();
+	});
+
 	it('exposes a radiogroup with the given aria-label', () => {
 		render(RouteStateControl, { value: 'disabled', ariaLabel: 'Route state' });
 
