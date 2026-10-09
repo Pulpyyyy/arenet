@@ -140,6 +140,11 @@
 			"cardAutomation": "Security Automation",
 			"cardForwardAuth": "Fournisseurs forward-auth"
 		},
+		"automationRules": {
+			"durationHint": "Fenêtre, durée et cooldown : un nombre entier suivi de s, m (ou min), h ou d — par ex. 30s, 5m, 2h, 1d. Un nombre seul compte en secondes.",
+			"durationUnreadable": "Durée illisible — par ex. 30s, 5m, 2h, 1d",
+			"unreadableSummary": "Enregistrement bloqué : {count} durée(s) illisible(s). Corrige les champs signalés en rouge."
+		},
 		"dnsProviders": {
 			"title": "Fournisseurs DNS",
 			"subtitle": "Comptes DNS utilisés pour émettre les certificats wildcard (ACME DNS-01).",

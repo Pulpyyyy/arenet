@@ -45,6 +45,7 @@
 	import { ApiError, type AccessLogSettings } from '$lib/api/types';
 	import { serverErrorMessage } from '$lib/api/server-errors';
 	import { relativeTime } from '$lib/utils/audit-format';
+	import { humanToNs, nsToHuman } from '$lib/utils/rule-duration';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import Card from '$lib/components/Card.svelte';
@@ -244,6 +245,12 @@
 	);
 	let rulesSubmitting = $state(false);
 	let rulesFormError = $state<string | null>(null);
+	// Duration fields whose text could not be read, keyed
+	// "source.field", holding what the operator typed so the
+	// input keeps showing it. Save is refused while any is
+	// listed: an unreadable "5 minutes" used to go out as 0.
+	let unreadableDurations = $state<Record<string, string>>({});
+	const unreadableCount = $derived(Object.keys(unreadableDurations).length);
 
 	// Credentials form. Empty password triggers the J.4
 	// preserve-on-edit path (server keeps stored value).
@@ -270,6 +277,7 @@
 			// re-runs on every load so the operator sees
 			// the live state, not a stale draft.
 			rulesDraft = { ...res.rules.rules };
+			unreadableDurations = {};
 			credsForm = {
 				lapiUrl: res.credentials.lapiUrl,
 				machineId: res.credentials.machineId,
@@ -285,6 +293,8 @@
 	}
 
 	async function submitAutomationRules(): Promise<void> {
+		// Save is disabled meanwhile; this also covers Enter.
+		if (unreadableCount > 0) return;
 		rulesSubmitting = true;
 		rulesFormError = null;
 		try {
@@ -356,27 +366,30 @@
 		}
 	}
 
-	// Helper: ns ↔ "60s" / "4h" / "7d" round-trip. Keep the
-	// UI numbers operator-friendly without abandoning the
-	// wire's nanosecond format.
-	function nsToHuman(ns: number): string {
-		if (ns <= 0) return '0s';
-		const s = Math.floor(ns / 1e9);
-		if (s % 86400 === 0) return `${s / 86400}d`;
-		if (s % 3600 === 0) return `${s / 3600}h`;
-		if (s % 60 === 0) return `${s / 60}m`;
-		return `${s}s`;
-	}
-	function humanToNs(s: string): number {
-		const m = s.trim().match(/^(\d+)\s*([smhd]?)$/);
-		if (!m) return 0;
-		const n = Number(m[1]);
-		switch (m[2]) {
-			case 'd': return n * 86400 * 1e9;
-			case 'h': return n * 3600 * 1e9;
-			case 'm': return n * 60 * 1e9;
-			default:  return n * 1e9; // 's' or empty = seconds
+	// The three duration columns, edited as text ("60s" / "4h" /
+	// "7d", see $lib/utils/rule-duration) and stored as the
+	// wire's nanoseconds.
+	type RuleDurationField = 'window_ns' | 'duration_ns' | 'cooldown_ns';
+	const RULE_DURATION_FIELDS: readonly {
+		key: RuleDurationField;
+		label: string;
+		placeholder: string;
+	}[] = [
+		{ key: 'window_ns', label: 'Window', placeholder: '60s' },
+		{ key: 'duration_ns', label: 'Duration', placeholder: '4h' },
+		{ key: 'cooldown_ns', label: 'Cooldown', placeholder: '24h' }
+	];
+	function setRuleDuration(s: AutomationSource, field: RuleDurationField, text: string): void {
+		const key = `${s}.${field}`;
+		const ns = humanToNs(text);
+		if (ns === null) {
+			unreadableDurations = { ...unreadableDurations, [key]: text };
+			return;
 		}
+		const next = { ...unreadableDurations };
+		delete next[key];
+		unreadableDurations = next;
+		setRuleField(s, field, ns);
 	}
 
 	// Per-rule field accessors. Svelte 5 runes work better
@@ -772,6 +785,7 @@
 	const accessLogDirty = $derived(alKey() !== alSaved);
 	const automationDirty = $derived(
 		credsKey() !== credsSaved ||
+			unreadableCount > 0 ||
 			JSON.stringify(rulesDraft) !== JSON.stringify(automationRules.rules)
 	);
 	const fwdAuthDirty = $derived(fwdAuthFormOpen && JSON.stringify(fwdAuthForm) !== fwdAuthOpenedKey);
@@ -1311,6 +1325,9 @@
 						<p class="text-xs text-muted mb-3">
 							Each category is disabled by default. When enabled, Arenet bans a source IP after <em>threshold</em> events in <em>window</em>, for <em>duration</em>, with a <em>cooldown</em> after an operator unban that suppresses re-ban for that long.
 						</p>
+						<p id="automation-duration-hint" class="text-xs text-muted mb-3">
+							{tl('settings.automationRules.durationHint')}
+						</p>
 						<form
 							onsubmit={(e) => {
 								e.preventDefault();
@@ -1353,39 +1370,34 @@
 														aria-label={`Threshold for ${AUTOMATION_SOURCE_LABELS[src]}`}
 													/>
 												</td>
-												<td class="py-2 px-2">
-													<input
-														type="text"
-														value={nsToHuman(getRule(src).window_ns)}
-														onchange={(e) =>
-															setRuleField(src, 'window_ns', humanToNs((e.target as HTMLInputElement).value))}
-														placeholder="60s"
-														class="w-20 bg-surface border border-border-default rounded-md px-2 py-1 text-sm font-mono"
-														aria-label={`Window for ${AUTOMATION_SOURCE_LABELS[src]}`}
-													/>
-												</td>
-												<td class="py-2 px-2">
-													<input
-														type="text"
-														value={nsToHuman(getRule(src).duration_ns)}
-														onchange={(e) =>
-															setRuleField(src, 'duration_ns', humanToNs((e.target as HTMLInputElement).value))}
-														placeholder="4h"
-														class="w-20 bg-surface border border-border-default rounded-md px-2 py-1 text-sm font-mono"
-														aria-label={`Duration for ${AUTOMATION_SOURCE_LABELS[src]}`}
-													/>
-												</td>
-												<td class="py-2 px-2">
-													<input
-														type="text"
-														value={nsToHuman(getRule(src).cooldown_ns)}
-														onchange={(e) =>
-															setRuleField(src, 'cooldown_ns', humanToNs((e.target as HTMLInputElement).value))}
-														placeholder="24h"
-														class="w-20 bg-surface border border-border-default rounded-md px-2 py-1 text-sm font-mono"
-														aria-label={`Cooldown for ${AUTOMATION_SOURCE_LABELS[src]}`}
-													/>
-												</td>
+												{#each RULE_DURATION_FIELDS as f (f.key)}
+													{@const key = `${src}.${f.key}`}
+													{@const unreadable = key in unreadableDurations}
+													{@const errorId = `automation-${src}-${f.key}-error`}
+													<td class="py-2 px-2">
+														<input
+															type="text"
+															value={unreadableDurations[key] ?? nsToHuman(getRule(src)[f.key])}
+															onchange={(e) =>
+																setRuleDuration(src, f.key, (e.target as HTMLInputElement).value)}
+															placeholder={f.placeholder}
+															class="w-20 bg-surface border rounded-md px-2 py-1 text-sm font-mono"
+															class:border-down={unreadable}
+															class:border-border-default={!unreadable}
+															aria-label={`${f.label} for ${AUTOMATION_SOURCE_LABELS[src]}`}
+															aria-invalid={unreadable ? 'true' : undefined}
+															aria-describedby={unreadable
+																? `${errorId} automation-duration-hint`
+																: 'automation-duration-hint'}
+															data-testid={`automation-${src}-${f.key}`}
+														/>
+														{#if unreadable}
+															<p id={errorId} class="text-xs text-down mt-1">
+																{tl('settings.automationRules.durationUnreadable')}
+															</p>
+														{/if}
+													</td>
+												{/each}
 											</tr>
 										{/each}
 									</tbody>
@@ -1394,8 +1406,23 @@
 							{#if rulesFormError}
 								<p class="text-sm text-down mt-3" role="alert">{rulesFormError}</p>
 							{/if}
+							{#if unreadableCount > 0}
+								<p
+									id="automation-rules-unreadable"
+									class="text-sm text-down mt-3"
+									role="alert"
+									data-testid="automation-rules-unreadable"
+								>
+									{tl('settings.automationRules.unreadableSummary', { count: unreadableCount })}
+								</p>
+							{/if}
 							<div class="flex justify-end mt-4">
-								<Button type="submit" disabled={rulesSubmitting}>
+								<Button
+									type="submit"
+									disabled={rulesSubmitting || unreadableCount > 0}
+									aria-describedby={unreadableCount > 0 ? 'automation-rules-unreadable' : undefined}
+									data-testid="automation-rules-save"
+								>
 									{rulesSubmitting ? 'Saving…' : 'Save rules'}
 								</Button>
 							</div>
