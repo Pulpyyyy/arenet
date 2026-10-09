@@ -232,6 +232,9 @@ describe('Settings page — leaving with unsaved edits', () => {
 		await userEvent.click(enabled);
 		expect(screen.queryByTestId('access-log-unsaved')).toBeNull();
 		expect(leave()).not.toHaveBeenCalled();
+	});
+});
+
 // An OIDC account has no local password — the server answers
 // no_local_password — so the account card must not offer to change it.
 describe('settings — change password button', () => {
