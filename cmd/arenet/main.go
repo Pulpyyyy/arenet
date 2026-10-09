@@ -264,6 +264,12 @@ func run(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config) (retEr
 		"data_dir", cfg.DataDir,
 		"dev", cfg.Dev,
 	)
+	if containerLoopbackAdmin(cfg.AdminPort, os.Stat) {
+		logger.Warn("admin bound to loopback inside a container: unreachable through a published port (harmless only with host networking)",
+			"admin_bind", cfg.AdminPort,
+			"fix", "remove ARENET_ADMIN_BIND from your compose/docker run (the image default :8001 is correct) and restrict exposure with the port mapping, e.g. \"127.0.0.1:8001:8001\"",
+		)
+	}
 
 	// Create the data dir owner-only (0o700): it holds arenet.db with
 	// secrets and, in production, the TLS material. MkdirAll sets the

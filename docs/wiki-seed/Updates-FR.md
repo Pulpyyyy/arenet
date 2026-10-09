@@ -35,6 +35,8 @@ docker compose logs -f arenet | grep "Arenet starting"   # confirme la nouvelle 
 
 Ton état vit dans le volume nommé `arenet-data` (monté sur `/var/lib/arenet`), il survit donc à la recréation du conteneur. Rien d'autre à faire.
 
+> **⚠️ Vérifie `ARENET_ADMIN_BIND` dans ton compose.** Les anciennes versions du `docker-compose.yml` de référence définissaient `ARENET_ADMIN_BIND: 127.0.0.1:8001`. Les anciennes images l'ignoraient silencieusement ; les nouvelles le respectent, ce qui bind l'admin sur le loopback *du conteneur* — injoignable via le port publié, alors que le healthcheck reste vert. **Supprime cette ligne** avant de mettre à jour : dans le conteneur l'admin doit rester sur `:8001`, et la restriction au loopback est assurée par le mapping de port `"127.0.0.1:8001:8001"`. Arenet logue un warning `admin bound to loopback inside a container` au démarrage si la ligne est toujours là. Au passage, ajoute `- "443:443/udp"` sous `ports:` pour HTTP/3.
+
 **Épingle une version précise** au lieu de `:latest` pour des mises à niveau reproductibles :
 
 ```yaml
