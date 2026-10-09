@@ -8,9 +8,15 @@
   Per spec §6.1 WAF audit, this page renders ONLY the parts
   backed by real backend instrumentation today:
 
-  - 4 KPI tiles: requests inspected, blocked, mode, paranoia.
-    Mode + paranoia are STATIC reads of Coraza defaults (no
-    backend API to mutate them today — read-only display).
+  - 5 KPI tiles: requests inspected, blocked, detected, mode,
+    paranoia. Mode is set per route, so the tile counts routes by
+    the mode Coraza actually applies (lib/utils/waf-mode-summary);
+    it used to read a hardcoded "Blocking". Paranoia is the CRS
+    default, 1: crs-setup.conf.example leaves rule 900000
+    commented out and REQUEST-901 rule 901120 sets
+    tx.blocking_paranoia_level=1 when unset (coraza-coreruleset
+    v4.25.0). It used to read 2. A route's custom SecLang, emitted
+    before the CRS includes, can still raise it.
   - OWASP CRS category event-count grid: read-only tiles per
     category, derived from summary.wafBlocksByCategory. The
     mock shows on/off switches per category; backend has NO
@@ -43,6 +49,8 @@
 	import { language } from '$lib/stores/language.svelte';
 	import { fetchSummary } from '$lib/api/metrics';
 	import { fetchEventsByRule } from '$lib/api/security';
+	import { listRoutes } from '$lib/api/client';
+	import { countWafModes, type WafModeCounts } from '$lib/utils/waf-mode-summary';
 	import { ApiError } from '$lib/api/types';
 	import type {
 		SummaryResponse,
@@ -61,8 +69,28 @@
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 	let summary = $state<SummaryResponse | null>(null);
+	// undefined while the route list loads, null when it could not be
+	// read: the Mode tile then says so instead of guessing.
+	let modeCounts = $state<WafModeCounts | null | undefined>(undefined);
 
 	const disabled = $derived(summary?.disabled === true);
+
+	// Called from the template behind `language.current &&` so a
+	// language switch re-renders them, like the t() calls around them.
+	function modeValue(): string {
+		if (!modeCounts) return '—';
+		const { block, detect } = modeCounts;
+		if (block + detect === 0) return t('waf.kpiModeAllOff');
+		return t('waf.kpiModeValue', { block, detect });
+	}
+	function modeHint(): string {
+		if (modeCounts === undefined) return '';
+		if (modeCounts === null) return t('waf.kpiModeUnavailable');
+		const { off, skipped } = modeCounts;
+		return skipped > 0
+			? t('waf.kpiModeFootSkipped', { off, skipped })
+			: t('waf.kpiModeFoot', { off });
+	}
 
 	// Phase Y — drill-down state. Per category : whether the
 	// card is expanded + the loaded rule rows + a per-card
@@ -181,6 +209,14 @@
 	async function load(): Promise<void> {
 		loading = true;
 		loadError = null;
+		// The route list only feeds the Mode tile: fetched alongside,
+		// never awaited here, so neither its latency nor its failure
+		// holds up the event counts.
+		modeCounts = undefined;
+		listRoutes().then(
+			(routes) => (modeCounts = countWafModes(routes)),
+			() => (modeCounts = null)
+		);
 		try {
 			summary = await fetchSummary();
 		} catch (err) {
@@ -254,14 +290,16 @@
 			hint={language.current && t('waf.kpiDetectedFoot')}
 		/>
 		<StatCard
+			testid="kpi-mode"
 			label={language.current && t('waf.kpiMode')}
-			value={language.current && t('waf.kpiModeBlocking')}
+			value={language.current && modeValue()}
 			variant="text"
-			hint={language.current && t('waf.kpiModeFoot')}
+			hint={language.current && modeHint()}
 		/>
 		<StatCard
+			testid="kpi-paranoia"
 			label={language.current && t('waf.kpiParanoiaLevel')}
-			value={2}
+			value={1}
 			unit="/ 4"
 			hint={language.current && t('waf.kpiParanoiaLevelFoot')}
 		/>
