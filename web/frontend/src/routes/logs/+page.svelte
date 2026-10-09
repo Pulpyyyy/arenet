@@ -36,6 +36,7 @@
 -->
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { afterNavigate } from '$app/navigation';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
@@ -126,6 +127,8 @@
 		'country_block',
 		'rate_limit'
 	];
+	// load() keeps only this many rows, newest first, across all sources.
+	const ROW_CAP = 200;
 
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
@@ -140,6 +143,12 @@
 	// the last good ones, and the pill stops saying "live".
 	let stale = $state(false);
 	let lastOkAt = $state<string | null>(null);
+	// How many rows load() merged before cutting to ROW_CAP. Above the
+	// cap, older events exist that the list (and so the filters and the
+	// histogram) never sees: the page says so instead of letting a busy
+	// hour pass for the whole day.
+	let mergedCount = $state(0);
+	const truncated = $derived(mergedCount > ROW_CAP);
 	let search = $state('');
 	let levelFilter = $state<'all' | LevelTag>('all');
 	// Phase Z.5.2 — route + HTTP status code filters. Both
@@ -184,8 +193,12 @@
 	// defaults and wipe the incoming params. A value the page doesn't
 	// know falls back to its default instead of silently hiding every row.
 	const LEVEL_FILTERS: ReadonlyArray<'all' | LevelTag> = ['all', 'block', 'detect', 'warn', 'info'];
+	// The query string the filters were last read from or written to.
+	// Plain variable, not $state: the write-back effect must not track it.
+	let syncedSearch = '';
 	function readFiltersFromURL(): void {
 		if (typeof window === 'undefined') return;
+		syncedSearch = window.location.search;
 		const params = new URLSearchParams(window.location.search);
 		search = params.get('q') ?? '';
 		// Not checked against routeMap: it isn't loaded yet, and a deleted
@@ -198,18 +211,35 @@
 	}
 	readFiltersFromURL();
 
+	// /logs → /logs (sidebar link, a "view in logs" link, back/forward)
+	// reuses this component, so the init read above doesn't run again.
+	// SvelteKit has already put the new URL in place when this fires.
+	// 'enter' is the first mount, which init already covered; our own
+	// history.replaceState below is not a SvelteKit navigation and never
+	// lands here.
+	afterNavigate(({ type }) => {
+		if (type === 'enter') return;
+		readFiltersFromURL();
+	});
+
 	// replaceState, not pushState (same as /security's ?tab): refining a
 	// filter shouldn't fill the back button. Defaults are omitted so the
 	// plain /logs stays plain, and SvelteKit's own history.state is kept
 	// so its back/forward bookkeeping survives.
 	$effect(() => {
-		const url = new URL(window.location.href);
+		// Read the filters first so the effect keeps tracking them even
+		// when it returns early below.
 		const next: Record<string, string> = {
 			q: search.trim(),
 			route: routeFilter,
 			code: codeFilter,
 			level: levelFilter === 'all' ? '' : levelFilter
 		};
+		const url = new URL(window.location.href);
+		// A navigation changed the query since our last sync. Its filters
+		// win and afterNavigate is about to read them; writing now would
+		// put the old ones back.
+		if (url.search !== syncedSearch) return;
 		for (const [key, value] of Object.entries(next)) {
 			if (value) url.searchParams.set(key, value);
 			else url.searchParams.delete(key);
@@ -217,6 +247,7 @@
 		if (url.href !== window.location.href) {
 			window.history.replaceState(window.history.state, '', url);
 		}
+		syncedSearch = url.search;
 	});
 
 	let paused = $state(false);
@@ -342,6 +373,37 @@
 	const histogramCells = $derived(
 		filteredRows.map((r) => ({ ts: r.ts, source: r.source }))
 	);
+
+	// The histogram's default view: 24h in 5-minute buckets.
+	const HISTOGRAM_WINDOW_MS = 24 * 60 * 60 * 1000;
+	const HISTOGRAM_BUCKET_MS = 5 * 60 * 1000;
+	// When the list is cut, the chart is fitted to oldest-listed-row →
+	// now, with the finest of these bucket widths that keeps it under
+	// HISTOGRAM_FITTED_MAX_BUCKETS bars (5 minutes past that). A fixed
+	// ladder rather than span / N keeps the bars from changing width on
+	// every poll.
+	const HISTOGRAM_FITTED_BUCKETS_MS = [10_000, 30_000, 60_000, 2 * 60_000];
+	const HISTOGRAM_FITTED_MAX_BUCKETS = 72;
+
+	// Past the row cap, a 24h axis would draw the hours before the oldest
+	// listed row as empty when they were only cut. `since` is that row's
+	// ts when the window was fitted, null for the default view.
+	const histogramWindow = $derived.by(() => {
+		const full = { windowMs: HISTOGRAM_WINDOW_MS, bucketMs: HISTOGRAM_BUCKET_MS, since: null as string | null };
+		if (!truncated || rows.length === 0) return full;
+		const since = rows[rows.length - 1].ts;
+		const oldest = Date.parse(since);
+		if (!Number.isFinite(oldest)) return full;
+		const span = Math.max(0, Date.now() - oldest);
+		const bucketMs =
+			HISTOGRAM_FITTED_BUCKETS_MS.find((b) => span / b <= HISTOGRAM_FITTED_MAX_BUCKETS) ??
+			HISTOGRAM_BUCKET_MS;
+		// One bucket of slack: the chart ends on the bucket boundary after
+		// now, so a window of exactly `span` could leave the oldest row out.
+		const windowMs = (Math.ceil(span / bucketMs) + 1) * bucketMs;
+		if (windowMs >= HISTOGRAM_WINDOW_MS) return full;
+		return { windowMs, bucketMs, since };
+	});
 
 	function mapWaf(e: WafEvent): UnifiedRow {
 		// W.bugfix Fix #1 — read action + statusCode from the
@@ -637,7 +699,8 @@
 			}
 
 			merged.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
-			rows = merged.slice(0, 200);
+			mergedCount = merged.length;
+			rows = merged.slice(0, ROW_CAP);
 
 			// Phase Z.5.3 — enrich SOURCE IP column with
 			// country codes. Collect every distinct IP NOT
@@ -709,6 +772,10 @@
 		} catch {
 			return iso;
 		}
+	}
+	// HH:MM, the precision of the histogram's own axis labels.
+	function fmtClock(iso: string): string {
+		return fmtTime(iso).slice(0, 5);
 	}
 
 	onMount(() => {
@@ -855,6 +922,8 @@
 		<span>{language.current && t('logs.colSource')}</span>
 		<span>{language.current && t('logs.colCode')}</span>
 		<span>{language.current && t('logs.colRequest')}</span>
+		<!-- Row-actions slot (the WAF "Exclude…" button); no heading. -->
+		<span></span>
 		<span class="right">{language.current && t('logs.colSourceIP')}</span>
 	</div>
 	{#if loading && rows.length === 0}
@@ -940,6 +1009,10 @@
 						{/if}
 						<span class="k">·</span>
 						<span title={r.detailTitle ?? ''}>{r.detail}</span>
+					</span>
+					<!-- Its own column, outside .log-msg's ellipsis: at the end
+					     of the message a long path pushed it out of view. -->
+					<span class="log-actions">
 						{#if isAdmin && r.wafEvent && isExcludableRule(r.wafEvent.ruleId)}
 							{@const ev = r.wafEvent}
 							<button
@@ -969,6 +1042,11 @@
 			{/each}
 		</div>
 	{/if}
+	{#if truncated}
+		<p class="truncated-notice" data-testid="logs-truncated">
+			{language.current && t('logs.truncatedNotice', { shown: rows.length })}
+		</p>
+	{/if}
 </div>
 
 <WafExcludeDialog
@@ -986,7 +1064,12 @@
 -->
 <div class="card histogram-card">
 	<div class="histogram-header">
-		<span>{language.current && t('logs.histogramHeader')}</span>
+		<span>
+			{language.current &&
+				(histogramWindow.since
+					? t('logs.histogramHeaderFitted', { since: fmtClock(histogramWindow.since) })
+					: t('logs.histogramHeader'))}
+		</span>
 		<div class="histogram-legend">
 			{#each histogramSeries as s (s.key)}
 				<span class="legend-item">
@@ -999,7 +1082,12 @@
 	<ActivityHistogram
 		cells={histogramCells}
 		series={histogramSeries}
-		label={language.current && t('logs.histogramAriaLabel')}
+		windowMs={histogramWindow.windowMs}
+		bucketMs={histogramWindow.bucketMs}
+		label={language.current &&
+			(histogramWindow.since
+				? t('logs.histogramAriaLabelFitted', { since: fmtClock(histogramWindow.since) })
+				: t('logs.histogramAriaLabel'))}
 		height="fill"
 	/>
 </div>
@@ -1289,7 +1377,9 @@
 
 	.log-header {
 		display: grid;
-		grid-template-columns: 120px 78px 100px 60px 1fr 140px;
+		/* The `auto` track is the row-actions slot: empty (0 wide) on
+		   rows without an action, so only those rows' message narrows. */
+		grid-template-columns: 120px 78px 100px 60px 1fr auto 140px;
 		gap: 10px;
 		padding: 10px 16px;
 		border-bottom: 1px solid var(--border);
@@ -1315,7 +1405,7 @@
 	}
 	.log-row {
 		display: grid;
-		grid-template-columns: 120px 78px 100px 60px 1fr 140px;
+		grid-template-columns: 120px 78px 100px 60px 1fr auto 140px;
 		gap: 10px;
 		padding: 6px 16px;
 		align-items: baseline;
@@ -1323,8 +1413,11 @@
 		border-bottom: 1px solid var(--border);
 	}
 	.log-row:last-child { border-bottom: none; }
+	.log-actions {
+		justify-self: end;
+		white-space: nowrap;
+	}
 	.exclude-btn {
-		margin-left: 8px;
 		background: transparent;
 		color: var(--fg-muted, var(--text-muted));
 		border: 1px solid var(--border);
@@ -1402,6 +1495,15 @@
 	.right { text-align: right; }
 	.mono { font-family: var(--font-mono); }
 	.dim { color: var(--fg-dim); }
+
+	.truncated-notice {
+		margin: 0;
+		padding: 8px 16px;
+		border-top: 1px solid var(--border);
+		background: var(--bg-elevated);
+		color: var(--fg-muted);
+		font-size: 12px;
+	}
 
 	.loading-wrap { display: flex; justify-content: center; padding: 48px; }
 	.empty-row { color: var(--fg-muted); font-size: 12.5px; padding: 32px; text-align: center; font-style: italic; }

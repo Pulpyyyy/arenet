@@ -17,6 +17,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
+import type { AfterNavigate } from '@sveltejs/kit';
+import { afterNavigate } from '$app/navigation';
+import { auth } from '$lib/stores/auth.svelte';
 import type {
 	AuthFailureRecentEvent,
 	CertEvent,
@@ -1458,6 +1461,62 @@ describe('/logs — filters live in the URL', () => {
 			expect(params.get('code')).toBe('429');
 		});
 	});
+
+	// An in-app navigation from /logs to /logs keeps the component, so
+	// the page has to pick the new URL's filters up from afterNavigate.
+	// SvelteKit moves the URL first, then calls back: the tests do the same.
+	function navigateTo(path: string): void {
+		window.history.pushState(window.history.state, '', path);
+		const calls = vi.mocked(afterNavigate).mock.calls;
+		const callback = calls[calls.length - 1]?.[0];
+		if (!callback) throw new Error('the page registered no afterNavigate callback');
+		callback({ type: 'link' } as AfterNavigate);
+	}
+
+	it('clears the filters on a navigation to the plain /logs', async () => {
+		securityMock.fetchEvents.mockResolvedValue({
+			events: [
+				wafEvent({ id: 1, requestPath: '/keep' }),
+				wafEvent({ id: 2, ts: isoOffset(-60), requestPath: '/drop' })
+			]
+		});
+		window.history.replaceState(null, '', '/logs?q=keep');
+		render(Page);
+		await screen.findByText('/keep');
+		expect(screen.queryByText('/drop')).not.toBeInTheDocument();
+
+		navigateTo('/logs');
+		await waitFor(() => expect(screen.getByLabelText('Filter events')).toHaveValue(''));
+		expect(await screen.findByText('/drop')).toBeInTheDocument();
+		expect(screen.getByText('/keep')).toBeInTheDocument();
+		// The old filter isn't written back over the new URL.
+		expect(window.location.search).toBe('');
+	});
+
+	it('switches the route filter on a navigation from ?route=a to ?route=b', async () => {
+		clientMock.listRoutes.mockResolvedValue([
+			{ id: 'route-a', host: 'a.test' },
+			{ id: 'route-b', host: 'b.test' }
+		]);
+		securityMock.fetchEvents.mockResolvedValue({
+			events: [
+				wafEvent({ id: 1, routeId: 'route-a', requestPath: '/on-a' }),
+				wafEvent({ id: 2, ts: isoOffset(-60), routeId: 'route-b', requestPath: '/on-b' })
+			]
+		});
+		window.history.replaceState(null, '', '/logs?route=route-a');
+		render(Page);
+		await screen.findByText('/on-a');
+		expect(screen.queryByText('/on-b')).not.toBeInTheDocument();
+
+		navigateTo('/logs?route=route-b');
+		expect(await screen.findByText('/on-b')).toBeInTheDocument();
+		expect(screen.queryByText('/on-a')).not.toBeInTheDocument();
+		await waitFor(() =>
+			expect(screen.getByLabelText('Filter by route')).toHaveValue('route-b')
+		);
+		expect(new URLSearchParams(window.location.search).get('route')).toBe('route-b');
+	});
 });
 
 // --- Phase Z.5.3 : SOURCE IP enrichment with country code -----------------
@@ -1643,3 +1702,68 @@ describe('/logs — a source that does not answer is named', () => {
 	});
 });
 
+describe('/logs — the row cap is said, and Exclude stays in reach', () => {
+	// `count` WAF rows, one second apart, newest first.
+	function wafEvents(count: number): WafEvent[] {
+		return Array.from({ length: count }, (_, i): WafEvent => ({
+			id: i + 1,
+			ts: isoOffset(-i),
+			routeId: 'r-1',
+			ruleId: '942100',
+			category: 'SQLi',
+			severity: 4,
+			srcIp: '1.2.3.4',
+			requestMethod: 'GET',
+			requestPath: '/?id=1',
+			payloadSample: 'id=1',
+			action: 'BLOCK',
+			statusCode: 403
+		}));
+	}
+
+	afterEach(() => {
+		auth.user = null;
+	});
+
+	it('says how many rows it shows when more than 200 were merged', async () => {
+		// 150 WAF + 60 throttle = 210 merged, cut to 200.
+		securityMock.fetchEvents.mockResolvedValue({ events: wafEvents(150) });
+		securityMock.fetchThrottleEvents.mockResolvedValue({
+			events: Array.from({ length: 60 }, (_, i): ThrottleEvent => ({
+				id: i + 1,
+				ts: isoOffset(-200 - i),
+				tier: 1,
+				srcIp: '5.6.7.8',
+				attemptedUsername: 'admin',
+				blockedUntil: isoOffset(700 - i),
+				blockDurationSeconds: 900
+			}))
+		});
+		render(Page);
+		const notice = await screen.findByTestId('logs-truncated');
+		expect(notice.textContent).toContain('200');
+		expect(document.querySelectorAll('.log-row')).toHaveLength(200);
+	});
+
+	it('says nothing when everything merged fits', async () => {
+		securityMock.fetchEvents.mockResolvedValue({ events: wafEvents(200) });
+		render(Page);
+		await waitFor(() => expect(document.querySelectorAll('.log-row')).toHaveLength(200));
+		expect(screen.queryByTestId('logs-truncated')).not.toBeInTheDocument();
+	});
+
+	it('keeps the Exclude button out of the ellipsised message', async () => {
+		auth.user = {
+			username: 'admin',
+			displayName: 'Admin',
+			role: 'admin',
+			mfa: 'none',
+			passwordCompromised: false
+		} as never;
+		securityMock.fetchEvents.mockResolvedValue({ events: wafEvents(1) });
+		render(Page);
+		const btn = await screen.findByTestId('waf-exclude-open');
+		expect(btn.closest('.log-msg')).toBeNull();
+		expect(btn.closest('.log-row')).not.toBeNull();
+	});
+});
