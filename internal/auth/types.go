@@ -109,8 +109,8 @@ const (
 	// identity. No PasswordHash, no OIDCSub. Authenticates
 	// exclusively via an Authorization: Bearer header carrying
 	// an APIToken (see APITokenStore). Service users are
-	// EXCLUDED from the break-glass last-admin guard — only
-	// human local admins count, so a service-admin can never
+	// EXCLUDED from the last-admin guards — only human (local
+	// or OIDC) admins count, so a service-admin can never
 	// lock out humans by being the last admin in the system.
 	UserAuthSourceService = "service"
 )

@@ -80,7 +80,7 @@ Two roles :
 
 The role is set per-allowlist-entry (Users page). Changing an entry's role requires a re-login (the role is baked into the session at login time).
 
-**Last-admin safeguard** : Arenet prevents you from demoting the last local admin account (the break-glass). The API returns 400 ; the UI greys out the demote action. Always keep at least one local admin even when OIDC is wired.
+**Last-admin safeguard** : Arenet prevents you from demoting the last local admin account (the break-glass). The API returns 400 ; the UI greys out the demote action. Always keep at least one local admin even when OIDC is wired. A second guard refuses to demote or delete the last human admin, local or OIDC (service accounts never count), so an instance can never be left with no admin at all.
 
 ---
 
