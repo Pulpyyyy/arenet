@@ -19,7 +19,7 @@
 // verified at the .cm-editor selector).
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/svelte';
 import type { ErrorTemplate } from '$lib/api/error-templates';
 
 const { apiMock, toastMock } = vi.hoisted(() => ({
@@ -340,6 +340,29 @@ describe('/settings/error-pages — delete confirmation', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 		expect(apiMock.delete).not.toHaveBeenCalled();
 	});
+
+	// The dialog was hand-rolled: no Escape, no focus trap, focus not
+	// restored. It is now the shared ConfirmDialog.
+	it('is the shared dialog: names the template, Escape closes it, confirm deletes', async () => {
+		apiMock.list.mockResolvedValue([sampleTemplate({ id: 'doomed', name: 'Doomed' })]);
+		apiMock.delete.mockResolvedValue(undefined);
+		render(Page);
+		await screen.findByText('Doomed');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+		const dialog = await screen.findByRole('dialog', { name: 'Delete template?' });
+		expect(dialog).toHaveTextContent('Deleting "Doomed" is irreversible');
+		await fireEvent.keyDown(document, { key: 'Escape' });
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+		expect(apiMock.delete).not.toHaveBeenCalled();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+		const reopened = await screen.findByRole('dialog', { name: 'Delete template?' });
+		apiMock.list.mockResolvedValueOnce([]);
+		await fireEvent.click(within(reopened).getByRole('button', { name: 'Delete' }));
+		await waitFor(() => expect(apiMock.delete).toHaveBeenCalledWith('doomed'));
+		await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+	});
 });
 
 // --- Step R Phase 2.1 — builtin visibility + duplicate flow ----------------
@@ -420,6 +443,24 @@ describe('/settings/error-pages — Phase 2.1 builtin visibility', () => {
 		expect(
 			screen.getByRole('button', { name: /Duplicate to customise/ })
 		).toBeInTheDocument();
+	});
+
+	// The preview and the copy share one editor instance (the view stays
+	// 'edit'), so the copy used to open with the preview's read-only gate.
+	it('"Duplicate to customise" opens the copy in an editable editor', async () => {
+		apiMock.list.mockResolvedValue([builtinTemplate()]);
+		apiMock.create.mockResolvedValue(
+			sampleTemplate({ id: 'copy-id', name: 'Copy of Arenet default' })
+		);
+		const { container } = render(Page);
+		await screen.findByText('Arenet default');
+		await fireEvent.click(screen.getByRole('button', { name: 'Preview' }));
+		const content = () => container.querySelector('.cm-content');
+		await waitFor(() => expect(content()?.getAttribute('contenteditable')).toBe('false'));
+
+		await fireEvent.click(screen.getByRole('button', { name: /Duplicate to customise/ }));
+		await screen.findByRole('button', { name: /^Save$/ });
+		await waitFor(() => expect(content()?.getAttribute('contenteditable')).toBe('true'));
 	});
 
 	it('clicking row Dupliquer calls create with "Copy of X" name', async () => {
