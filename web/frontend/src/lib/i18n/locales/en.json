@@ -1984,8 +1984,11 @@
 		"body": "JSON body",
 		"send": "Send",
 		"confirmSend": "Yes, send it",
+		"confirmDeleteSend": "Yes, send the DELETE",
 		"cancel": "Cancel",
-		"confirmMutating": "This request changes the real configuration of this Arenet (same effect as from the UI). Send it?"
+		"countdown": "({seconds} s)",
+		"confirmMutating": "You are about to send {request}. It changes the real configuration of this Arenet, with the same effect as doing it from the UI. Send it?",
+		"confirmDelete": "You are about to send {request}. It deletes something from the real configuration of this Arenet, and there is no undo. Send it anyway?"
 	},
 	"wafSecLang": {
 		"title": "SecLang (advanced)",

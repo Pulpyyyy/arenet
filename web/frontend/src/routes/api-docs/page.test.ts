@@ -5,7 +5,7 @@
 // v2.39 — API docs viewer: helpers + page (list, search, detail,
 // "Try it" with confirmation for changing methods).
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 
 const { clientMock } = vi.hoisted(() => ({
@@ -63,6 +63,11 @@ beforeEach(() => {
 	clientMock.getOpenAPI.mockReset();
 	clientMock.rawRequest.mockReset();
 	clientMock.getOpenAPI.mockResolvedValue(DOC);
+	window.history.replaceState(null, '', '/api-docs');
+});
+
+afterEach(() => {
+	vi.useRealTimers();
 });
 
 // v2.55 — the tag groups fold, so an operation link is hidden until its
@@ -125,11 +130,20 @@ describe('/api-docs page', () => {
 		await fireEvent.click(screen.getByTestId('api-try-open'));
 		expect((screen.getByTestId('api-body') as HTMLTextAreaElement).value).toContain('app.example.com');
 
+		// The confirm button is held back for a moment; fake only the
+		// timers from here on, once the document has loaded.
+		vi.useFakeTimers();
 		await fireEvent.click(screen.getByTestId('api-send'));
 		expect(screen.getByTestId('api-confirm')).toBeInTheDocument();
 		expect(clientMock.rawRequest).not.toHaveBeenCalled();
 
+		// A second click on Send (a double-click) does not send.
 		await fireEvent.click(screen.getByTestId('api-send'));
+		expect(clientMock.rawRequest).not.toHaveBeenCalled();
+
+		await vi.advanceTimersByTimeAsync(1000);
+		await fireEvent.click(screen.getByTestId('api-confirm-send'));
+		vi.useRealTimers();
 		await waitFor(() => expect(screen.getByTestId('api-result')).toBeInTheDocument());
 		expect(clientMock.rawRequest).toHaveBeenCalledWith('post', '/api/v1/routes', expect.stringContaining('app.example.com'));
 		expect(screen.getByTestId('api-result').textContent).toContain('201');
@@ -195,6 +209,48 @@ describe('/api-docs page', () => {
 		expect(toggles[1].getAttribute('aria-expanded'), 'System holds the selection').toBe('true');
 		expect(toggles[0].getAttribute('aria-expanded')).toBe('false');
 		expect(screen.getAllByTestId('api-op-link')[3]).toBeVisible();
+	});
+
+	// The selected operation lives in the hash: linkable, survives a reload.
+	it('opens the operation named by the hash', async () => {
+		window.history.replaceState(null, '', '/api-docs#get/routes/{id}');
+		render(Page);
+		await waitFor(() => expect(screen.getByTestId('api-op').textContent).toContain('Get a route'));
+		// Its group is open and its link marked as the current one.
+		const link = screen.getAllByTestId('api-op-link')[2];
+		expect(link).toBeVisible();
+		expect(link.getAttribute('aria-current')).toBe('true');
+	});
+
+	it('writes the selection to the hash and marks only the active link', async () => {
+		render(Page);
+		await waitFor(() => expect(screen.getAllByTestId('api-op-link')).toHaveLength(4));
+		await openGroup();
+		const links = screen.getAllByTestId('api-op-link');
+		for (const l of links) expect(l.hasAttribute('aria-current')).toBe(false);
+
+		await fireEvent.click(links[1]);
+		expect(window.location.hash).toBe('#post/routes');
+		expect(links[1].getAttribute('aria-current')).toBe('true');
+		expect(links[0].hasAttribute('aria-current')).toBe(false);
+
+		await fireEvent.click(links[0]);
+		expect(window.location.hash).toBe('#get/routes');
+		expect(links[0].getAttribute('aria-current')).toBe('true');
+		expect(links[1].hasAttribute('aria-current')).toBe(false);
+	});
+
+	it('ignores a hash that names no operation', async () => {
+		window.history.replaceState(null, '', '/api-docs#delete/nope');
+		render(Page);
+		await waitFor(() => expect(screen.getByTestId('api-intro')).toBeInTheDocument());
+		expect(screen.queryByTestId('api-op')).toBeNull();
+	});
+
+	it('does not nest a second main landmark', async () => {
+		const { container } = render(Page);
+		await waitFor(() => expect(screen.getByTestId('api-intro')).toBeInTheDocument());
+		expect(container.querySelector('main')).toBeNull();
 	});
 
 	it('counts the operations in each group', async () => {

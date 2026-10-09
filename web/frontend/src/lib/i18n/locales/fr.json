@@ -1984,8 +1984,11 @@
 		"body": "Corps JSON",
 		"send": "Envoyer",
 		"confirmSend": "Oui, envoyer",
+		"confirmDeleteSend": "Oui, envoyer le DELETE",
 		"cancel": "Annuler",
-		"confirmMutating": "Cette requête modifie la configuration réelle de cet Arenet (même effet que depuis l'interface). L'envoyer ?"
+		"countdown": "({seconds} s)",
+		"confirmMutating": "Tu vas envoyer {request}. Cette requête modifie la configuration réelle de cet Arenet, avec le même effet que depuis l'interface. L'envoyer ?",
+		"confirmDelete": "Tu vas envoyer {request}. Cette requête supprime un élément de la configuration réelle de cet Arenet, et tu ne pourras pas revenir en arrière. L'envoyer quand même ?"
 	},
 	"wafSecLang": {
 		"title": "SecLang (avancé)",
