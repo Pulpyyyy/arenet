@@ -24,6 +24,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/barto95100/arenet/internal/apierr"
 	"github.com/barto95100/arenet/internal/audit"
 	"github.com/barto95100/arenet/internal/auth"
 )
@@ -123,9 +124,10 @@ type updateUserRoleRequest struct {
 
 // updateUserRole is POST /api/v1/admin/users/{id}/role. Elevates
 // or demotes another user's role (Step K.2 §1.3 #12). Last-admin
-// guard fires when demoting the last LOCAL admin (the break-
-// glass channel). The acting user can demote themselves IF
-// another local admin exists.
+// guards fire when demoting the last LOCAL admin (the break-
+// glass channel) or the last human admin of any source. The
+// acting user can demote themselves IF another local admin
+// exists.
 func (h *Handler) updateUserRole(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
@@ -154,12 +156,8 @@ func (h *Handler) updateUserRole(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.users.UpdateRole(r.Context(), id, req.Role); err != nil {
-		if errors.Is(err, auth.ErrUserNotFound) {
-			writeError(w, http.StatusNotFound, "user not found")
-			return
-		}
-		// Last-admin guard fires here.
-		writeError(w, http.StatusBadRequest, err.Error())
+		// Last-admin guards fire here.
+		writeAdminRemovalError(w, err)
 		return
 	}
 
@@ -230,13 +228,9 @@ func (h *Handler) deleteAdminUser(w http.ResponseWriter, r *http.Request) {
 	activity, _ := h.sessions.ListAllActive(r.Context())
 
 	if err := h.users.Delete(r.Context(), id); err != nil {
-		if errors.Is(err, auth.ErrUserNotFound) {
-			writeError(w, http.StatusNotFound, "user not found")
-			return
-		}
-		// Last-admin guard fires here. Same shape as
+		// Last-admin guards fire here. Same shape as
 		// updateUserRole's demote path.
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeAdminRemovalError(w, err)
 		return
 	}
 
@@ -260,4 +254,24 @@ func (h *Handler) deleteAdminUser(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeAdminRemovalError maps a refusal from UserStore.UpdateRole or
+// UserStore.Delete to its HTTP response. The two last-admin guards
+// carry a code so the UI can say them in the operator's language;
+// both stay 400, the status the break-glass refusal has always had.
+// Anything else keeps the pre-existing 400 + raw message shape.
+func writeAdminRemovalError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, auth.ErrUserNotFound):
+		writeError(w, http.StatusNotFound, "user not found")
+	case errors.Is(err, auth.ErrLastLocalAdmin):
+		writeErrorFrom(w, http.StatusBadRequest,
+			apierr.New("user_last_local_admin", nil, "%s", err))
+	case errors.Is(err, auth.ErrLastAdmin):
+		writeErrorFrom(w, http.StatusBadRequest,
+			apierr.New("user_last_admin", nil, "%s", err))
+	default:
+		writeError(w, http.StatusBadRequest, err.Error())
+	}
 }

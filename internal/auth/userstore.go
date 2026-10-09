@@ -309,9 +309,9 @@ func (s *UserStore) CreateManaged(ctx context.Context, spec ManagedUserSpec) (Us
 // authenticate exclusively via APIToken (see APITokenStore).
 //
 // Role is the caller's choice (admin OR viewer). Service
-// admins are excluded from the break-glass last-admin guard
-// (only AuthSource=local && Role=admin humans count), so a
-// service-admin can never be the "last admin standing".
+// admins are excluded from the last-admin guards (only human
+// admins count, see checkAdminRemoval), so a service-admin
+// can never be the "last admin standing".
 //
 // Returns ErrUsernameTaken if name collides with any
 // existing user (human or service).
@@ -846,13 +846,14 @@ func (s *UserStore) GetByOIDCSub(ctx context.Context, sub string) (User, error) 
 
 // UpdateRole sets the user's Role field (Step K.2 §3.1).
 // Validates the enum + enforces the §1.3 decision 12 last-admin
-// guard: demoting the last user with AuthSource=local AND
-// Role=admin is rejected to prevent locking the instance out of
-// admin access (the local admin is the break-glass channel).
+// guards (see checkAdminRemoval): demoting the last local admin
+// (the break-glass channel) or the last human admin of any
+// source is rejected to prevent locking the instance out of
+// admin access.
 //
-// Returns ErrUserNotFound when no row matches id, an error of
-// shape "auth: cannot demote the last local admin" when the
-// guard fires, and the standard storage errors otherwise.
+// Returns ErrUserNotFound when no row matches id,
+// ErrLastLocalAdmin / ErrLastAdmin when a guard fires, and the
+// standard storage errors otherwise.
 func (s *UserStore) UpdateRole(ctx context.Context, id, newRole string) error {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
@@ -880,31 +881,13 @@ func (s *UserStore) UpdateRole(ctx context.Context, id, newRole string) error {
 			return fmt.Errorf("auth: unmarshal user: %w", err)
 		}
 
-		// Last-admin guard: the demote path "admin → viewer" on
-		// a local-source admin must be rejected if this user is
-		// the last LOCAL admin. OIDC-source admins don't count
-		// for the break-glass channel — only local admins can
-		// log in when the IdP is down (§1.3 decisions 4-6).
-		if user.AuthSource == UserAuthSourceLocal &&
-			user.Role == UserRoleAdmin &&
-			newRole == UserRoleViewer {
-			// Count local admins other than this user.
-			otherLocalAdmins := 0
-			_ = b.ForEach(func(k, v []byte) error {
-				if string(k) == id {
-					return nil
-				}
-				var other User
-				if err := json.Unmarshal(v, &other); err != nil {
-					return nil
-				}
-				if other.AuthSource == UserAuthSourceLocal && other.Role == UserRoleAdmin {
-					otherLocalAdmins++
-				}
-				return nil
-			})
-			if otherLocalAdmins == 0 {
-				return fmt.Errorf("auth: cannot demote the last local admin — break-glass channel must remain")
+		// Last-admin guards on the demote path "admin → viewer".
+		// Checked inside this write transaction so two
+		// concurrent demotions cannot both see the other admin
+		// as still present.
+		if newRole == UserRoleViewer {
+			if err := checkAdminRemoval(b, id, user); err != nil {
+				return err
 			}
 		}
 
@@ -994,10 +977,12 @@ func (s *UserStore) List(ctx context.Context) ([]User, error) {
 // Delete removes the user identified by id. Returns
 // ErrUserNotFound if no such user exists.
 //
-// Last-admin guard (same shape as UpdateRole): refuses to
-// delete a user that is a local admin if no other local
-// admin remains — the break-glass channel must always have
-// at least one local admin (§1.3 decisions 4-6).
+// Last-admin guards (same as UpdateRole, see
+// checkAdminRemoval): refuses to delete the last local admin
+// — the break-glass channel must always have at least one
+// local admin (§1.3 decisions 4-6) — and the last human admin
+// of any source. Returns ErrLastLocalAdmin / ErrLastAdmin
+// when a guard fires.
 //
 // Session cleanup is performed by the API handler that
 // wraps this call (SessionStore.DeleteAllForUser), not
@@ -1025,32 +1010,72 @@ func (s *UserStore) Delete(ctx context.Context, id string) error {
 			return fmt.Errorf("auth: unmarshal user: %w", err)
 		}
 
-		// Last-admin guard. Same logic as UpdateRole's demote
-		// path — refactored out into an inline scan rather than
+		// Last-admin guards. Same logic as UpdateRole's demote
+		// path, scanning this transaction's bucket rather than
 		// reusing CountLocalAdmins to avoid a second bbolt
 		// transaction inside this Update.
-		if target.AuthSource == UserAuthSourceLocal && target.Role == UserRoleAdmin {
-			otherLocalAdmins := 0
-			_ = b.ForEach(func(k, v []byte) error {
-				if string(k) == id {
-					return nil
-				}
-				var other User
-				if err := json.Unmarshal(v, &other); err != nil {
-					return nil
-				}
-				if other.AuthSource == UserAuthSourceLocal && other.Role == UserRoleAdmin {
-					otherLocalAdmins++
-				}
-				return nil
-			})
-			if otherLocalAdmins == 0 {
-				return fmt.Errorf("auth: cannot delete the last local admin — break-glass channel must remain")
-			}
+		if err := checkAdminRemoval(b, id, target); err != nil {
+			return err
 		}
 
 		return b.Delete([]byte(id))
 	})
+}
+
+// isHumanAdmin reports whether u is an admin a person signs in as:
+// local or OIDC. Service accounts are machine identities and never
+// count toward the last-admin guards.
+func isHumanAdmin(u User) bool {
+	if u.Role != UserRoleAdmin {
+		return false
+	}
+	return u.AuthSource == UserAuthSourceLocal || u.AuthSource == UserAuthSourceOIDC
+}
+
+// checkAdminRemoval refuses to take admin rights away from target
+// (stored under key id) by demotion or deletion when that would
+// leave the instance without:
+//   - a local admin — ErrLastLocalAdmin. The break-glass channel:
+//     only a local admin can sign in when the IdP is down (§1.3
+//     decisions 4-6);
+//   - a human admin of any source — ErrLastAdmin. Without this,
+//     an instance whose last local admin is gone (pre-guard data,
+//     a hand-edited database) could demote its only OIDC admin
+//     and be left with no admin at all.
+//
+// It scans b, the bucket of the caller's write transaction, so the
+// count and the write are atomic. A target that is not a human
+// admin (viewer, service account) is always allowed: removing it
+// does not change either count. Corrupted rows are skipped, the
+// same as everywhere else in this store.
+func checkAdminRemoval(b *bolt.Bucket, id string, target User) error {
+	if !isHumanAdmin(target) {
+		return nil
+	}
+	otherHumans, otherLocals := 0, 0
+	_ = b.ForEach(func(k, v []byte) error {
+		if string(k) == id {
+			return nil
+		}
+		var other User
+		if err := json.Unmarshal(v, &other); err != nil {
+			return nil
+		}
+		if isHumanAdmin(other) {
+			otherHumans++
+			if other.AuthSource == UserAuthSourceLocal {
+				otherLocals++
+			}
+		}
+		return nil
+	})
+	if target.AuthSource == UserAuthSourceLocal && otherLocals == 0 {
+		return ErrLastLocalAdmin
+	}
+	if otherHumans == 0 {
+		return ErrLastAdmin
+	}
+	return nil
 }
 
 // UpdateEmail sets the user's Email field. Used by the OIDC

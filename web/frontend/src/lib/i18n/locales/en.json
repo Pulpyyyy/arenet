@@ -50,6 +50,8 @@
 			"user_password_too_short": "The password is too short — 15 characters minimum.",
 			"user_password_too_long": "The password is too long.",
 			"user_email_on_oidc_allowlist": "{email} is already an SSO identity. Creating a local account for it would give that person two accounts — one password-based, one federated — and which one they land in would depend on which button they pressed.",
+			"user_last_local_admin": "This is the last local admin: it is the way in when SSO is down, so it cannot be demoted or deleted. Promote another local account to admin first.",
+			"user_last_admin": "This is the last admin: demoting or deleting it would leave nobody able to administer Arenet. Promote another user to admin first — service accounts do not count.",
 			"redirect_target_required": "A target URL is required.",
 			"redirect_target_invalid": "{target} is not a valid URL.",
 			"redirect_target_scheme": "{target} must start with http:// or https://.",

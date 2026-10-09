@@ -50,6 +50,8 @@
 			"user_password_too_short": "Le mot de passe est trop court — 15 caractères minimum.",
 			"user_password_too_long": "Le mot de passe est trop long.",
 			"user_email_on_oidc_allowlist": "{email} est déjà une identité SSO. Créer un compte local pour cette adresse donnerait deux comptes à la même personne — un par mot de passe, un fédéré — et celui où elle arriverait dépendrait du bouton pressé.",
+			"user_last_local_admin": "C'est le dernier admin local : c'est l'accès de secours quand le SSO est indisponible, il ne peut donc être ni rétrogradé ni supprimé. Passe d'abord un autre compte local en admin.",
+			"user_last_admin": "C'est le dernier admin : le rétrograder ou le supprimer ne laisserait plus personne pour administrer Arenet. Passe d'abord un autre utilisateur en admin — les comptes de service ne comptent pas.",
 			"redirect_target_required": "Une URL de destination est requise.",
 			"redirect_target_invalid": "{target} n'est pas une URL valide.",
 			"redirect_target_scheme": "{target} doit commencer par http:// ou https://.",

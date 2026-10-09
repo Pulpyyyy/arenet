@@ -28,6 +28,7 @@
 	import { pushToast } from '$lib/stores/toast';
 	import { settingsApi } from '$lib/api/settings';
 	import { authApi } from '$lib/api/auth';
+	import { serverErrorMessage } from '$lib/api/server-errors';
 	import {
 		ApiError,
 		type AdminUser,
@@ -254,7 +255,9 @@
 				'success'
 			);
 		} catch (err) {
-			const msg = err instanceof ApiError ? err.message : (err instanceof Error ? err.message : 'Failed to change role');
+			// serverErrorMessage translates the coded last-admin
+			// refusals and falls back to the server's sentence.
+			const msg = err instanceof Error ? serverErrorMessage(err) : 'Failed to change role';
 			pushToast(msg, 'danger');
 		} finally {
 			confirmRoleOpen = false;
@@ -319,7 +322,7 @@
 			users = users.filter((x) => x.id !== u.id);
 			pushToast(t('users.toastDeleted', { username: u.username }), 'success');
 		} catch (err) {
-			const msg = err instanceof ApiError ? err.message : (err instanceof Error ? err.message : 'Failed to delete user');
+			const msg = err instanceof Error ? serverErrorMessage(err) : 'Failed to delete user';
 			pushToast(msg, 'danger');
 		} finally {
 			confirmDeleteOpen = false;

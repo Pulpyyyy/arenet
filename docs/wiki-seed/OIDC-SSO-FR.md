@@ -80,7 +80,7 @@ Deux rôles :
 
 Le rôle est set par entrée d'allowlist (page Users). Changer le rôle d'une entrée nécessite un re-login (le rôle est baké dans la session au moment du login).
 
-**Safeguard last-admin** : Arenet t'empêche de demote le dernier compte admin local (le break-glass). L'API retourne 400 ; l'UI greys out l'action demote. Garde toujours au moins un admin local même quand OIDC est câblé.
+**Safeguard last-admin** : Arenet t'empêche de demote le dernier compte admin local (le break-glass). L'API retourne 400 ; l'UI greys out l'action demote. Garde toujours au moins un admin local même quand OIDC est câblé. Un second garde-fou refuse de rétrograder ou supprimer le dernier admin humain, local ou OIDC (les comptes de service ne comptent jamais), pour qu'une instance ne se retrouve jamais sans aucun admin.
 
 ---
 

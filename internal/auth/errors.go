@@ -66,6 +66,19 @@ var (
 	// the supplied value is not exactly "en" or "fr". The API layer
 	// maps this to HTTP 400. v2.9.11 i18n Phase 1 spec.
 	ErrLanguageInvalid = errors.New("auth: language must be \"en\" or \"fr\"")
+
+	// ErrLastLocalAdmin is returned by UpdateRole (demote) and Delete
+	// when the target is the last user with AuthSource=local AND
+	// Role=admin. That account is the break-glass channel: the only
+	// way in when the IdP is down (§1.3 decisions 4-6).
+	ErrLastLocalAdmin = errors.New("auth: cannot demote or delete the last local admin — break-glass channel must remain")
+
+	// ErrLastAdmin is returned by UpdateRole (demote) and Delete when
+	// the target is the last human admin, local or OIDC. Service
+	// accounts are not counted: a machine identity cannot administer
+	// the instance through the UI, so an instance whose only admin is
+	// a service account has no administrator anyone can sign in as.
+	ErrLastAdmin = errors.New("auth: cannot demote or delete the last admin — the instance would have no human administrator left")
 )
 
 // Session store sentinel errors. See spec §3.3.

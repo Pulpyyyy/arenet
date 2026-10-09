@@ -777,9 +777,12 @@ paths:
         Promotes or demotes a user (`viewer` ↔ `admin`); also applies to
         service accounts. Takes effect on the user's next request.
 
-        Last-admin guard: demoting the last **local** admin is refused with
-        `400` (`cannot demote the last local admin — break-glass channel
-        must remain`); OIDC and service-account admins do not count.
+        Last-admin guards, both `400`:
+        - code `user_last_local_admin` — demoting the last **local** admin
+          (the break-glass channel); OIDC and service-account admins do
+          not count toward this one.
+        - code `user_last_admin` — demoting the last **human** admin, local
+          or OIDC; service-account admins do not count.
       tags: [Users]
       x-arenet-role: admin
       parameters:
@@ -808,9 +811,10 @@ paths:
       description: |
         Deletes an account and signs it out everywhere (all its sessions are
         purged). Deleting yourself is allowed if another local admin
-        remains. Last-admin guard: the last **local** admin cannot be
-        deleted (`400`, `cannot delete the last local admin — break-glass
-        channel must remain`).
+        remains. Last-admin guards, both `400`: the last **local** admin
+        cannot be deleted (code `user_last_local_admin`, the break-glass
+        channel), nor the last **human** admin, local or OIDC (code
+        `user_last_admin`); service-account admins count toward neither.
 
         For service accounts prefer `DELETE /admin/users/service-accounts/{id}`,
         which also revokes their tokens explicitly.
