@@ -39,6 +39,7 @@ import { auth } from '$lib/stores/auth.svelte';
 import { idle } from '$lib/stores/idle.svelte';
 import { pushToast } from '$lib/stores/toast';
 import { goto } from '$app/navigation';
+import { isEntryPath, withNext } from '$lib/utils/safe-next';
 
 // In production (the binary serves both API and frontend), always use
 // same-origin paths regardless of any VITE_API_BASE_URL value baked
@@ -186,12 +187,19 @@ export async function request<T>(
 
 		// Step D interceptors BEFORE body parsing.
 		if (res.status === 401) {
+			// A 401 on the /me bootstrap (or its retry) is not a lost
+			// session: the root layout owns that redirect, because it
+			// also has to choose /setup on a fresh install. Navigating
+			// from here as well would race it.
+			const bootstrapping = auth.state === 'unknown' || auth.state === 'error';
 			auth.clear();
 			// Avoid redirect loops: only navigate when not already on
-			// an unauthenticated entry page.
-			const here = typeof window !== 'undefined' ? window.location.pathname : '';
-			if (here !== '/login' && here !== '/setup') {
-				void goto('/login');
+			// an unauthenticated entry page. ?next= brings the user back
+			// here once signed in again.
+			const loc = typeof window !== 'undefined' ? window.location : undefined;
+			const here = loc?.pathname ?? '';
+			if (!bootstrapping && !isEntryPath(here)) {
+				void goto(withNext('/login', here + (loc?.search ?? '')));
 			}
 			throw new ApiError('authentication required', 401, 'auth');
 		}

@@ -19,8 +19,11 @@
   decoration on top would defeat that.
 
   Mounted conditionally by +layout.svelte (Chunk 7 Étape 2) via
-  {#if auth.state === 'locked'}. No escape handler: the user
-  must authenticate or close the tab.
+  {#if auth.state === 'locked'}, which also makes the app shell
+  behind it `inert`. No escape handler: the way out is to unlock
+  or to sign out (same flow as the sidebar's sign-out, then
+  /login). Focus starts in the password field (the SSO button for
+  an OIDC account) and Tab cycles inside the card.
 
   Auth logic preserved verbatim: auth.unlock(password) → POST
   /api/v1/auth/unlock, 401 → "wrong password", other → the
@@ -48,10 +51,60 @@
 	let error = $state('');
 	let submitting = $state(false);
 	let passwordInput: HTMLInputElement | undefined = $state();
+	let card: HTMLDivElement | undefined = $state();
+	let signingOut = $state(false);
+
+	// Focusable descendants of the card, in tab order (same selector
+	// as Modal's trap).
+	function focusable(): HTMLElement[] {
+		if (!card) return [];
+		const selector =
+			'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+		return Array.from(card.querySelectorAll<HTMLElement>(selector));
+	}
 
 	onMount(() => {
-		passwordInput?.focus();
+		// An OIDC account has no password field: start on its button.
+		(passwordInput ?? focusable()[0])?.focus();
 	});
+
+	// Focus trap. The layout makes the app shell inert, but the
+	// banners and gates outside it are still in the tab order, and so
+	// is the browser chrome: keep Tab and Shift+Tab inside the card.
+	function onKeydown(event: KeyboardEvent): void {
+		if (event.key !== 'Tab') return;
+		const items = focusable();
+		if (items.length === 0) {
+			event.preventDefault();
+			return;
+		}
+		const first = items[0];
+		const last = items[items.length - 1];
+		const active = document.activeElement as HTMLElement | null;
+		if (!active || !card?.contains(active)) {
+			event.preventDefault();
+			(event.shiftKey ? last : first).focus();
+		} else if (event.shiftKey && active === first) {
+			event.preventDefault();
+			last.focus();
+		} else if (!event.shiftKey && active === last) {
+			event.preventDefault();
+			first.focus();
+		}
+	}
+
+	// The way out that is not unlocking: the sidebar's sign-out flow.
+	// Logging out turns the state anonymous, which unmounts this.
+	async function signOut(): Promise<void> {
+		if (signingOut) return;
+		signingOut = true;
+		try {
+			await auth.logout();
+		} finally {
+			signingOut = false;
+			void goto('/login');
+		}
+	}
 
 	function togglePassword(): void {
 		showPassword = !showPassword;
@@ -98,6 +151,8 @@
 	}
 </script>
 
+<svelte:document onkeydown={onKeydown} />
+
 <div
 	class="lockscreen-page"
 	role="dialog"
@@ -107,7 +162,7 @@
 >
 	<div class="lockscreen-halo" aria-hidden="true"></div>
 
-	<div class="lockscreen-card">
+	<div class="lockscreen-card" bind:this={card}>
 		<h2 id="lockscreen-title" class="lockscreen-title">{tl('auth.lock.title')}</h2>
 
 		{#if auth.user?.authSource === 'oidc'}
@@ -171,8 +226,9 @@
 						type="button"
 						class="lockscreen-pw-toggle"
 						onclick={togglePassword}
-						tabindex={-1}
-						aria-label={showPassword ? tl('auth.hidePassword') : tl('auth.showPassword')}
+						aria-pressed={showPassword ? 'true' : 'false'}
+						aria-controls="lockscreen-password"
+						aria-label={tl('auth.showPassword')}
 					>
 						{#if showPassword}
 							<svg
@@ -218,6 +274,16 @@
 			</button>
 		</form>
 		{/if}
+
+		<button
+			type="button"
+			class="lockscreen-signout"
+			onclick={signOut}
+			disabled={signingOut}
+			data-testid="lockscreen-signout"
+		>
+			{tl('common.signOut')}
+		</button>
 	</div>
 </div>
 
@@ -414,6 +480,10 @@
 		color: var(--fg-muted);
 		background: var(--surface-2);
 	}
+	.lockscreen-pw-toggle:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
 	.lockscreen-pw-toggle :global(svg) {
 		width: 16px;
 		height: 16px;
@@ -460,6 +530,30 @@
 	}
 	.lockscreen-submit.loading .lockscreen-submit-label {
 		opacity: 0.85;
+	}
+	.lockscreen-signout {
+		display: block;
+		margin: 14px auto 0;
+		padding: 4px 8px;
+		background: none;
+		border: none;
+		border-radius: 6px;
+		color: var(--fg-muted);
+		font: inherit;
+		font-size: 12.5px;
+		cursor: pointer;
+	}
+	.lockscreen-signout:hover:not(:disabled) {
+		color: var(--fg);
+		text-decoration: underline;
+	}
+	.lockscreen-signout:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+	.lockscreen-signout:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 	@keyframes lockscreenSpin {
 		to {

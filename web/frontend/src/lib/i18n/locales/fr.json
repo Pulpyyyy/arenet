@@ -36,8 +36,10 @@
 		"ssoOrLocal": "ou avec un compte local",
 		"showPassword": "Afficher le mot de passe",
 		"hidePassword": "Masquer le mot de passe",
-		"firstTimePrompt": "Première connexion ?",
-		"createAdminLink": "Créer le compte administrateur",
+		"retryIn": "Réessaie dans {time}",
+		"reasons": {
+			"oidcUnlockRequired": "Ta session a été verrouillée. Un compte SSO n'a pas de mot de passe local pour la déverrouiller : reconnecte-toi avec le SSO."
+		},
 		"lock": {
 			"title": "Session verrouillée.",
 			"signedInAs": "Connecté en tant que",
@@ -59,7 +61,9 @@
 			"oidcInvalidState": "La requête SSO a été rejetée (jeton d'état invalide, expiré ou rejoué). Réessaie.",
 			"oidcIdpError": "Le fournisseur d'identité a rejeté la demande de connexion. Contacte l'administrateur de l'IdP.",
 			"oidcIdpUnreachable": "Le fournisseur d'identité est injoignable. Réessaie plus tard, ou connecte-toi avec un compte local ci-dessous.",
-			"oidcInternal": "Une erreur inattendue est survenue pendant la connexion SSO. Réessaie, ou utilise un compte local."
+			"oidcInternal": "Une erreur inattendue est survenue pendant la connexion SSO. Réessaie, ou utilise un compte local.",
+			"rateLimited": "Trop de tentatives de connexion échouées depuis cette adresse. La connexion est suspendue jusqu'à la fin du décompte sur le bouton.",
+			"rateLimitedLater": "Trop de tentatives de connexion échouées depuis cette adresse. Réessaie plus tard."
 		}
 	},
 	"errors": {
@@ -2991,6 +2995,11 @@
 		"title": "Change ton mot de passe",
 		"body": "Ce compte a été créé par un administrateur, qui connaît son premier mot de passe. Choisis le tien avant d'aller plus loin.",
 		"action": "Changer mon mot de passe"
+	},
+	"bootstrap": {
+		"unreachable": "Impossible de joindre Arenet.",
+		"serverError": "Arenet a répondu par une erreur (HTTP {status}).",
+		"retry": "Réessayer"
 	},
 	"passwordBreach": {
 		"title": "Ton mot de passe figure dans une fuite de données connue.",

@@ -36,8 +36,10 @@
 		"ssoOrLocal": "or with a local account",
 		"showPassword": "Show password",
 		"hidePassword": "Hide password",
-		"firstTimePrompt": "First time here?",
-		"createAdminLink": "Create the admin account",
+		"retryIn": "Try again in {time}",
+		"reasons": {
+			"oidcUnlockRequired": "Your session was locked. An SSO account has no local password to unlock it with: sign in again with SSO."
+		},
 		"lock": {
 			"title": "Session locked.",
 			"signedInAs": "Signed in as",
@@ -59,7 +61,9 @@
 			"oidcInvalidState": "The SSO request was rejected (invalid, expired or replayed state token). Try again.",
 			"oidcIdpError": "The identity provider rejected the sign-in request. Contact the IdP administrator.",
 			"oidcIdpUnreachable": "The identity provider is unreachable. Try again later, or sign in with a local account below.",
-			"oidcInternal": "An unexpected error occurred during SSO sign-in. Try again, or use a local account."
+			"oidcInternal": "An unexpected error occurred during SSO sign-in. Try again, or use a local account.",
+			"rateLimited": "Too many failed sign-in attempts from this address. Sign-in is paused until the countdown on the button ends.",
+			"rateLimitedLater": "Too many failed sign-in attempts from this address. Try again later."
 		}
 	},
 	"errors": {
@@ -2991,6 +2995,11 @@
 		"title": "Change your password",
 		"body": "This account was created by an administrator, who knows its first password. Choose your own before going any further.",
 		"action": "Change my password"
+	},
+	"bootstrap": {
+		"unreachable": "Arenet could not be reached.",
+		"serverError": "Arenet answered with an error (HTTP {status}).",
+		"retry": "Retry"
 	},
 	"passwordBreach": {
 		"title": "Your password has been found in a known data breach.",

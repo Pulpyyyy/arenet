@@ -20,7 +20,9 @@
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { authApi } from '$lib/api/auth';
+	import { safeNext } from '$lib/utils/safe-next';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
@@ -55,7 +57,9 @@
 			// admin without a follow-up /me round-trip).
 			auth.user = user;
 			auth.state = 'authenticated';
-			void goto('/routes');
+			// Back to the page the visitor first asked for, when the
+			// layout sent them here with ?next= (same-origin paths only).
+			void goto(safeNext(page.url.searchParams.get('next')));
 		} catch (err) {
 			if (err instanceof ApiError) {
 				if (err.status === 403) {
@@ -237,8 +241,10 @@
 						type="button"
 						class="setup-pw-toggle"
 						onclick={togglePassword}
-						tabindex={-1}
-						aria-label={language.current && (showPassword ? t('setup.ariaHidePassword') : t('setup.ariaShowPassword'))}
+						aria-pressed={showPassword ? 'true' : 'false'}
+						aria-controls="setup-password"
+						aria-label={language.current && t('setup.ariaShowPassword')}
+						data-testid="setup-password-toggle"
 					>
 						{#if showPassword}
 							<svg
@@ -518,6 +524,10 @@
 	.setup-pw-toggle:hover {
 		color: var(--fg-muted);
 		background: var(--surface-2);
+	}
+	.setup-pw-toggle:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
 	}
 	.setup-pw-toggle :global(svg) {
 		width: 16px;

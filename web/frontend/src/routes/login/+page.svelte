@@ -9,10 +9,13 @@
 
     - onMount: probe /api/v1/auth/oidc/status to decide whether
       to render the SSO button; surface ?error=<code> from the
-      callback into a readable banner.
+      callback into a readable banner, and ?reason=<code> from
+      another page into an information banner. On a fresh install
+      (setup/status available) go to /setup instead, with ?next=.
     - handleSubmit: validate locally, call auth.login(), map
-      401/400/429/other into formError, goto('/routes') on
-      success.
+      401/400/other into formError and 429 into a Retry-After
+      countdown on the submit button; on success go to ?next=
+      (same-origin paths only) or /routes.
     - handleSsoLogin: full navigation to /api/v1/auth/oidc/login
       so the backend can 302 to the IdP.
 
@@ -35,7 +38,7 @@
       usernames, not emails).
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -43,6 +46,8 @@
 	import { authApi } from '$lib/api/auth';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
+	import { safeNext, withNext } from '$lib/utils/safe-next';
+	import { formatCountdown } from '$lib/utils/duration';
 	import LoginBackground from '$lib/components/LoginBackground.svelte';
 	import SSOProviderLogo from '$lib/components/SSOProviderLogo.svelte';
 	import type { OIDCProviderKind } from '$lib/api/types';
@@ -60,6 +65,22 @@
 		internal: 'auth.errors.oidcInternal'
 	};
 
+	// Why another page sent the user here (?reason=<code>), as bundle
+	// keys for an information banner. Unknown codes show nothing.
+	const LOGIN_REASON_KEYS: Record<string, string> = {
+		// LockScreen: an SSO account has no local password to unlock with.
+		oidc_unlock_required: 'auth.reasons.oidcUnlockRequired'
+	};
+
+	const MS_PER_SECOND = 1000;
+	const COOLDOWN_TICK_MS = 1000;
+
+	// Own keys only: a query value of "constructor" must not resolve to
+	// Object.prototype.constructor.
+	function keyFor(map: Record<string, string>, code: string): string | undefined {
+		return Object.prototype.hasOwnProperty.call(map, code) ? map[code] : undefined;
+	}
+
 	let username = $state('');
 	let password = $state('');
 	let rememberMe = $state(false);
@@ -74,11 +95,15 @@
 	// login is never affected).
 	let oidcEnabled = $state(false);
 	let oidcKind = $state<OIDCProviderKind | ''>('');
-	// Setup availability probe. The "Première connexion ?" link
-	// only makes sense before the first admin is created; once
-	// any admin exists the /setup endpoint 404s and the link
-	// becomes a dead-end. We hide it in that case.
-	let setupAvailable = $state(false);
+	// Bundle key of the ?reason= information banner, '' for none.
+	let reasonKey = $state('');
+	// Login rate limit (429): seconds left before the server accepts
+	// another attempt, from Retry-After. The submit button is disabled
+	// and counts down while it is above 0.
+	let cooldownLeft = $state(0);
+	let rateLimited = $state(false);
+	let cooldownEnds = 0;
+	let cooldownTimer: ReturnType<typeof setInterval> | null = null;
 
 	onMount(() => {
 		void authApi
@@ -92,24 +117,61 @@
 				oidcKind = '';
 			});
 
+		// A fresh install has no account to sign in with: go to /setup,
+		// keeping ?next= so setup lands on the page first asked for.
+		// replaceState: Back must not bounce off /login again. A failed
+		// probe leaves the user here, where local login still works.
 		void authApi
 			.setupStatus()
 			.then((s) => {
-				setupAvailable = s.available;
+				if (s.available) {
+					void goto(withNext('/setup', page.url.searchParams.get('next')), {
+						replaceState: true
+					});
+				}
 			})
-			.catch(() => {
-				setupAvailable = false;
-			});
+			.catch(() => {});
 
 		// Step K.2 — surface ?error=<code> from the OIDC callback.
 		const errCode = page.url.searchParams.get('error');
 		if (errCode) {
-			const key = OIDC_ERROR_KEYS[errCode];
+			const key = keyFor(OIDC_ERROR_KEYS, errCode);
 			formError = key
 				? t(key)
 				: t('auth.errors.oidcGeneric', { code: errCode });
 		}
+
+		const reason = page.url.searchParams.get('reason');
+		if (reason) {
+			reasonKey = keyFor(LOGIN_REASON_KEYS, reason) ?? '';
+		}
 	});
+
+	onDestroy(stopCooldown);
+
+	function startCooldown(seconds: number): void {
+		stopCooldown();
+		cooldownEnds = Date.now() + seconds * MS_PER_SECOND;
+		cooldownLeft = seconds;
+		cooldownTimer = setInterval(tickCooldown, COOLDOWN_TICK_MS);
+	}
+
+	// Recomputed from the end time rather than decremented, so a tab
+	// that was throttled in the background still shows the right time.
+	function tickCooldown(): void {
+		cooldownLeft = Math.max(0, Math.ceil((cooldownEnds - Date.now()) / MS_PER_SECOND));
+		if (cooldownLeft === 0) {
+			stopCooldown();
+			rateLimited = false;
+		}
+	}
+
+	function stopCooldown(): void {
+		if (cooldownTimer !== null) {
+			clearInterval(cooldownTimer);
+			cooldownTimer = null;
+		}
+	}
 
 	function handleSsoLogin(): void {
 		// Full navigation (NOT a fetch) — the backend 302s to the
@@ -124,10 +186,11 @@
 
 	async function handleSubmit(e: Event): Promise<void> {
 		e.preventDefault();
-		if (submitting) return;
+		if (submitting || cooldownLeft > 0) return;
 		usernameError = '';
 		passwordError = '';
 		formError = '';
+		rateLimited = false;
 		if (!username) {
 			usernameError = t('auth.errors.identifierRequired');
 			return;
@@ -139,7 +202,9 @@
 		submitting = true;
 		try {
 			await auth.login(username, password, rememberMe);
-			void goto('/routes');
+			// Back to the page that sent the user here (?next=, set by
+			// the redirect), same-origin paths only; /routes otherwise.
+			void goto(safeNext(page.url.searchParams.get('next')));
 		} catch (err) {
 			if (err instanceof ApiError) {
 				if (err.status === 401) {
@@ -152,7 +217,13 @@
 					// i18n backlog).
 					formError = err.message;
 				} else if (err.status === 429) {
-					formError = err.message;
+					// Too many failures from this address: the server
+					// refuses every attempt until Retry-After has passed,
+					// so the button waits it out instead of offering
+					// attempts that cannot succeed.
+					rateLimited = true;
+					const seconds = err.retryAfterSeconds ?? 0;
+					if (seconds > 0) startCooldown(seconds);
 				} else {
 					formError = t('auth.errors.unreachable');
 				}
@@ -187,8 +258,30 @@
 		<h1 class="login-title">{language.current && t('auth.welcomeTitle')}</h1>
 		<p class="login-sub">{language.current && t('auth.welcomeSub')}</p>
 
-		{#if formError}
-			<div class="login-banner" role="alert">
+		{#if reasonKey}
+			<div class="login-banner login-banner-info" role="status" data-testid="login-reason">
+				<svg
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<circle cx="12" cy="12" r="10" />
+					<line x1="12" y1="16" x2="12" y2="12" />
+					<line x1="12" y1="8" x2="12.01" y2="8" />
+				</svg>
+				<div>{language.current && t(reasonKey)}</div>
+			</div>
+		{/if}
+
+		{#if rateLimited || formError}
+			<!-- The rate-limit text is static on purpose: the countdown
+			     lives on the submit button, outside this live region,
+			     so a screen reader is not interrupted every second. -->
+			<div class="login-banner" role="alert" data-testid="login-error">
 				<svg
 					viewBox="0 0 24 24"
 					fill="none"
@@ -202,7 +295,14 @@
 					<line x1="12" y1="8" x2="12" y2="12" />
 					<line x1="12" y1="16" x2="12.01" y2="16" />
 				</svg>
-				<div>{formError}</div>
+				<div>
+					{#if rateLimited}
+						{language.current &&
+							t(cooldownLeft > 0 ? 'auth.errors.rateLimited' : 'auth.errors.rateLimitedLater')}
+					{:else}
+						{formError}
+					{/if}
+				</div>
 			</div>
 		{/if}
 
@@ -239,7 +339,7 @@
 			<div class="login-divider">{language.current && t('auth.ssoOrLocal')}</div>
 		{/if}
 
-		<form onsubmit={handleSubmit} autocomplete="on" novalidate>
+		<form onsubmit={handleSubmit} autocomplete="on" novalidate data-testid="login-form">
 			<div class="login-field">
 				<label for="login-username">{language.current && t('auth.identifierLabel')}</label>
 				<div class="login-input-wrap">
@@ -276,9 +376,10 @@
 						type="button"
 						class="login-pw-toggle"
 						onclick={togglePassword}
-						tabindex={-1}
-						aria-label={language.current &&
-							(showPassword ? t('auth.hidePassword') : t('auth.showPassword'))}
+						aria-pressed={showPassword ? 'true' : 'false'}
+						aria-controls="login-password"
+						aria-label={language.current && t('auth.showPassword')}
+						data-testid="login-password-toggle"
 					>
 						{#if showPassword}
 							<svg
@@ -330,19 +431,18 @@
 				type="submit"
 				class="login-submit"
 				class:loading={submitting}
-				disabled={submitting}
+				disabled={submitting || cooldownLeft > 0}
+				data-testid="login-submit"
 			>
 				<span class="login-spin" aria-hidden="true"></span>
-				<span class="login-submit-label">{language.current && t('auth.loginButton')}</span>
+				<span class="login-submit-label">
+					{language.current &&
+						(cooldownLeft > 0
+							? t('auth.retryIn', { time: formatCountdown(cooldownLeft) })
+							: t('auth.loginButton'))}
+				</span>
 			</button>
 		</form>
-
-		{#if setupAvailable}
-			<div class="login-foot">
-				{language.current && t('auth.firstTimePrompt')}
-				<a href="/setup">{language.current && t('auth.createAdminLink')}</a>
-			</div>
-		{/if}
 	</div>
 </div>
 
@@ -465,6 +565,12 @@
 		font-size: 12.5px;
 		line-height: 1.45;
 		margin-bottom: 16px;
+	}
+	/* Information variant (?reason=): accent instead of red. */
+	.login-banner-info {
+		background: var(--accent-soft);
+		border-color: var(--accent-line);
+		color: var(--fg);
 	}
 	.login-banner :global(svg) {
 		width: 16px;
@@ -615,6 +721,10 @@
 		color: var(--fg-muted);
 		background: var(--surface-2);
 	}
+	.login-pw-toggle:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
 	.login-pw-toggle :global(svg) {
 		width: 16px;
 		height: 16px;
@@ -715,23 +825,6 @@
 		to {
 			transform: rotate(360deg);
 		}
-	}
-
-	.login-foot {
-		margin-top: 18px;
-		text-align: center;
-		color: var(--fg-muted);
-		font-size: 12.5px;
-	}
-	.login-foot a {
-		color: var(--accent);
-		font-weight: 500;
-		text-decoration: none;
-	}
-	.login-foot a:hover {
-		text-decoration: underline;
-		text-decoration-color: var(--accent-line);
-		text-underline-offset: 3px;
 	}
 
 	@media (max-width: 640px) {

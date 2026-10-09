@@ -15,7 +15,12 @@
 // along with this program.  If not, see https://www.gnu.org/licenses/.
 
 import { describe, it, expect } from 'vitest';
-import { DURATION_UNIT_FACTORS, secondsToParts, partsToSeconds } from './duration';
+import {
+	DURATION_UNIT_FACTORS,
+	formatCountdown,
+	secondsToParts,
+	partsToSeconds
+} from './duration';
 
 describe('secondsToParts', () => {
 	it('picks the largest whole unit that divides evenly', () => {
@@ -70,5 +75,21 @@ describe('DURATION_UNIT_FACTORS', () => {
 			hours: 3600,
 			days: 86400
 		});
+	});
+});
+
+describe('formatCountdown', () => {
+	it('renders minutes and zero-padded seconds', () => {
+		expect(formatCountdown(900)).toBe('15:00');
+		expect(formatCountdown(3600)).toBe('60:00');
+		expect(formatCountdown(61)).toBe('1:01');
+		expect(formatCountdown(45)).toBe('0:45');
+	});
+
+	it('rounds a fraction up and clamps nonsense to 0:00', () => {
+		expect(formatCountdown(0.2)).toBe('0:01');
+		expect(formatCountdown(0)).toBe('0:00');
+		expect(formatCountdown(-5)).toBe('0:00');
+		expect(formatCountdown(Number.NaN)).toBe('0:00');
 	});
 });
