@@ -13,9 +13,9 @@
 //   - Delete confirm dialog → API call → row removed
 //   - Self-row Delete button hidden (UX guard)
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { tick } from 'svelte';
-import { render, screen, fireEvent } from '@testing-library/svelte';
+import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 
 const { settingsMock, authMock, toastMock, authStoreMock } = vi.hoisted(() => ({
@@ -23,7 +23,8 @@ const { settingsMock, authMock, toastMock, authStoreMock } = vi.hoisted(() => ({
 		listAdminUsers: vi.fn(),
 		updateUserRole: vi.fn(),
 		deleteAdminUser: vi.fn(),
-		getOIDCConfig: vi.fn()
+		getOIDCConfig: vi.fn(),
+		rotateServiceAccountToken: vi.fn()
 	},
 	authMock: {
 		oidcStatus: vi.fn()
@@ -43,7 +44,8 @@ vi.mock('$lib/api/settings', () => ({
 		listAdminUsers: (...a: unknown[]) => settingsMock.listAdminUsers(...a),
 		updateUserRole: (...a: unknown[]) => settingsMock.updateUserRole(...a),
 		deleteAdminUser: (...a: unknown[]) => settingsMock.deleteAdminUser(...a),
-		getOIDCConfig: (...a: unknown[]) => settingsMock.getOIDCConfig(...a)
+		getOIDCConfig: (...a: unknown[]) => settingsMock.getOIDCConfig(...a),
+		rotateServiceAccountToken: (...a: unknown[]) => settingsMock.rotateServiceAccountToken(...a)
 	}
 }));
 vi.mock('$lib/api/auth', () => ({
@@ -81,6 +83,7 @@ beforeEach(() => {
 	settingsMock.updateUserRole.mockReset();
 	settingsMock.deleteAdminUser.mockReset();
 	settingsMock.getOIDCConfig.mockReset();
+	settingsMock.rotateServiceAccountToken.mockReset();
 	authMock.oidcStatus.mockReset();
 	toastMock.pushToast.mockReset();
 	authStoreMock.state = 'authenticated';
@@ -174,6 +177,35 @@ describe('/utilisateurs — filters', () => {
 
 		expect(screen.getByTestId('user-row-u1')).toBeTruthy();
 		expect(screen.queryByTestId('user-row-u2')).toBeNull();
+	});
+
+	it('role chips say which one is pressed', async () => {
+		settingsMock.listAdminUsers.mockResolvedValue([
+			user({ id: 'u1', role: 'admin' }),
+			user({ id: 'u2', role: 'viewer' })
+		]);
+		render(Page);
+		await tick();
+		await tick();
+		await tick();
+
+		const chips = Array.from(
+			screen.getByTestId('role-filter').querySelectorAll('button')
+		);
+		expect(chips.map((c) => c.getAttribute('aria-pressed'))).toEqual([
+			'true',
+			'false',
+			'false'
+		]);
+
+		await userEvent.click(chips[1]);
+		await tick();
+
+		expect(chips.map((c) => c.getAttribute('aria-pressed'))).toEqual([
+			'false',
+			'true',
+			'false'
+		]);
 	});
 
 	it('source chips narrow to local / oidc', async () => {
@@ -362,6 +394,67 @@ describe('/utilisateurs — delete flow', () => {
 	});
 });
 
+// --- Role changes: never your own, never the last admin -----------
+//
+// Demoting yourself, or the last admin, locks the instance out of its
+// own administration; the page does not offer either.
+
+describe('/utilisateurs — role change guards', () => {
+	async function renderWith(list: AdminUser[]): Promise<void> {
+		settingsMock.listAdminUsers.mockResolvedValue(list);
+		render(Page);
+		await tick();
+		await tick();
+		await tick();
+	}
+
+	it('offers no role button on your own row, and says why', async () => {
+		await renderWith([
+			user({ id: 'self-id', username: 'me', role: 'admin', authSource: 'local' }),
+			user({ id: 'other-id', username: 'other', role: 'admin', authSource: 'local' })
+		]);
+
+		expect(screen.queryByTestId('role-btn-self-id')).toBeNull();
+		const hint = screen.getByTestId('role-self-hint-self-id');
+		expect(hint.getAttribute('title')).toMatch(/your own role/i);
+		// Two local admins: the other one can be demoted.
+		expect((screen.getByTestId('role-btn-other-id') as HTMLButtonElement).disabled).toBe(false);
+	});
+
+	it('disables Demote on the last admin, with the reason', async () => {
+		await renderWith([
+			user({ id: 'u1', username: 'alice', role: 'admin', authSource: 'local' }),
+			user({ id: 'u2', username: 'bob', role: 'viewer', authSource: 'local' }),
+			// A service admin cannot sign in here: it does not count.
+			user({ id: 'svc-1', username: 'ci', role: 'admin', authSource: 'service' })
+		]);
+
+		const demote = screen.getByTestId('role-btn-u1') as HTMLButtonElement;
+		expect(demote.disabled).toBe(true);
+		expect(demote.getAttribute('aria-describedby')).toBe('role-lock-u1');
+		expect(screen.getByTestId('role-lock-hint-u1').textContent).toMatch(/last admin/i);
+
+		await fireEvent.click(demote);
+		expect(screen.queryByRole('dialog')).toBeNull();
+		expect(settingsMock.updateUserRole).not.toHaveBeenCalled();
+
+		// Promoting a viewer stays possible.
+		expect((screen.getByTestId('role-btn-u2') as HTMLButtonElement).disabled).toBe(false);
+	});
+
+	it('disables Demote on the last local admin, not on an SSO admin', async () => {
+		await renderWith([
+			user({ id: 'u1', username: 'alice', role: 'admin', authSource: 'local' }),
+			user({ id: 'u2', username: 'bob', role: 'admin', authSource: 'oidc' })
+		]);
+
+		expect((screen.getByTestId('role-btn-u1') as HTMLButtonElement).disabled).toBe(true);
+		expect(screen.getByTestId('role-lock-hint-u1').textContent).toMatch(/last local admin/i);
+		expect((screen.getByTestId('role-btn-u2') as HTMLButtonElement).disabled).toBe(false);
+		expect(screen.queryByTestId('role-lock-hint-u2')).toBeNull();
+	});
+});
+
 describe('/utilisateurs — Phase 2 visual polish', () => {
 	it('renders the friendly provider label on the SOURCE column instead of "OIDC"', async () => {
 		authMock.oidcStatus.mockResolvedValue({ enabled: true, kind: 'authentik' });
@@ -530,6 +623,72 @@ describe('/utilisateurs — Phase 2 visual polish', () => {
 		// the online state — assert the dot is there.
 		const dot = cell.querySelector('[aria-label^="Status:"]');
 		expect(dot).not.toBeNull();
+	});
+});
+
+// --- Token rotation: confirm, then a show-once reveal -------------
+//
+// Rotating revokes the current token at once, so the new one is the
+// only working credential: the reveal must not be dismissible, and
+// a refused copy (plain HTTP) must still leave a way out.
+
+describe('/utilisateurs — token rotation', () => {
+	async function openRotation(): Promise<void> {
+		settingsMock.listAdminUsers.mockResolvedValue([
+			user({ id: 'svc-1', username: 'ci-deploy', authSource: 'service', role: 'viewer' })
+		]);
+		render(Page);
+		await tick();
+		await tick();
+		await tick();
+		await fireEvent.click(screen.getByTestId('rotate-btn-svc-1'));
+	}
+
+	async function rotate(): Promise<void> {
+		settingsMock.rotateServiceAccountToken.mockResolvedValue({
+			token: 'arn_newtokennewtoken',
+			tokenId: 'tok-2'
+		});
+		await openRotation();
+		await fireEvent.click(screen.getByTestId('rotate-confirm-btn'));
+		await waitFor(() => expect(screen.getByTestId('rotate-revealed-token')).toBeInTheDocument());
+	}
+
+	afterEach(() => {
+		delete (navigator as unknown as Record<string, unknown>).clipboard;
+		delete (document as unknown as Record<string, unknown>).execCommand;
+	});
+
+	it('asks in a labelled dialog, with a danger confirm button', async () => {
+		await openRotation();
+
+		expect(screen.getByRole('dialog', { name: /ci-deploy/ })).toBeInTheDocument();
+		expect(screen.getByTestId('rotate-confirm-btn').className).toContain('bg-down');
+		expect(settingsMock.rotateServiceAccountToken).not.toHaveBeenCalled();
+	});
+
+	it('keeps the new token on Escape until it is saved', async () => {
+		await rotate();
+		expect(settingsMock.rotateServiceAccountToken).toHaveBeenCalledWith('svc-1');
+
+		await fireEvent.keyDown(document, { key: 'Escape' });
+		expect(screen.getByTestId('rotate-revealed-token').textContent).toBe('arn_newtokennewtoken');
+
+		const close = screen.getByTestId('rotate-close-btn') as HTMLButtonElement;
+		expect(close.disabled).toBe(true);
+		await fireEvent.click(screen.getByTestId('rotate-saved-checkbox'));
+		expect(close.disabled).toBe(false);
+	});
+
+	it('says so in the dialog when the copy fails', async () => {
+		await rotate();
+		Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+		Object.defineProperty(document, 'execCommand', { value: () => false, configurable: true });
+
+		await fireEvent.click(screen.getByTestId('rotate-copy-btn'));
+
+		expect(await screen.findByTestId('rotate-copy-failed')).toBeInTheDocument();
+		expect((screen.getByTestId('rotate-close-btn') as HTMLButtonElement).disabled).toBe(true);
 	});
 });
 

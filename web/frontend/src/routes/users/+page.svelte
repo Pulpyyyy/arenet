@@ -41,12 +41,14 @@
 	import Badge from '$lib/components/Badge.svelte';
 	import Spinner from '$lib/components/Spinner.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import Modal from '$lib/components/Modal.svelte';
 	import OIDCConfigSummary from '$lib/components/OIDCConfigSummary.svelte';
 	import UserAvatar from '$lib/components/UserAvatar.svelte';
 	import StatusDot from '$lib/components/StatusDot.svelte';
 	import CreateServiceAccountModal from '$lib/components/CreateServiceAccountModal.svelte';
 	import CreateUserModal from '$lib/components/CreateUserModal.svelte';
 	import { oidcProviderLabel, oidcProviderColors } from '$lib/utils/oidc-labels';
+	import { copyText } from '$lib/utils/clipboard';
 	import type { OIDCProviderKind } from '$lib/api/types';
 
 	let users = $state<AdminUser[]>([]);
@@ -70,6 +72,10 @@
 	let pendingRotate = $state<AdminUser | null>(null);
 	let revealedRotateToken = $state<string | null>(null);
 	let rotateCopied = $state(false);
+	let rotateSaved = $state(false);
+	let rotateCopyFailed = $state(false);
+	let rotating = $state(false);
+	let rotateTokenEl: HTMLElement | undefined = $state(undefined);
 
 	// Search + filter state — pure frontend filtering over the
 	// full users[] (admin volumes < 50 — no API surface needed).
@@ -124,7 +130,12 @@
 		const localAdmins = users.filter(
 			(u) => u.authSource === 'local' && u.role === 'admin'
 		).length;
-		return { total, admins, viewers, oidc, local, localAdmins };
+		// Service accounts are machines: an admin token cannot sign
+		// in to this page, so it does not count as a way back in.
+		const humanAdmins = users.filter(
+			(u) => u.authSource !== 'service' && u.role === 'admin'
+		).length;
+		return { total, admins, viewers, oidc, local, localAdmins, humanAdmins };
 	});
 
 	const subtitle = $derived(
@@ -238,7 +249,30 @@
 		return u.role === 'admin' ? 'viewer' : 'admin';
 	}
 
+	// Why a demotion is not offered, or null when it is. The last
+	// admin would leave nobody able to administer the instance; the
+	// last LOCAL admin is the way back in when the SSO is down, and
+	// the backend refuses that one too (UserStore.UpdateRole). Counts
+	// run over every user, not the filtered list.
+	type RoleLock = 'lastAdmin' | 'lastLocalAdmin';
+	function roleLockFor(u: AdminUser): RoleLock | null {
+		if (u.role !== 'admin') return null;
+		if (counts.humanAdmins <= 1) return 'lastAdmin';
+		if (u.authSource === 'local' && counts.localAdmins <= 1) return 'lastLocalAdmin';
+		return null;
+	}
+
+	function roleLockHint(lock: RoleLock): string {
+		void language.current;
+		return lock === 'lastAdmin'
+			? t('users.roleLastAdminHint')
+			: t('users.roleLastLocalAdminHint');
+	}
+
 	function onRoleClick(u: AdminUser): void {
+		// The buttons are not offered in these cases; this keeps the
+		// rule in one place should another caller appear.
+		if (auth.user?.id === u.id || roleLockFor(u) !== null) return;
 		pendingRole = { user: u, nextRole: nextRoleFor(u) };
 		confirmRoleOpen = true;
 	}
@@ -271,12 +305,15 @@
 		pendingRotate = u;
 		revealedRotateToken = null;
 		rotateCopied = false;
+		rotateSaved = false;
+		rotateCopyFailed = false;
 		confirmRotateOpen = true;
 	}
 
 	async function confirmRotate(): Promise<void> {
-		if (!pendingRotate) return;
+		if (!pendingRotate || rotating) return;
 		const u = pendingRotate;
+		rotating = true;
 		try {
 			const result = await settingsApi.rotateServiceAccountToken(u.id);
 			revealedRotateToken = result.token;
@@ -286,17 +323,20 @@
 			pushToast(msg, 'danger');
 			confirmRotateOpen = false;
 			pendingRotate = null;
+		} finally {
+			rotating = false;
 		}
 	}
 
 	async function copyRotateToken(): Promise<void> {
 		if (!revealedRotateToken) return;
-		try {
-			await navigator.clipboard.writeText(revealedRotateToken);
+		if (await copyText(revealedRotateToken, rotateTokenEl)) {
 			rotateCopied = true;
+			rotateCopyFailed = false;
 			pushToast(t('users.toastTokenCopied'), 'success');
-		} catch {
-			pushToast(t('users.toastCopyFailed'), 'danger');
+		} else {
+			// Said inside the dialog, next to the text to copy by hand.
+			rotateCopyFailed = true;
 		}
 	}
 
@@ -305,6 +345,8 @@
 		pendingRotate = null;
 		revealedRotateToken = null;
 		rotateCopied = false;
+		rotateSaved = false;
+		rotateCopyFailed = false;
 	}
 
 	async function confirmDelete(): Promise<void> {
@@ -420,6 +462,7 @@
 							type="button"
 							class:active={roleFilter === val}
 							class="filter-chip"
+							aria-pressed={roleFilter === val}
 							onclick={() => (roleFilter = val as RoleFilter)}
 						>
 							{label}
@@ -432,6 +475,7 @@
 							type="button"
 							class:active={sourceFilter === val}
 							class="filter-chip"
+							aria-pressed={sourceFilter === val}
 							onclick={() => (sourceFilter = val as SourceFilter)}
 						>
 							{label}
@@ -602,14 +646,41 @@
 													{language.current && t('users.actionDelete')}
 												</Button>
 											{/if}
-											<Button
-												variant="ghost"
-												size="sm"
-												onclick={() => onRoleClick(u)}
-												data-testid="role-btn-{u.id}"
-											>
-												{language.current && (u.role === 'admin' ? t('users.actionDemote') : t('users.actionPromote'))}
-											</Button>
+											{#if isSelf}
+												<!-- Your own role is changed by another admin,
+												     never by you: no button, and a word on why. -->
+												<span
+													class="px-2.5 py-1 text-xs text-muted"
+													title={language.current && t('users.roleSelfHint')}
+													data-testid="role-self-hint-{u.id}"
+												>
+													{language.current && t('users.roleSelfLabel')}
+													<span class="sr-only">{language.current && t('users.roleSelfHint')}</span>
+												</span>
+											{:else}
+												{@const lock = roleLockFor(u)}
+												<!-- Disabled for the last admin. A disabled
+												     button gets no hover in every browser, so
+												     the tooltip sits on a wrapper; the hidden
+												     text gives screen readers the same reason. -->
+												<span title={lock ? roleLockHint(lock) : undefined}>
+													<Button
+														variant="ghost"
+														size="sm"
+														disabled={lock !== null}
+														aria-describedby={lock ? `role-lock-${u.id}` : undefined}
+														onclick={() => onRoleClick(u)}
+														data-testid="role-btn-{u.id}"
+													>
+														{language.current && (u.role === 'admin' ? t('users.actionDemote') : t('users.actionPromote'))}
+													</Button>
+													{#if lock}
+														<span id="role-lock-{u.id}" class="sr-only" data-testid="role-lock-hint-{u.id}">
+															{roleLockHint(lock)}
+														</span>
+													{/if}
+												</span>
+											{/if}
 										{/if}
 									</div>
 								</td>
@@ -672,74 +743,79 @@
 	onCreated={load}
 />
 
-<!-- Phase 4 — Token rotation modal (custom because we need
-     the show-once token reveal flow, not a yes/no confirm). -->
-{#if confirmRotateOpen && pendingRotate}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center p-4"
-		style:background="var(--overlay-modal, rgba(0,0,0,0.8))"
-		role="presentation"
-		onclick={(e) => {
-			if (e.target === e.currentTarget && (revealedRotateToken === null || rotateCopied)) closeRotateModal();
-		}}
-		onkeydown={(e) => {
-			if (e.key === 'Escape' && (revealedRotateToken === null || rotateCopied)) closeRotateModal();
-		}}
-		data-testid="rotate-modal"
-	>
-		<div
-			class="bg-elevated border border-border-default rounded-lg shadow-lg w-full max-w-md"
-			role="dialog"
-			aria-modal="true"
-		>
-			<header class="px-5 py-4 border-b border-border-subtle">
-				<h2 class="text-lg font-semibold">
-					{language.current && (revealedRotateToken ? t('users.rotateNewTitle') : t('users.rotateConfirmTitle', { username: pendingRotate.username }))}
-				</h2>
-			</header>
-			<div class="px-5 py-4 text-sm flex flex-col gap-3">
-				{#if !revealedRotateToken}
-					<p>
-						{language.current && t('users.rotateModalIntro')}
-					</p>
-				{:else}
-					<p>
-						{language.current && t('users.rotateRevealedShownOnce')}
-					</p>
-					<pre
-						class="px-3 py-2 rounded-md bg-surface border border-border-default font-mono text-xs break-all whitespace-pre-wrap select-all"
-						data-testid="rotate-revealed-token">{revealedRotateToken}</pre>
-				{/if}
-			</div>
-			<footer class="px-5 py-3 border-t border-border-subtle flex justify-end gap-2">
-				{#if !revealedRotateToken}
-					<Button variant="ghost" size="sm" onclick={closeRotateModal}>{language.current && t('users.rotateBtnCancel')}</Button>
-					<Button variant="primary" size="sm" onclick={confirmRotate} data-testid="rotate-confirm-btn">
-						{language.current && t('users.rotateBtnConfirm')}
-					</Button>
-				{:else}
-					<Button
-						variant="secondary"
-						size="sm"
-						onclick={copyRotateToken}
-						data-testid="rotate-copy-btn"
-					>
-						{language.current && (rotateCopied ? t('users.rotateBtnCopied') : t('users.rotateBtnCopy'))}
-					</Button>
-					<Button
-						variant="primary"
-						size="sm"
-						disabled={!rotateCopied}
-						onclick={closeRotateModal}
-						data-testid="rotate-close-btn"
-					>
-						{language.current && t('users.rotateBtnClose')}
-					</Button>
-				{/if}
-			</footer>
-		</div>
+<!-- Phase 4 — Token rotation: a confirm step, then a show-once reveal,
+     so not a plain ConfirmDialog. Built on Modal for its labelling and
+     focus handling. Rotating revokes the current token at once, hence
+     the danger button; the reveal (and the request in flight) cannot be
+     dismissed, or the new token would be lost with the old one revoked. -->
+<Modal
+	open={confirmRotateOpen && pendingRotate !== null}
+	title={language.current &&
+		(revealedRotateToken
+			? t('users.rotateNewTitle')
+			: t('users.rotateConfirmTitle', { username: pendingRotate?.username ?? '' }))}
+	onClose={closeRotateModal}
+	dismissible={revealedRotateToken === null && !rotating}
+>
+	<div class="text-sm flex flex-col gap-3" data-testid="rotate-modal">
+		{#if !revealedRotateToken}
+			<p>
+				{language.current && t('users.rotateModalIntro')}
+			</p>
+		{:else}
+			<p>
+				{language.current && t('users.rotateRevealedShownOnce')}
+			</p>
+			<pre
+				bind:this={rotateTokenEl}
+				class="px-3 py-2 rounded-md bg-surface border border-border-default font-mono text-xs break-all whitespace-pre-wrap select-all"
+				data-testid="rotate-revealed-token">{revealedRotateToken}</pre>
+			{#if rotateCopyFailed}
+				<p role="alert" class="text-down" data-testid="rotate-copy-failed">
+					{language.current && t('secretReveal.copyFailed')}
+				</p>
+			{/if}
+			<label class="inline-flex items-center gap-2 text-secondary cursor-pointer">
+				<input
+					type="checkbox"
+					class="accent-cyan"
+					bind:checked={rotateSaved}
+					data-testid="rotate-saved-checkbox"
+				/>
+				{language.current && t('secretReveal.savedConfirm')}
+			</label>
+		{/if}
 	</div>
-{/if}
+	{#snippet footer()}
+		{#if !revealedRotateToken}
+			<Button variant="ghost" size="sm" disabled={rotating} onclick={closeRotateModal}
+				>{language.current && t('users.rotateBtnCancel')}</Button
+			>
+			<Button
+				variant="danger"
+				size="sm"
+				loading={rotating}
+				onclick={confirmRotate}
+				data-testid="rotate-confirm-btn"
+			>
+				{language.current && t('users.rotateBtnConfirm')}
+			</Button>
+		{:else}
+			<Button variant="secondary" size="sm" onclick={copyRotateToken} data-testid="rotate-copy-btn">
+				{language.current && (rotateCopied ? t('users.rotateBtnCopied') : t('users.rotateBtnCopy'))}
+			</Button>
+			<Button
+				variant="primary"
+				size="sm"
+				disabled={!rotateCopied && !rotateSaved}
+				onclick={closeRotateModal}
+				data-testid="rotate-close-btn"
+			>
+				{language.current && t('users.rotateBtnClose')}
+			</Button>
+		{/if}
+	{/snippet}
+</Modal>
 
 <style>
 	/* Phase 2 follow-up — provider-coloured pill rendered in the

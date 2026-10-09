@@ -105,7 +105,80 @@ describe('CreateServiceAccountModal', () => {
 		await fireEvent.click(screen.getByTestId('svc-copy-button'));
 		await waitFor(() => expect(writeTextMock).toHaveBeenCalled());
 
+		// The copy resolves through the clipboard helper a few
+		// microtasks later; wait for the re-render instead of racing it.
+		await waitFor(() => expect(closeBtn.disabled).toBe(false));
+	});
+
+	// Escape and the backdrop used to run the same close as the button,
+	// throwing away a token that is never shown again.
+	it('keeps the token on Escape or a backdrop click during the reveal', async () => {
+		createMock.mockResolvedValue(baseResponse());
+		const onClose = vi.fn();
+
+		const Modal = (await import('./CreateServiceAccountModal.svelte')).default;
+		render(Modal, { props: { open: true, onClose } });
+
+		await fireEvent.input(screen.getByTestId('svc-name-input'), { target: { value: 'ci' } });
+		await fireEvent.click(screen.getByTestId('svc-submit-button'));
+		await waitFor(() => expect(screen.getByTestId('svc-revealed-token')).toBeTruthy());
+
+		await fireEvent.keyDown(document, { key: 'Escape' });
+		await fireEvent.click(document.querySelector('.modal-backdrop') as HTMLElement);
+
+		expect(onClose).not.toHaveBeenCalled();
+		expect(screen.getByTestId('svc-revealed-token').textContent).toContain('arn_revealed');
+	});
+
+	it('unlocks "Fermer" when the operator ticks "I have saved it"', async () => {
+		createMock.mockResolvedValue(baseResponse());
+		const onClose = vi.fn();
+
+		const Modal = (await import('./CreateServiceAccountModal.svelte')).default;
+		render(Modal, { props: { open: true, onClose } });
+
+		await fireEvent.input(screen.getByTestId('svc-name-input'), { target: { value: 'ci' } });
+		await fireEvent.click(screen.getByTestId('svc-submit-button'));
+		await waitFor(() => expect(screen.getByTestId('svc-close-button')).toBeTruthy());
+
+		const closeBtn = screen.getByTestId('svc-close-button') as HTMLButtonElement;
+		expect(closeBtn.disabled).toBe(true);
+		await fireEvent.click(screen.getByTestId('svc-saved-checkbox'));
 		expect(closeBtn.disabled).toBe(false);
+		expect(writeTextMock).not.toHaveBeenCalled();
+
+		await fireEvent.click(closeBtn);
+		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
+	it('says so in the dialog when copying fails on a plain-HTTP origin', async () => {
+		createMock.mockResolvedValue(baseResponse());
+
+		const Modal = (await import('./CreateServiceAccountModal.svelte')).default;
+		render(Modal, { props: { open: true, onClose: () => {} } });
+
+		await fireEvent.input(screen.getByTestId('svc-name-input'), { target: { value: 'ci' } });
+		await fireEvent.click(screen.getByTestId('svc-submit-button'));
+		await waitFor(() => expect(screen.getByTestId('svc-copy-button')).toBeTruthy());
+
+		// No Clipboard API outside a secure context, and the legacy
+		// execCommand path refused as well.
+		Object.defineProperty(global.navigator, 'clipboard', { value: undefined, configurable: true });
+		Object.defineProperty(document, 'execCommand', { value: () => false, configurable: true });
+		try {
+			await fireEvent.click(screen.getByTestId('svc-copy-button'));
+			const failed = await screen.findByTestId('svc-copy-failed');
+			expect(failed.textContent).toMatch(/by hand|à la main/i);
+			expect((screen.getByTestId('svc-close-button') as HTMLButtonElement).disabled).toBe(true);
+			// No success toast for a copy that did not happen.
+			expect(pushToastMock).not.toHaveBeenCalledWith(expect.anything(), 'success');
+		} finally {
+			Object.defineProperty(global.navigator, 'clipboard', {
+				value: { writeText: (t: string) => writeTextMock(t) },
+				configurable: true
+			});
+			delete (document as unknown as Record<string, unknown>).execCommand;
+		}
 	});
 
 	it('clipboard write fires with the plain token on copy', async () => {

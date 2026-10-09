@@ -3,6 +3,13 @@
   Copyright (C) 2026  The Arenet Authors
   Licensed under the GNU AGPL v3 or later. See LICENSE.
 -->
+<script module lang="ts">
+	// Open modals, oldest first. Every open Modal listens on `document`,
+	// so without this a ConfirmDialog opened over a form would close
+	// both on one Escape. Only the last entry handles keys.
+	const openStack: symbol[] = [];
+</script>
+
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { fade, fly } from 'svelte/transition';
@@ -24,6 +31,12 @@
 		children?: Snippet;
 		footer?: Snippet;
 		width?: Width;
+		/**
+		 * False makes Escape and backdrop clicks do nothing, so only the
+		 * dialog's own buttons can close it — for content that is lost
+		 * on close, like a secret shown once.
+		 */
+		dismissible?: boolean;
 	}
 
 	let {
@@ -32,7 +45,8 @@
 		onClose,
 		children,
 		footer,
-		width = 'md'
+		width = 'md',
+		dismissible = true
 	}: Props = $props();
 
 	// Tailwind class per width token. Kept as a static map
@@ -49,6 +63,11 @@
 
 	let dialog: HTMLDivElement | undefined = $state(undefined);
 	const titleId = `modal-title-${Math.random().toString(36).slice(2, 9)}`;
+	const stackToken = Symbol('modal');
+
+	function isTopmost(): boolean {
+		return openStack[openStack.length - 1] === stackToken;
+	}
 
 	/**
 	 * Returns the focusable descendants of the dialog, in tab order.
@@ -62,9 +81,11 @@
 	}
 
 	function onKeydown(event: KeyboardEvent) {
+		// A modal underneath another one must neither close nor trap Tab.
+		if (!isTopmost()) return;
 		if (event.key === 'Escape') {
 			event.preventDefault();
-			onClose();
+			if (dismissible) onClose();
 			return;
 		}
 		if (event.key !== 'Tab') return;
@@ -87,6 +108,7 @@
 
 	$effect(() => {
 		if (!open) return;
+		openStack.push(stackToken);
 		document.addEventListener('keydown', onKeydown);
 		const previouslyFocused = document.activeElement as HTMLElement | null;
 		// Move focus into the dialog after Svelte mounts the markup.
@@ -95,6 +117,10 @@
 			(items[0] ?? dialog)?.focus();
 		});
 		return () => {
+			// By identity, not pop(): modals do not always close in the
+			// order they opened.
+			const index = openStack.indexOf(stackToken);
+			if (index !== -1) openStack.splice(index, 1);
 			document.removeEventListener('keydown', onKeydown);
 			previouslyFocused?.focus();
 		};
@@ -109,7 +135,7 @@
 		role="presentation"
 		class="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
 		onclick={(e) => {
-			if (e.target === e.currentTarget) onClose();
+			if (dismissible && e.target === e.currentTarget) onClose();
 		}}
 		onkeydown={() => {
 			/* keydown is handled at document level via $effect; this stub keeps
@@ -119,22 +145,27 @@
 	>
 		<!-- Dialog: fly + fade per spec §10.2 (slide-up + fade with
 		     --motion-slow 400ms). Both directions (in/out) are now
-		     animated — pre-Chunk-3 only the entry was. -->
+		     animated — pre-Chunk-3 only the entry was.
+		     Capped to the viewport minus the backdrop's p-4, with only the
+		     body scrolling: a long form used to overflow the centred box
+		     and clip its own header and Save footer out of reach. -->
 		<div
 			bind:this={dialog}
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby={titleId}
 			tabindex="-1"
-			class="bg-elevated border border-border-default rounded-lg shadow-lg w-full {widthClass[width]} focus:outline-none"
+			class="bg-elevated border border-border-default rounded-lg shadow-lg w-full {widthClass[width]} max-h-[calc(100dvh-2rem)] flex flex-col focus:outline-none"
 			transition:fly={{ y: 20, duration: 400, easing: cubicOut }}
 		>
-			<header class="px-5 py-4 border-b border-border-subtle">
+			<header class="shrink-0 px-5 py-4 border-b border-border-subtle">
 				<h2 id={titleId} class="text-lg font-semibold">{title}</h2>
 			</header>
-			<div class="px-5 py-4">{@render children?.()}</div>
+			<div class="min-h-0 overflow-y-auto px-5 py-4">
+				{@render children?.()}
+			</div>
 			{#if footer}
-				<footer class="px-5 py-3 border-t border-border-subtle flex justify-end gap-2">
+				<footer class="shrink-0 px-5 py-3 border-t border-border-subtle flex justify-end gap-2">
 					{@render footer()}
 				</footer>
 			{/if}

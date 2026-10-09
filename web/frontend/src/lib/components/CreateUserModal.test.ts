@@ -9,8 +9,8 @@
 // operator who leaves without copying has to delete the account and
 // start again, and the dialog has to say that by refusing to close.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/svelte';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, fireEvent } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 
 const { api } = vi.hoisted(() => ({ api: { createAdminUser: vi.fn() } }));
@@ -39,6 +39,21 @@ const created = {
 beforeEach(() => {
 	api.createAdminUser.mockReset();
 });
+
+afterEach(() => {
+	// Undo the clipboard stubs; own properties shadow jsdom's.
+	delete (navigator as unknown as Record<string, unknown>).clipboard;
+	delete (document as unknown as Record<string, unknown>).execCommand;
+});
+
+async function reachReveal(onClose: () => void) {
+	api.createAdminUser.mockResolvedValue(created);
+	const view = render(CreateUserModal, { open: true, onClose });
+	await userEvent.type(screen.getByTestId('new-user-username'), 'alice');
+	await userEvent.click(screen.getByTestId('new-user-submit'));
+	await waitFor(() => expect(screen.getByTestId('new-user-revealed')).toBeInTheDocument());
+	return view;
+}
 
 describe('CreateUserModal', () => {
 	it('generates by default and does not send a password', async () => {
@@ -107,5 +122,57 @@ describe('CreateUserModal', () => {
 
 		const shown = await screen.findByTestId('new-user-error');
 		expect(shown.textContent).toMatch(/taken|pris/i);
+	});
+
+	// Escape and the backdrop used to run the same close as the button,
+	// discarding the password the dialog was refusing to let go of.
+	it('keeps the password on Escape or a backdrop click during the reveal', async () => {
+		const onClose = vi.fn();
+		await reachReveal(onClose);
+
+		await fireEvent.keyDown(document, { key: 'Escape' });
+		const backdrop = document.querySelector('.modal-backdrop') as HTMLElement;
+		await fireEvent.click(backdrop);
+
+		expect(onClose).not.toHaveBeenCalled();
+		expect(screen.getByTestId('new-user-revealed').textContent).toBe(created.generatedPassword);
+	});
+
+	// On plain HTTP the copy can fail for good; ticking the box is the
+	// way out that does not lose the password.
+	it('unlocks Close once the admin ticks "I have saved it"', async () => {
+		const onClose = vi.fn();
+		await reachReveal(onClose);
+
+		const close = screen.getByTestId('new-user-close') as HTMLButtonElement;
+		expect(close.disabled).toBe(true);
+		await userEvent.click(screen.getByTestId('new-user-saved'));
+		expect(close.disabled).toBe(false);
+
+		await userEvent.click(close);
+		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
+	it('says so in the dialog when copying fails, and keeps Close locked', async () => {
+		await reachReveal(vi.fn());
+		// A plain-HTTP origin: no Clipboard API, and the legacy path refused.
+		Object.defineProperty(navigator, 'clipboard', {
+			value: undefined,
+			configurable: true,
+			writable: true
+		});
+		Object.defineProperty(document, 'execCommand', {
+			value: vi.fn(() => false),
+			configurable: true,
+			writable: true
+		});
+
+		await fireEvent.click(screen.getByTestId('new-user-copy'));
+
+		const failed = await screen.findByTestId('new-user-copy-failed');
+		expect(failed.textContent).toMatch(/by hand|à la main/i);
+		expect((screen.getByTestId('new-user-close') as HTMLButtonElement).disabled).toBe(true);
+		// The password stays on screen to be copied by hand.
+		expect(screen.getByTestId('new-user-revealed').textContent).toBe(created.generatedPassword);
 	});
 });
