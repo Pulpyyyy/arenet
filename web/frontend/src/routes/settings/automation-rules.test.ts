@@ -55,6 +55,7 @@ vi.mock('$app/navigation', () => ({
 }));
 
 import Page from './+page.svelte';
+import { AUTOMATION_SOURCE_LABELS } from '$lib/api/types';
 
 const S = 1e9;
 const sqli = {
@@ -64,6 +65,12 @@ const sqli = {
 	duration_ns: 4 * 3600 * S,
 	cooldown_ns: 24 * 3600 * S
 };
+// The backend always returns every category (automation.DefaultRuleSet
+// when nothing is stored). With only waf-sqli, the others would show a
+// threshold of 0 against min=1 and the browser would refuse the submit.
+const allRules = Object.fromEntries(
+	Object.keys(AUTOMATION_SOURCE_LABELS).map((s) => [s, { ...sqli, enabled: false }])
+);
 
 beforeEach(() => {
 	Element.prototype.scrollIntoView = vi.fn();
@@ -71,7 +78,7 @@ beforeEach(() => {
 	api.getAutomation.mockReset();
 	api.putAutomationRules.mockReset();
 	api.getAutomation.mockResolvedValue({
-		rules: { rules: { 'waf-sqli': sqli } },
+		rules: { rules: { ...allRules, 'waf-sqli': sqli } },
 		credentials: { lapiUrl: '', machineId: '', configured: false }
 	});
 	api.putAutomationRules.mockResolvedValue({});
@@ -136,7 +143,7 @@ describe('settings — automation rule durations', () => {
 		await userEvent.click(save);
 		await waitFor(() => expect(api.putAutomationRules).toHaveBeenCalledTimes(1));
 		expect(api.putAutomationRules).toHaveBeenCalledWith({
-			rules: { rules: { 'waf-sqli': { ...sqli, cooldown_ns: 90 * 60 * S } } }
+			rules: { rules: { ...allRules, 'waf-sqli': { ...sqli, cooldown_ns: 90 * 60 * S } } }
 		});
 	});
 });
