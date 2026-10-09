@@ -36,14 +36,19 @@ networks only — already refuses the Internet. To keep the admin
 to one workstation (plus the SSH tunnel):
 
 ```bash
+# systemd: the SSH tunnel arrives from loopback
 ARENET_ADMIN_ALLOWED_CIDRS=192.168.1.50,127.0.0.1
+# Docker bridge: the SSH tunnel arrives from the network gateway
+ARENET_ADMIN_ALLOWED_CIDRS=192.168.1.50,172.20.0.1
 ```
+
+On Docker, find your gateway with `docker network inspect
+<network> --format '{{(index .IPAM.Config 0).Gateway}}'`.
 
 **Verify** (from another LAN machine — should be refused):
 
 ```bash
-curl -m 3 -o /dev/null -w '%{http_code}
-' http://<homelab-LAN-IP>:8001/
+curl -m 3 -o /dev/null -w '%{http_code}\n' http://<homelab-LAN-IP>:8001/
 # expected: 403
 ```
 

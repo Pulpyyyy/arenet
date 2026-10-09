@@ -29,9 +29,11 @@ import (
 // ARENET_ADMIN_ALLOWED_CIDRS is unset or empty: every non-Internet range.
 // It closes the worst case — an admin port reachable from the Internet
 // through a forgotten port forward or a VPS — without locking out any
-// homelab path: LAN, SSH tunnel, Docker bridge (published-port traffic
-// from the host typically arrives from the bridge gateway, a private
-// address), Tailscale (CGNAT 100.64.0.0/10) and IPv6 ULA / link-local.
+// homelab path: LAN, SSH tunnel, Docker bridge (traffic from the host to
+// a port published on 127.0.0.1 arrives from the network gateway, a
+// private address — measured on Docker 29.9 rootful, see
+// docs/operations/env-vars.md), Tailscale (CGNAT 100.64.0.0/10) and
+// IPv6 ULA / link-local.
 //
 // It does NOT separate one LAN device from another, nor the host from
 // the other containers of a Docker network: they are all private. An

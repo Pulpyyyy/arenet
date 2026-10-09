@@ -171,7 +171,7 @@ All of these are optional overrides — set them via `environment:` in `docker-c
 | Variable | Default | What |
 | -------- | ------- | ---- |
 | `ARENET_ADMIN_BIND` | `127.0.0.1:8001` | Admin UI/API bind address. Set `0.0.0.0:8001` for LAN access (see above). |
-| `ARENET_ADMIN_ALLOWED_CIDRS` | _(private networks)_ | Client IPs allowed to reach the admin (CIDRs or bare IPs, comma-separated). Empty = loopback, RFC 1918, Tailscale, IPv6 ULA/link-local; anything else gets a 403. Example: `192.168.1.50,127.0.0.1`. |
+| `ARENET_ADMIN_ALLOWED_CIDRS` | _(private networks)_ | Client IPs allowed to reach the admin (CIDRs or bare IPs, comma-separated). Empty = loopback, RFC 1918, Tailscale, IPv6 ULA/link-local; anything else gets a 403. Example: `192.168.1.50,127.0.0.1` (systemd) — on Docker the SSH tunnel arrives from the network gateway, so use e.g. `192.168.1.50,172.20.0.1`. |
 | `ARENET_DATA_DIR` | `/var/lib/arenet` | Where the binary stores its BoltDB/SQLite state. |
 | `ARENET_UPDATE_CHECK_INTERVAL` | `24h` | Cadence of the opt-in update checker (Go duration, min `1h`). The check must still be **enabled in Settings → Updates** — there is no env toggle for that. See [DNS Providers → Stay updated](DNS-Providers#stay-updated). |
 | `ARENET_ACME_EMAIL` | _(none)_ | Contact email passed to the ACME issuer for Let's Encrypt notices. |

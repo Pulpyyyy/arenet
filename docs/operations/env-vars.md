@@ -247,10 +247,13 @@ defaults; you'll typically touch 2–3 on a real install.
   containers of a Docker network — they are all private.
 - **Format**: comma-separated CIDRs and/or bare IPs (a bare IP is
   that single address). An explicit list **replaces** the default
-  — loopback included, so add `127.0.0.1` if you use an SSH
-  tunnel. `0.0.0.0/0,::/0` opens the admin to every source.
-- **Example**: `ARENET_ADMIN_ALLOWED_CIDRS=192.168.1.50,127.0.0.1`
-  (one workstation + SSH tunnel).
+  — loopback included, so keep the SSH-tunnel source if you use
+  one (`127.0.0.1` on systemd, the bridge gateway on Docker — see
+  below). `0.0.0.0/0,::/0` opens the admin to every source.
+- **Example**: one workstation + SSH tunnel —
+  `ARENET_ADMIN_ALLOWED_CIDRS=192.168.1.50,127.0.0.1` (systemd),
+  `ARENET_ADMIN_ALLOWED_CIDRS=192.168.1.50,172.20.0.1` (Docker,
+  with your own network's gateway).
 - **Notes**: a malformed entry causes Arenet to **fail-fast at
   boot**. The effective list is logged at startup (`admin: source
   allowlist`). `/healthz` is exempt so the container healthcheck
@@ -262,14 +265,27 @@ defaults; you'll typically touch 2–3 on a real install.
   **every CIDR in `ARENET_TRUSTED_PROXIES` can pick the IP the
   allowlist sees**. Trusting a whole Docker network lets every
   container on it through.
-  In **Docker bridge** mode, the host typically reaches a port
-  published on `127.0.0.1` through `docker-proxy`, so it arrives
-  from the bridge gateway (e.g. `172.18.0.1`), not from
-  `127.0.0.1`. **Rootless Docker** and Docker Desktop typically
-  hide the real client address behind their port forwarder: there
-  the allowlist cannot tell clients apart. Rather than guess, read
-  the `client_ip` in the refusal warning — it is exactly the
-  address the allowlist judged.
+  **Docker bridge mode** — source IPs seen inside the container,
+  measured on Docker 29.9 (rootful, `docker-proxy` enabled):
+
+  | Path | Source IP the allowlist sees |
+  |---|---|
+  | Host → port published on `127.0.0.1` (this is the SSH-tunnel path) | the network's **gateway** (e.g. `172.20.0.1`), not `127.0.0.1` |
+  | Host → its own LAN IP | the host's LAN IP |
+  | Another container on the same network | that container's own IP (e.g. `172.20.0.3`) |
+
+  So `127.0.0.1` in the list is useless on Docker bridge; allow
+  the gateway as a `/32` instead. It lets the host (and the SSH
+  tunnel) in **without** letting the neighbouring containers in,
+  since they have their own addresses. Find it with
+  `docker network inspect <network> --format '{{(index .IPAM.Config 0).Gateway}}'`.
+  It is stable for an existing network but may differ after the
+  network is recreated.
+  **Rootless Docker** and Docker Desktop route published ports
+  through their own forwarder and were not measured; they may hide
+  the real client address. In any case, read the `client_ip` in
+  the refusal warning — it is exactly the address the allowlist
+  judged.
 - **Source**: `cmd/arenet/main.go`, parser and middleware at
   `internal/auth/source_allowlist.go`.
 

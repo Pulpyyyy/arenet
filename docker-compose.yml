@@ -113,9 +113,11 @@ services:
       # Unset = private networks only (LAN, loopback, Tailscale);
       # the Internet gets a 403. Narrow it to your workstation
       # (with "8001:8001" published). Every refusal logs the
-      # client_ip Arenet saw — the SSH-tunnel path typically shows
-      # up as the Docker bridge gateway, add it if you use one:
-      # ARENET_ADMIN_ALLOWED_CIDRS: 192.168.1.50
+      # client_ip Arenet saw. The SSH tunnel arrives from this
+      # network's gateway, not 127.0.0.1 — allow it as well:
+      #   docker network inspect <network> \
+      #     --format '{{(index .IPAM.Config 0).Gateway}}'
+      # ARENET_ADMIN_ALLOWED_CIDRS: 192.168.1.50,172.20.0.1
 
     # Caddy binds :80 and :443 — these are privileged ports on
     # Linux. CAP_NET_BIND_SERVICE lets the nonroot user inside
