@@ -28,6 +28,30 @@ curl -m 3 http://<homelab-LAN-IP>:8001/healthz
 If you've intentionally opened admin to LAN (`ARENET_ADMIN_BIND=
 0.0.0.0:8001`), apply items 2 + 3 below.
 
+### Narrow who may reach the admin
+
+Independently of the bind, `ARENET_ADMIN_ALLOWED_CIDRS` limits
+which client IPs the admin answers. Its default — private
+networks only — already refuses the Internet. To keep the admin
+to one workstation (plus the SSH tunnel):
+
+```bash
+ARENET_ADMIN_ALLOWED_CIDRS=192.168.1.50,127.0.0.1
+```
+
+**Verify** (from another LAN machine — should be refused):
+
+```bash
+curl -m 3 -o /dev/null -w '%{http_code}
+' http://<homelab-LAN-IP>:8001/
+# expected: 403
+```
+
+An IP is not an identity — any LAN device can take an allowed
+address — so this narrows the surface, it does not replace
+authentication or TLS. See `docs/operations/env-vars.md` for the
+Docker caveats (bridge gateway, rootless).
+
 ## 2. Put TLS in front of LAN-exposed admin
 
 Admin runs plain HTTP. If you expose it on LAN, terminate TLS

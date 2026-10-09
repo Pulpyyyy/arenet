@@ -171,6 +171,7 @@ Toutes optionnelles — définis-les via `environment:` dans `docker-compose.yml
 | Variable | Défaut | Rôle |
 | -------- | ------ | ---- |
 | `ARENET_ADMIN_BIND` | `127.0.0.1:8001` | Adresse de bind de l'UI/API d'admin. Mets `0.0.0.0:8001` pour un accès LAN (voir ci-dessus). |
+| `ARENET_ADMIN_ALLOWED_CIDRS` | _(réseaux privés)_ | IP clientes autorisées à joindre l'admin (CIDR ou IP seules, séparés par des virgules). Vide = loopback, RFC 1918, Tailscale, IPv6 ULA/link-local ; le reste reçoit un 403. Exemple : `192.168.1.50,127.0.0.1`. |
 | `ARENET_DATA_DIR` | `/var/lib/arenet` | Où le binaire stocke son état BoltDB/SQLite. |
 | `ARENET_UPDATE_CHECK_INTERVAL` | `24h` | Cadence du vérificateur de mises à jour opt-in (durée Go, min `1h`). Le check doit tout de même être **activé dans Réglages → Mises à jour** — pas de toggle env pour ça. Voir [DNS Providers → Rester à jour](DNS-Providers-FR#rester-à-jour). |
 | `ARENET_ACME_EMAIL` | _(aucun)_ | Email de contact passé à l'émetteur ACME pour les notices Let's Encrypt. |

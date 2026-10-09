@@ -67,6 +67,13 @@ func NewRouter(h *Handler, dev bool, ipExtractor *auth.IPExtractor, ws *WSTopolo
 		r.Use(devCORS("http://localhost:5173"))
 	}
 	r.Use(auth.IPExtractMiddleware(ipExtractor))
+	// Source allowlist (ARENET_ADMIN_ALLOWED_CIDRS) — after the IP
+	// extractor so it judges the resolved client, before every route
+	// so the SPA, the API and the WebSockets are all covered. /healthz
+	// stays exempt for the in-container healthcheck.
+	if h.adminAllowlist != nil {
+		r.Use(auth.SourceAllowlistMiddleware(h.adminAllowlist, h.logger, "/healthz"))
+	}
 
 	// /healthz: mounted at the root (NOT /api/v1/...) so the probe
 	// path stays stable across API versions. No auth wrapper because

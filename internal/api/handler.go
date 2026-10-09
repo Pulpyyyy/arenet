@@ -327,7 +327,11 @@ type Handler struct {
 	// at boot via SetAdminListen and read by the TCP-service port
 	// guard. Empty only costs that one guard.
 	adminListen string
-	logger      *slog.Logger
+	// adminAllowlist restricts which client IPs reach the admin
+	// interface. Set at boot via SetAdminAllowlist; nil (tests that
+	// don't call it) mounts no source check.
+	adminAllowlist *auth.SourceAllowlist
+	logger         *slog.Logger
 	// uiOrigin (Step K.2 dev) — when non-empty, the OIDC
 	// callback's redirects are emitted as absolute URLs
 	// against this origin (e.g. http://localhost:5173) so the
@@ -711,6 +715,12 @@ func (h *Handler) SetUpdateChecker(c updateChecker) {
 // allowed to take the port the operator manages Arenet through.
 func (h *Handler) SetAdminListen(addr string) {
 	h.adminListen = addr
+}
+
+// SetAdminAllowlist installs the admin source allowlist. Must be called
+// before NewRouter, which mounts the check only when one is set.
+func (h *Handler) SetAdminAllowlist(al *auth.SourceAllowlist) {
+	h.adminAllowlist = al
 }
 
 // reservedTCPPorts is what a TCP service may not listen on.

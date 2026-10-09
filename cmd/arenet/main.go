@@ -1353,6 +1353,15 @@ func run(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config) (retEr
 		logger.Info("auth: no trusted proxies configured (X-Forwarded-For will be ignored)")
 	}
 
+	adminAllowlist, err := auth.NewSourceAllowlist(os.Getenv("ARENET_ADMIN_ALLOWED_CIDRS"))
+	if err != nil {
+		return fmt.Errorf("admin allowlist: %w", err)
+	}
+	logger.Info("admin: source allowlist",
+		"default", adminAllowlist.Defaulted(),
+		"cidrs", adminAllowlist.CIDRs(),
+	)
+
 	// Step V.1.3 — install trusted-proxy-aware client-IP
 	// resolver for the V.1 normal-traffic middleware.
 	// Late install (post-ipExtractor construction) but
@@ -1391,6 +1400,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config) (retEr
 		cfg.Dev, logger,
 	)
 	apiHandler.SetAdminListen(cfg.AdminPort)
+	apiHandler.SetAdminAllowlist(adminAllowlist)
 	if cfg.UIOrigin != "" {
 		apiHandler.SetUIOrigin(cfg.UIOrigin)
 		logger.Info("OIDC callback redirects will target SPA origin", "ui_origin", cfg.UIOrigin)

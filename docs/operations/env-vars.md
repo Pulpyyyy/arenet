@@ -230,6 +230,49 @@ defaults; you'll typically touch 2–3 on a real install.
 - **Source**: `cmd/arenet/main.go:490`, parser at
   `internal/auth/ipextract.go:46`.
 
+### `ARENET_ADMIN_ALLOWED_CIDRS`
+
+- **Purpose**: which client IPs may reach the admin interface
+  (UI, REST API, WebSockets). Anything else gets a `403` and a
+  `request refused, source not in ARENET_ADMIN_ALLOWED_CIDRS`
+  warning in the logs.
+- **Default**: empty, which means **private networks only**:
+  loopback (`127.0.0.0/8`, `::1/128`), RFC 1918 (`10.0.0.0/8`,
+  `172.16.0.0/12`, `192.168.0.0/16`), Tailscale / CGNAT
+  (`100.64.0.0/10`), IPv4 link-local (`169.254.0.0/16`), IPv6
+  ULA (`fc00::/7`) and link-local (`fe80::/10`). It blocks an
+  admin reached from the Internet (forgotten port forward, VPS)
+  without changing anything for a homelab, but it does NOT tell
+  one LAN device from another, nor the Docker host from the other
+  containers of a Docker network — they are all private.
+- **Format**: comma-separated CIDRs and/or bare IPs (a bare IP is
+  that single address). An explicit list **replaces** the default
+  — loopback included, so add `127.0.0.1` if you use an SSH
+  tunnel. `0.0.0.0/0,::/0` opens the admin to every source.
+- **Example**: `ARENET_ADMIN_ALLOWED_CIDRS=192.168.1.50,127.0.0.1`
+  (one workstation + SSH tunnel).
+- **Notes**: a malformed entry causes Arenet to **fail-fast at
+  boot**. The effective list is logged at startup (`admin: source
+  allowlist`). `/healthz` is exempt so the container healthcheck
+  keeps working under a narrow list.
+  The check judges the client IP as resolved with
+  `ARENET_TRUSTED_PROXIES`: behind an Arenet route it is the real
+  client (Caddy overwrites `X-Forwarded-For` from untrusted
+  clients — `reverseproxy.go:943-953` in Caddy v2.11.4), but
+  **every CIDR in `ARENET_TRUSTED_PROXIES` can pick the IP the
+  allowlist sees**. Trusting a whole Docker network lets every
+  container on it through.
+  In **Docker bridge** mode, the host typically reaches a port
+  published on `127.0.0.1` through `docker-proxy`, so it arrives
+  from the bridge gateway (e.g. `172.18.0.1`), not from
+  `127.0.0.1`. **Rootless Docker** and Docker Desktop typically
+  hide the real client address behind their port forwarder: there
+  the allowlist cannot tell clients apart. Rather than guess, read
+  the `client_ip` in the refusal warning — it is exactly the
+  address the allowlist judged.
+- **Source**: `cmd/arenet/main.go`, parser and middleware at
+  `internal/auth/source_allowlist.go`.
+
 ### `ARENET_HIBP_DISABLED`
 
 - **Purpose**: disables the HaveIBeenPwned k-anonymity

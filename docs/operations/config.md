@@ -47,6 +47,7 @@ above, but they are NOT exposed in the TOML file or as
 | CrowdSec LAPI URL | `ARENET_CROWDSEC_API_URL` |
 | CrowdSec API key | `ARENET_CROWDSEC_API_KEY` |
 | Trusted reverse-proxies (CIDR) | `ARENET_TRUSTED_PROXIES` |
+| Admin source allowlist (CIDR) | `ARENET_ADMIN_ALLOWED_CIDRS` |
 | Data plane HTTP override | `ARENET_HTTP_PORT` |
 | Data plane HTTPS override | `ARENET_HTTPS_PORT` |
 | HIBP password check | `ARENET_HIBP_DISABLED` |

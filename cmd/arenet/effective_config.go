@@ -52,6 +52,7 @@ func effectiveConfigLogAttrs(
 		"update_interval", updateInterval,
 		"acme_email", setUnset("ARENET_ACME_EMAIL"),
 		"trusted_proxies", setUnset("ARENET_TRUSTED_PROXIES"),
+		"admin_allowed_cidrs", setUnset("ARENET_ADMIN_ALLOWED_CIDRS"),
 		"crowdsec_api_url", setUnset("ARENET_CROWDSEC_API_URL"),
 		"crowdsec_api_key", setUnset("ARENET_CROWDSEC_API_KEY"),
 		"geoip_mmdb", setUnset("ARENET_GEOIP_MMDB"),
