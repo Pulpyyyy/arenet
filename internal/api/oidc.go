@@ -589,7 +589,9 @@ func (h *Handler) oidcStatus(w http.ResponseWriter, r *http.Request) {
 // oidcInitiateLogin (GET /api/v1/auth/oidc/login) starts the
 // OIDC dance: generates a per-request state + nonce, sets them
 // in short-TTL cookies, and 302s to the IdP's authorization
-// endpoint with the matching parameters.
+// endpoint with the matching parameters. An optional ?next= (a
+// same-origin path, see safeNextPath) is kept in a third flow
+// cookie for the callback's final redirect.
 //
 // SECURITY-CRITICAL: state + nonce MUST be cryptographically
 // random per request. The state is the CSRF defence (the
@@ -640,6 +642,9 @@ func (h *Handler) oidcInitiateLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	setOIDCFlowCookie(w, r, oidcStateCookie, state)
 	setOIDCFlowCookie(w, r, oidcNonceCookie, nonce)
+	// The page to come back to (?next=, optional), kept beside the
+	// state; never sent to the IdP.
+	setOIDCNextCookie(w, r, r.URL.Query().Get("next"))
 
 	authURL := oauthCfg.AuthCodeURL(state, oidc.Nonce(nonce))
 	http.Redirect(w, r, authURL, http.StatusFound)
@@ -660,7 +665,8 @@ func (h *Handler) oidcInitiateLogin(w http.ResponseWriter, r *http.Request) {
 //     Role: viewer per §1.3 #12).
 //  7. Issues an arenet_session cookie (same shape as local
 //     login).
-//  8. Redirects to /routes.
+//  8. Redirects to the page asked for at login (?next=, kept in
+//     the arenet_oidc_next cookie, see oidc_next.go), else /routes.
 //
 // No-auth endpoint by design. The break-glass invariant is
 // preserved: this function never modifies the local-login
@@ -700,6 +706,8 @@ func (h *Handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	// Single-use: clear the state cookie now that we've consumed it.
 	clearOIDCFlowCookie(w, r, oidcStateCookie)
+	// Same for the landing page; only used if the sign-in succeeds.
+	next := takeOIDCNext(w, r)
 
 	// Nonce cookie — kept until ID-token verification reads it.
 	nonceCookie, err := r.Cookie(oidcNonceCookie)
@@ -895,7 +903,8 @@ func (h *Handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		Message:               "auth_method=oidc",
 	})
 
-	http.Redirect(w, r, h.uiURL("/routes"), http.StatusFound)
+	// The page asked for at login (validated twice), /routes otherwise.
+	http.Redirect(w, r, h.uiURL(next), http.StatusFound)
 }
 
 // matchAllowlist returns the matching entry + its index +

@@ -17,7 +17,7 @@
       countdown on the submit button; on success go to ?next=
       (same-origin paths only) or /routes.
     - handleSsoLogin: full navigation to /api/v1/auth/oidc/login
-      so the backend can 302 to the IdP.
+      (with the safe ?next=) so the backend can 302 to the IdP.
 
   Differences from the mock (deliberate, per the port brief):
 
@@ -71,6 +71,9 @@
 		// LockScreen: an SSO account has no local password to unlock with.
 		oidc_unlock_required: 'auth.reasons.oidcUnlockRequired'
 	};
+
+	// Starts the SSO flow; takes the page to come back to as ?next=.
+	const OIDC_LOGIN_PATH = '/api/v1/auth/oidc/login';
 
 	const MS_PER_SECOND = 1000;
 	const COOLDOWN_TICK_MS = 1000;
@@ -176,8 +179,9 @@
 	function handleSsoLogin(): void {
 		// Full navigation (NOT a fetch) — the backend 302s to the
 		// IdP, which 302s back to /api/v1/auth/oidc/callback, which
-		// sets the session cookie and 302s to /routes.
-		window.location.href = '/api/v1/auth/oidc/login';
+		// sets the session cookie and 302s to ?next= (kept by the
+		// backend, same rules as safeNext) or /routes.
+		window.location.href = withNext(OIDC_LOGIN_PATH, page.url.searchParams.get('next'));
 	}
 
 	function togglePassword(): void {

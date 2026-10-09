@@ -249,6 +249,9 @@ func (c *callbackEnv) fire(t *testing.T, claims map[string]any, opts ...fireOpt)
 	if fo.attachNonceCookie {
 		req.AddCookie(&http.Cookie{Name: oidcNonceCookie, Value: fo.cookieNonce})
 	}
+	if fo.nextCookie != "" {
+		req.AddCookie(&http.Cookie{Name: oidcNextCookie, Value: fo.nextCookie})
+	}
 	rec := httptest.NewRecorder()
 	c.env.router.ServeHTTP(rec, req)
 	return rec
@@ -261,6 +264,7 @@ type fireOpts struct {
 	attachStateCookie bool
 	attachNonceCookie bool
 	token             string // when set, used verbatim (bypasses claim-signing)
+	nextCookie        string // when set, sent as the arenet_oidc_next cookie
 }
 
 func fireDefaults(c *callbackEnv) fireOpts {

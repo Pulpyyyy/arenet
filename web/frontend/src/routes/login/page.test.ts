@@ -5,6 +5,7 @@
 // Login page. Pins:
 //   - a fresh install (setup/status available) goes to /setup, ?next= kept
 //   - a successful sign-in lands on ?next= when it is a same-origin path
+//   - the SSO button forwards a safe ?next= to the SSO start, drops others
 //   - ?reason= maps known codes to an information banner, ignores others
 //   - a 429 disables the submit button with a Retry-After countdown and
 //     a translated message instead of the raw backend one
@@ -127,6 +128,71 @@ describe('/login — where sign-in lands', () => {
 			const { container, getByTestId } = render(Page);
 			await signIn(container, getByTestId('login-form'));
 			await waitFor(() => expect(gotoMock).toHaveBeenCalledWith('/routes'));
+		}
+	);
+});
+
+describe('/login — SSO keeps ?next=', () => {
+	// The SSO button navigates with window.location.href; jsdom cannot
+	// navigate, so location is swapped for a recorder (same approach as
+	// BackupSection.test.ts) and restored afterwards.
+	const realLocation = window.location;
+	let assignedHref = '';
+
+	beforeEach(() => {
+		assignedHref = '';
+		authApiMock.oidcStatus.mockResolvedValue({ enabled: true });
+		Object.defineProperty(window, 'location', {
+			configurable: true,
+			writable: true,
+			value: {
+				set href(v: string) {
+					assignedHref = v;
+				},
+				get href() {
+					return assignedHref;
+				}
+			}
+		});
+	});
+
+	afterEach(() => {
+		Object.defineProperty(window, 'location', {
+			configurable: true,
+			writable: true,
+			value: realLocation
+		});
+	});
+
+	async function clickSso(container: HTMLElement): Promise<void> {
+		const button = await waitFor(() => {
+			const b = container.querySelector<HTMLButtonElement>('button.login-sso');
+			if (!b) throw new Error('SSO button not rendered');
+			return b;
+		});
+		await fireEvent.click(button);
+	}
+
+	it('carries a same-origin ?next= to the SSO start, encoded', async () => {
+		at('/login?next=%2Fcerts%3Ftab%3Dacme');
+		const { container } = render(Page);
+		await clickSso(container);
+		expect(assignedHref).toBe('/api/v1/auth/oidc/login?next=%2Fcerts%3Ftab%3Dacme');
+	});
+
+	it('starts SSO without ?next= when there is none', async () => {
+		const { container } = render(Page);
+		await clickSso(container);
+		expect(assignedHref).toBe('/api/v1/auth/oidc/login');
+	});
+
+	it.each(['//evil.example', 'https://evil.example/', '/\\evil.example', '/login'])(
+		'does not forward ?next=%s',
+		async (next) => {
+			at(`/login?next=${encodeURIComponent(next)}`);
+			const { container } = render(Page);
+			await clickSso(container);
+			expect(assignedHref).toBe('/api/v1/auth/oidc/login');
 		}
 	);
 });
