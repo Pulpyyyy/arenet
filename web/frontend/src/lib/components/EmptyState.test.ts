@@ -38,6 +38,25 @@ describe('EmptyState', () => {
 		expect(onAction).toHaveBeenCalledTimes(1);
 	});
 
+	it('offers a second way out beside the first', async () => {
+		const onAction = vi.fn();
+		const onSecondaryAction = vi.fn();
+		render(EmptyState, {
+			props: {
+				title: 'No routes yet',
+				actionLabel: 'Add a route',
+				onAction,
+				secondaryActionLabel: 'Import a Caddyfile',
+				onSecondaryAction
+			}
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Import a Caddyfile' }));
+		expect(onSecondaryAction).toHaveBeenCalledTimes(1);
+		expect(onAction).not.toHaveBeenCalled();
+		await fireEvent.click(screen.getByRole('button', { name: 'Add a route' }));
+		expect(onAction).toHaveBeenCalledTimes(1);
+	});
+
 	it('renders no action when only a label is given', () => {
 		render(EmptyState, { props: { title: 'No match', actionLabel: 'Clear' } });
 		expect(screen.queryByText('Clear')).toBeNull();

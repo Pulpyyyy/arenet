@@ -86,6 +86,7 @@
 	import Input from '$lib/components/Input.svelte';
 	import Checkbox from '$lib/components/Checkbox.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import EmptyState from '$lib/components/EmptyState.svelte';
 	import RouteStateControl from '$lib/components/RouteStateControl.svelte';
 	import IPFilterFields from '$lib/components/routes/IPFilterFields.svelte';
 	import PathRulesSection from '$lib/components/routes/PathRulesSection.svelte';
@@ -392,6 +393,15 @@
 	// NOT one of these: it has its own field, and the server refuses it
 	// here so there is one place to look for it.
 	let healthCheckHeaderRows = $state<{ name: string; value: string }[]>([]);
+
+	// The check's tuning — passes, fails, expected body, extra headers —
+	// sits behind an "Advanced" disclosure: most checks need a URI and
+	// nothing else. It opens by itself on a route that already uses one
+	// of them (an expected body or a header; passes and fails always
+	// carry the server's defaults, so they say nothing), and
+	// revealFirstError opens it, through data-invalid, when one of its
+	// fields is refused.
+	let hcAdvancedOpen = $state(false);
 
 	// v2.56 — run the check before saving it.
 	//
@@ -800,11 +810,10 @@
 		disablingRoute = true;
 		try {
 			await disableRoute(r.id);
-			// No dedicated "toasts.disabled" i18n key exists (out of
-			// this task's key set); the confirm dialog's own action
-			// label already told the operator what just happened, so
-			// reuse the disabled badge label for the toast text.
-			pushToast(t('routes.disabled.badge'), 'success');
+			// The toast reused the disabled badge's label, a bare
+			// "Disabled" that named no route: two changes in a row
+			// left two identical toasts. It says which host now.
+			pushToast(t('routes.toasts.nowDisabled', { host: r.host }), 'success');
 			disableTarget = null;
 			await loadRoutes();
 		} catch (err) {
@@ -852,7 +861,7 @@
 	async function handleEnableRoute(r: Route) {
 		try {
 			const res = await enableRoute(r.id);
-			pushToast(t('routes.enable.action'), 'success');
+			pushToast(t('routes.toasts.nowActive', { host: r.host }), 'success');
 			reportRouteCheck(res.check);
 			await loadRoutes();
 		} catch (err) {
@@ -896,7 +905,7 @@
 	async function handleEnterMaintenance(r: Route) {
 		try {
 			await enterMaintenance(r.id);
-			pushToast(t('routes.state.maintenance'), 'success');
+			pushToast(t('routes.toasts.nowMaintenance', { host: r.host }), 'success');
 			await loadRoutes();
 		} catch (err) {
 			const msg = err instanceof ApiError ? err.message : String(err);
@@ -907,7 +916,7 @@
 	async function handleExitMaintenance(r: Route) {
 		try {
 			await exitMaintenance(r.id);
-			pushToast(t('routes.state.active'), 'success');
+			pushToast(t('routes.toasts.nowActive', { host: r.host }), 'success');
 			await loadRoutes();
 		} catch (err) {
 			const msg = err instanceof ApiError ? err.message : String(err);
@@ -1021,6 +1030,10 @@
 	// RouteSection's `invalid`); a refused SecLang counts for the WAF.
 	const errorSections = $derived(invalidSections(errors));
 	const wafSectionInvalid = $derived(errorSections.has('waf') || secLangSaveErrors.length > 0);
+	// The health check's Advanced disclosure holds four refusable fields.
+	const hcAdvancedInvalid = $derived(
+		['passes', 'fails', 'expectBody', 'headers'].some((f) => !!errors[`healthCheck.${f}`])
+	);
 
 	// After a refused save, bring the first error into view. Errors sat
 	// at the top of a long panel, or inside a closed section, while Save
@@ -1559,6 +1572,7 @@
 		basicAuthPasswordSet = false;
 		healthCheckTouched = false;
 		healthCheckHeaderRows = [];
+		hcAdvancedOpen = false;
 		requestHeaderRows = [];
 		responseHeaderRows = [];
 		// Step X Option (c) — clear the exclude-rules textarea
@@ -1889,6 +1903,7 @@
 			}
 		};
 		healthCheckHeaderRows = headerRowsFrom(r.healthCheck.headers);
+		hcAdvancedOpen = (r.healthCheck.expectBody ?? '') !== '' || healthCheckHeaderRows.length > 0;
 		basicAuthPasswordSet = r.basicAuth?.passwordSet ?? false;
 		// Step X Option (c) — seed the textarea string view from
 		// the loaded canonical list so the operator sees what's
@@ -3700,34 +3715,106 @@
 	//     consistent with the Topology C13 gate.)
 	//   - 'alerts'  → routes in {degraded, down}. Unknown is also
 	//     excluded from alerts: we don't have a confirmed problem.
-	const filteredRoutes = $derived.by(() => {
-		const q = listFilter.trim().toLowerCase();
-		let pool = routes;
-		if (listTab === 'healthy') {
-			pool = pool.filter((r) => r.aggregateStatus === 'healthy');
-		} else if (listTab === 'alerts') {
-			pool = pool.filter(
-				(r) => r.aggregateStatus === 'degraded' || r.aggregateStatus === 'down',
-			);
+	function inTab(r: Route, tab: ListTab): boolean {
+		if (tab === 'healthy') return r.aggregateStatus === 'healthy';
+		if (tab === 'alerts') return r.aggregateStatus === 'degraded' || r.aggregateStatus === 'down';
+		return true;
+	}
+
+	function matchesQuery(r: Route, q: string): boolean {
+		if (!q) return true;
+		if (r.host.toLowerCase().includes(q)) return true;
+		for (const a of r.aliases ?? []) {
+			if (a.toLowerCase().includes(q)) return true;
 		}
-		if (!q) return pool;
-		return pool.filter((r) => {
-			if (r.host.toLowerCase().includes(q)) return true;
-			for (const a of r.aliases ?? []) {
-				if (a.toLowerCase().includes(q)) return true;
+		for (const u of r.upstreams ?? []) {
+			if (u.url.toLowerCase().includes(q)) return true;
+		}
+		// v2.59 — a redirecting route has no upstream, so until
+		// now the only thing matching it was its own host. Its
+		// target is the other half of "where does this name go",
+		// and it is what the Upstream column now displays.
+		const target = r.redirectConfig?.target;
+		if (target && target.toLowerCase().includes(q)) return true;
+		return false;
+	}
+
+	// The routes the search leaves, before the tab narrows them: what
+	// each tab's count is taken from, so "Alerts (2)" says what a
+	// click on it would show.
+	const searchedRoutes = $derived.by(() => {
+		const q = listFilter.trim().toLowerCase();
+		return routes.filter((r) => matchesQuery(r, q));
+	});
+
+	const tabCounts = $derived<Record<ListTab, number>>({
+		all: searchedRoutes.length,
+		healthy: searchedRoutes.filter((r) => inTab(r, 'healthy')).length,
+		alerts: searchedRoutes.filter((r) => inTab(r, 'alerts')).length
+	});
+
+	const LIST_TABS: ListTab[] = ['all', 'healthy', 'alerts'];
+	const LIST_TAB_LABEL_KEYS: Record<ListTab, string> = {
+		all: 'routes.list.tabAll',
+		healthy: 'routes.list.tabHealthy',
+		alerts: 'routes.list.tabAlerts'
+	};
+
+	const filteredRoutes = $derived(searchedRoutes.filter((r) => inTab(r, listTab)));
+
+	// Sorting. The list kept the server's order — creation order — so
+	// finding one host among forty meant reading them all. Host sorts
+	// alphabetically; State sorts by health, worst first (down,
+	// degraded, not yet known, not monitored, healthy, then the
+	// redirects that have no health at all), host breaking the ties.
+	// No sort key means the server's order, as before.
+	type SortKey = 'host' | 'state';
+	let sortKey = $state<SortKey | null>(null);
+	let sortDir = $state<'asc' | 'desc'>('asc');
+
+	const STATE_RANK: Record<string, number> = {
+		down: 0,
+		degraded: 1,
+		unknown: 2,
+		not_monitored: 3,
+		healthy: 4,
+		not_applicable: 5
+	};
+
+	function toggleSort(key: SortKey): void {
+		if (sortKey === key) {
+			sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+		} else {
+			sortKey = key;
+			sortDir = 'asc';
+		}
+	}
+
+	function ariaSort(key: SortKey): 'ascending' | 'descending' | 'none' {
+		if (sortKey !== key) return 'none';
+		return sortDir === 'asc' ? 'ascending' : 'descending';
+	}
+
+	const sortedRoutes = $derived.by(() => {
+		if (sortKey === null) return filteredRoutes;
+		const key = sortKey;
+		const dir = sortDir === 'asc' ? 1 : -1;
+		const byHost = (a: Route, b: Route) => a.host.localeCompare(b.host);
+		return [...filteredRoutes].sort((a, b) => {
+			if (key === 'state') {
+				const d =
+					(STATE_RANK[a.aggregateStatus] ?? STATE_RANK.unknown) -
+					(STATE_RANK[b.aggregateStatus] ?? STATE_RANK.unknown);
+				if (d !== 0) return d * dir;
 			}
-			for (const u of r.upstreams ?? []) {
-				if (u.url.toLowerCase().includes(q)) return true;
-			}
-			// v2.59 — a redirecting route has no upstream, so until
-			// now the only thing matching it was its own host. Its
-			// target is the other half of "where does this name go",
-			// and it is what the Upstream column now displays.
-			const target = r.redirectConfig?.target;
-			if (target && target.toLowerCase().includes(q)) return true;
-			return false;
+			return byHost(a, b) * dir;
 		});
 	});
+
+	function clearListFilter(): void {
+		listFilter = '';
+		listTab = 'all';
+	}
 
 	// Map the wire-level aggregate health to a Badge presentation
 	// (label + variant). The variant names map directly onto the
@@ -3849,12 +3936,19 @@
 	     route create flow drops directly into the split layout's
 	     right panel (operator who clicked "+ Add route" expects to
 	     see the form, not an empty-state encore). -->
-	<div class="mt-16 flex flex-col items-center text-center gap-4">
-		<div class="text-6xl text-muted">◉</div>
-		<p class="text-secondary">{language.current && t('routes.emptyState')}</p>
-		<Button onclick={() => guardUnsaved(openCreate)}
-			>{language.current && t('routes.emptyStateAddFirst')}</Button
-		>
+	<!-- The shared empty state, with both ways in: someone arriving
+	     from another proxy has a Caddyfile, not a blank form, and the
+	     import sat in the page header only. -->
+	<div class="mt-10">
+		<EmptyState
+			testid="routes-empty"
+			title={language.current && t('routes.emptyState')}
+			body={language.current && t('routes.emptyStateBody')}
+			actionLabel={language.current && t('routes.emptyStateAddFirst')}
+			onAction={() => guardUnsaved(openCreate)}
+			secondaryActionLabel={language.current && t('routes.emptyStateImport')}
+			onSecondaryAction={() => (importOpen = true)}
+		/>
 	</div>
 {:else}
 	<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6">
@@ -3898,50 +3992,78 @@
 				     route with no health (redirect: not_applicable)
 				     appears under All only, which is now the honest
 				     answer rather than a side effect of 'unknown'. -->
-				<div class="inline-flex gap-0.5 p-0.5 rounded-full bg-surface border border-border-default text-xs">
-					<button
-						type="button"
-						onclick={() => (listTab = 'all')}
-						class="px-3 py-1 rounded-full transition-colors"
-						class:bg-hover={listTab === 'all'}
-						class:text-primary={listTab === 'all'}
-						class:text-secondary={listTab !== 'all'}
-					>{language.current && t('routes.list.tabAll')}</button>
-					<button
-						type="button"
-						onclick={() => (listTab = 'healthy')}
-						class="px-3 py-1 rounded-full transition-colors"
-						class:bg-hover={listTab === 'healthy'}
-						class:text-primary={listTab === 'healthy'}
-						class:text-secondary={listTab !== 'healthy'}
-					>{language.current && t('routes.list.tabHealthy')}</button>
-					<button
-						type="button"
-						onclick={() => (listTab = 'alerts')}
-						class="px-3 py-1 rounded-full transition-colors"
-						class:bg-hover={listTab === 'alerts'}
-						class:text-primary={listTab === 'alerts'}
-						class:text-secondary={listTab !== 'alerts'}
-					>{language.current && t('routes.list.tabAlerts')}</button>
+				<!-- The active tab was shown by its tint alone, which a
+				     screen reader does not announce: aria-pressed says
+				     it. The count says what a click would show before
+				     the click. -->
+				<div
+					class="inline-flex gap-0.5 p-0.5 rounded-full bg-surface border border-border-default text-xs"
+					role="group"
+					aria-label={language.current && t('routes.list.tabsAriaLabel')}
+				>
+					{#each LIST_TABS as tab (tab)}
+						<button
+							type="button"
+							onclick={() => (listTab = tab)}
+							aria-pressed={listTab === tab}
+							data-testid="list-tab-{tab}"
+							class="px-3 py-1 rounded-full transition-colors"
+							class:bg-hover={listTab === tab}
+							class:text-primary={listTab === tab}
+							class:text-secondary={listTab !== tab}
+						>{language.current && t(LIST_TAB_LABEL_KEYS[tab])}
+							<span class="ml-1 tabular-nums text-muted" data-testid="list-tab-count-{tab}">{tabCounts[tab]}</span></button>
+					{/each}
 				</div>
 			</div>
 
 			{#if filteredRoutes.length === 0}
-				<div class="p-6 text-center text-sm text-secondary">
+				<div class="p-6 flex flex-col items-center gap-3 text-center text-sm text-secondary" data-testid="routes-no-match">
 					{language.current &&
 						(routes.length === 0
 							? t('routes.emptyState')
 							: t('routes.noMatchFilter'))}
+					<!-- A filter that matches nothing used to leave the
+					     operator to find what to undo: the search text, the
+					     tab, or both. One button undoes both. -->
+					{#if routes.length > 0}
+						<Button variant="secondary" size="sm" onclick={clearListFilter} data-testid="routes-clear-filter">
+							{language.current && t('routes.list.clearFilter')}
+						</Button>
+					{/if}
 				</div>
 			{:else}
 				<table class="w-full text-sm" bind:this={tableEl}>
 					<thead>
 						<tr class="text-left text-xs uppercase tracking-wider text-secondary border-b border-border-subtle">
-							<th class="px-4 py-3 font-medium">{language.current && t('routes.list.colHost')}</th>
+							<!-- Sortable: the button carries the action, the
+							     <th> carries aria-sort, as the ARIA table
+							     pattern has it. The arrow is decoration. -->
+							<th class="px-4 py-3 font-medium" aria-sort={ariaSort('host')}>
+								<button
+									type="button"
+									class="sort-btn"
+									onclick={() => toggleSort('host')}
+									data-testid="sort-host"
+								>
+									{language.current && t('routes.list.colHost')}
+									<span aria-hidden="true">{sortKey === 'host' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
+								</button>
+							</th>
 							<th class="px-4 py-3 font-medium">{language.current && t('routes.list.colUpstream')}</th>
 							<th class="px-4 py-3 font-medium">{language.current && t('routes.list.colTLS')}</th>
 							<th class="px-4 py-3 font-medium">{language.current && t('routes.list.colSecurity')}</th>
-							<th class="px-4 py-3 font-medium text-center">{language.current && t('routes.list.colState')}</th>
+							<th class="px-4 py-3 font-medium text-center" aria-sort={ariaSort('state')}>
+								<button
+									type="button"
+									class="sort-btn"
+									onclick={() => toggleSort('state')}
+									data-testid="sort-state"
+								>
+									{language.current && t('routes.list.colState')}
+									<span aria-hidden="true">{sortKey === 'state' ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}</span>
+								</button>
+							</th>
 							<!-- Task 9 — was sr-only (icon-only ghost button
 							     needed no visible header); now a visible
 							     column header since the cell holds the
@@ -3955,24 +4077,26 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each filteredRoutes as r (r.id)}
+						{#each sortedRoutes as r (r.id)}
 							{@const selected = editingId === r.id}
 							{@const statusBadge = aggregateToBadge(r.aggregateStatus)}
+							<!-- The row was role="button" with tabindex=0, around
+							     two links and the state radiogroup: a button
+							     holding other controls, which a screen reader
+							     flattens into one unusable name. The row is a
+							     plain row again; the host is the real button,
+							     and says whether its panel is open. The row
+							     click stays as a mouse convenience — the button
+							     is the keyboard way in, so the row needs no key
+							     handler of its own. -->
+							<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 							<tr
 								class="route-row border-b border-border-subtle last:border-b-0 cursor-pointer transition-colors hover:bg-hover"
 								class:route-row-selected={selected}
 								class:opacity-50={r.disabled}
 								data-testid={selected ? 'route-row-selected' : 'route-row'}
 								onclick={() => selectOrToggleRoute(r)}
-								onkeydown={(e) => {
-									if (e.key === 'Enter' || e.key === ' ') {
-										e.preventDefault();
-										selectOrToggleRoute(r);
-									}
-								}}
-								tabindex="0"
 								aria-current={selected ? 'true' : undefined}
-								role="button"
 							>
 								<td class="px-4 py-3 font-mono">
 									<!-- v2.17.1 Item C — the Maintenance /
@@ -3985,7 +4109,20 @@
 									     set via class:opacity-50={r.disabled}
 									     on the <tr>) remains as the secondary
 									     disabled cue. -->
-									{r.host}
+									<!-- stopPropagation: the row's own click
+									     handler would run the same toggle a
+									     second time and undo it. -->
+									<button
+										type="button"
+										class="host-btn"
+										aria-expanded={selected}
+										aria-controls={selected ? 'route-edit-panel' : undefined}
+										data-testid="route-host-button"
+										onclick={(e) => {
+											e.stopPropagation();
+											selectOrToggleRoute(r);
+										}}
+									>{r.host}</button>
 									{#if r.aliases && r.aliases.length > 0}
 										<span
 											class="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-sans text-secondary bg-elevated border border-border-subtle cursor-help"
@@ -4223,6 +4360,7 @@
 		     semantic for the already-selected row works without
 		     racing the outside listener. -->
 		<div
+			id="route-edit-panel"
 			bind:this={panelEl}
 			use:clickOutsideToClose
 			class="relative rounded-lg border border-border-subtle bg-elevated xl:sticky xl:top-[calc(var(--tb-height)+14px)] xl:max-h-[calc(100vh-var(--tb-height)-40px)] overflow-auto"
@@ -4644,9 +4782,16 @@
 												<Input
 													bind:value={formData.maintenanceConfig.bypassIps[i]}
 													placeholder="10.0.0.5 or 192.168.1.0/24"
+													aria-label={language.current && t('routes.form.repeater.bypassIp', { n: i + 1 })}
 												/>
 											</div>
-											<Button variant="ghost" size="sm" onclick={() => removeBypassIp(i)} type="button">×</Button>
+											<Button
+												variant="ghost"
+												size="sm"
+												onclick={() => removeBypassIp(i)}
+												type="button"
+												aria-label={language.current && t('routes.form.repeater.bypassIpRemove', { n: i + 1 })}
+											>×</Button>
 										</div>
 									{/each}
 								</div>
@@ -4674,9 +4819,19 @@
 								{#each formData.aliases as _, i (i)}
 									<div class="flex items-center gap-2">
 										<div class="flex-1">
-											<Input bind:value={formData.aliases[i]} placeholder={language.current && t('routes.form.aliasesPlaceholder')} />
+											<Input
+												bind:value={formData.aliases[i]}
+												placeholder={language.current && t('routes.form.aliasesPlaceholder')}
+												aria-label={language.current && t('routes.form.repeater.alias', { n: i + 1 })}
+											/>
 										</div>
-										<Button variant="ghost" size="sm" onclick={() => removeAlias(i)} type="button">×</Button>
+										<Button
+											variant="ghost"
+											size="sm"
+											onclick={() => removeAlias(i)}
+											type="button"
+											aria-label={language.current && t('routes.form.repeater.aliasRemove', { n: i + 1 })}
+										>×</Button>
 									</div>
 								{/each}
 							</div>
@@ -4714,6 +4869,7 @@
 										<Input
 											bind:value={formData.upstreams[i].url}
 											placeholder={language.current && t('routes.form.upstreamsPlaceholder')}
+											aria-label={language.current && t('routes.form.repeater.upstreamUrl', { n: i + 1 })}
 											error={errors[`upstreams[${i}].url`] ?? undefined}
 										/>
 										<!--
@@ -4813,6 +4969,7 @@
 										disabled={formData.upstreams[i].url.trim() === '' ||
 											!!(upstreamTests[i] && (upstreamTests[i] as { running?: boolean }).running)}
 										data-testid="test-upstream-{i}"
+										aria-label={language.current && t('routes.form.repeater.upstreamTest', { n: i + 1 })}
 									>
 										{language.current && t('routes.form.upstreamTestButton')}
 									</Button>
@@ -4823,6 +4980,7 @@
 												min="1"
 												bind:value={formData.upstreams[i].weight}
 												placeholder={language.current && t('routes.form.upstreamsWeightPlaceholder')}
+												aria-label={language.current && t('routes.form.repeater.upstreamWeight', { n: i + 1 })}
 												class="bg-surface border rounded-md px-3 py-2 text-sm text-primary focus:outline-none focus:ring-2 focus:ring-cyan focus:shadow-glow-cyan transition-shadow"
 												class:border-down={!!errors[`upstreams[${i}].weight`]}
 												class:border-border-default={!errors[`upstreams[${i}].weight`]}
@@ -4837,6 +4995,7 @@
 										size="sm"
 										onclick={() => removeUpstream(i)}
 										disabled={formData.upstreams.length <= 1}
+										aria-label={language.current && t('routes.form.repeater.upstreamRemove', { n: i + 1 })}
 										type="button">×</Button
 									>
 								</div>
@@ -5843,7 +6002,7 @@
 						testid="section-health-check"
 					>
 						<!-- Step J.3: active health-check sub-form. Gated by the
-						     enabled checkbox. Sub-fields disabled when off; their
+						     enabled checkbox. Sub-fields render only when on; their
 						     state is PRESERVED across the toggle so a user who
 						     flips off-and-on keeps their typed values.
 						     Any interaction marks healthCheckTouched so submit ships
@@ -5904,19 +6063,24 @@
 									testid="health-check-toggle"
 									labelTestid="health-check-toggle-label"
 								/>
+								<!-- The fields below used to stay on screen, greyed out,
+								     while the check was off: ten controls that did
+								     nothing. They render once the check is on; their
+								     values live in formData, so switching off and on
+								     keeps what was typed. -->
+								{#if formData.healthCheck.enabled}
 								<div>
 									<label
 										for="hc-uri"
 										class="text-sm font-medium text-secondary block mb-1"
 									>
-										URI <span class="text-down" aria-hidden="true">*</span>
+										{language.current && t('routes.form.healthCheckURILabel')} <span class="text-down" aria-hidden="true">*</span>
 									</label>
 									<input
 										id="hc-uri"
 										type="text"
 										bind:value={formData.healthCheck.uri}
 										placeholder={language.current && t('routes.form.healthCheckURIPlaceholder')}
-										disabled={!formData.healthCheck.enabled}
 										aria-required="true"
 										oninput={markHealthCheckTouched}
 										class="w-full bg-surface border rounded-md px-3 py-2 text-sm text-primary disabled:opacity-50 disabled:cursor-not-allowed"
@@ -5932,12 +6096,11 @@
 										for="hc-method"
 										class="text-sm font-medium text-secondary block mb-1"
 									>
-										Method
+										{language.current && t('routes.form.healthCheckMethodLabel')}
 									</label>
 									<select
 										id="hc-method"
 										bind:value={formData.healthCheck.method}
-										disabled={!formData.healthCheck.enabled}
 										onchange={markHealthCheckTouched}
 										class="w-full bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary disabled:opacity-50 disabled:cursor-not-allowed"
 									>
@@ -5953,7 +6116,6 @@
 										label={language.current && t('routes.form.healthCheckIntervalLabel')}
 										bind:value={formData.healthCheck.interval}
 										placeholder={HEALTH_CHECK_DEFAULTS.interval}
-										disabled={!formData.healthCheck.enabled}
 										oninput={markHealthCheckTouched}
 										error={errors['healthCheck.interval'] ?? undefined}
 									/>
@@ -5961,54 +6123,9 @@
 										label={language.current && t('routes.form.healthCheckTimeoutLabel')}
 										bind:value={formData.healthCheck.timeout}
 										placeholder={HEALTH_CHECK_DEFAULTS.timeout}
-										disabled={!formData.healthCheck.enabled}
 										oninput={markHealthCheckTouched}
 										error={errors['healthCheck.timeout'] ?? undefined}
 									/>
-								</div>
-								<div class="grid grid-cols-2 gap-3">
-									<div class="flex flex-col gap-1.5">
-										<label
-											for="hc-passes"
-											class="text-sm font-medium text-secondary">Passes</label
-										>
-										<input
-											id="hc-passes"
-											type="number"
-											min="1"
-											bind:value={formData.healthCheck.passes}
-											placeholder={String(HEALTH_CHECK_DEFAULTS.passes)}
-											disabled={!formData.healthCheck.enabled}
-											oninput={markHealthCheckTouched}
-											class="bg-surface border rounded-md px-3 py-2 text-sm text-primary disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-cyan focus:shadow-glow-cyan transition-shadow"
-											class:border-down={!!errors['healthCheck.passes']}
-											class:border-border-default={!errors['healthCheck.passes']}
-										/>
-										{#if errors['healthCheck.passes']}
-											<p data-field-error class="text-xs text-down">{errors['healthCheck.passes']}</p>
-										{/if}
-									</div>
-									<div class="flex flex-col gap-1.5">
-										<label
-											for="hc-fails"
-											class="text-sm font-medium text-secondary">Fails</label
-										>
-										<input
-											id="hc-fails"
-											type="number"
-											min="1"
-											bind:value={formData.healthCheck.fails}
-											placeholder={String(HEALTH_CHECK_DEFAULTS.fails)}
-											disabled={!formData.healthCheck.enabled}
-											oninput={markHealthCheckTouched}
-											class="bg-surface border rounded-md px-3 py-2 text-sm text-primary disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-cyan focus:shadow-glow-cyan transition-shadow"
-											class:border-down={!!errors['healthCheck.fails']}
-											class:border-border-default={!errors['healthCheck.fails']}
-										/>
-										{#if errors['healthCheck.fails']}
-											<p data-field-error class="text-xs text-down">{errors['healthCheck.fails']}</p>
-										{/if}
-									</div>
 								</div>
 								<div class="flex flex-col gap-1.5">
 									<label
@@ -6022,7 +6139,6 @@
 										max="599"
 										bind:value={formData.healthCheck.expectStatus}
 										placeholder={language.current && t('routes.form.healthCheckExpectStatusPlaceholder')}
-										disabled={!formData.healthCheck.enabled}
 										oninput={markHealthCheckTouched}
 										class="bg-surface border rounded-md px-3 py-2 text-sm text-primary disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-cyan focus:shadow-glow-cyan transition-shadow"
 										class:border-down={!!errors['healthCheck.expectStatus']}
@@ -6049,7 +6165,6 @@
 										type="text"
 										bind:value={formData.healthCheck.hostHeader}
 										placeholder={formData.host || 'app.example.com'}
-										disabled={!formData.healthCheck.enabled}
 										oninput={markHealthCheckTouched}
 										data-testid="hc-host-header"
 										class="bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary disabled:opacity-50 disabled:cursor-not-allowed"
@@ -6058,54 +6173,111 @@
 										{language.current && t('routes.form.healthCheckHostHeaderHint')}
 									</p>
 								</div>
-								<div class="flex flex-col gap-1.5">
-									<span class="text-sm font-medium text-secondary">
-										{language.current && t('routes.form.healthCheckHeadersLabel')}
-									</span>
-									{#each healthCheckHeaderRows as row, i (i)}
-										<div class="flex gap-2 items-start">
-											<input
-												type="text"
-												bind:value={row.name}
-												placeholder="Authorization"
-												disabled={!formData.healthCheck.enabled}
-												oninput={markHealthCheckTouched}
-												aria-label={language.current && t('routes.form.healthCheckHeaderNameLabel')}
-												data-testid="hc-header-name"
-												class="flex-1 min-w-0 bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono disabled:opacity-50"
-											/>
-											<input
-												type="text"
-												bind:value={row.value}
-												placeholder="Bearer …"
-												disabled={!formData.healthCheck.enabled}
-												oninput={markHealthCheckTouched}
-												aria-label={language.current && t('routes.form.healthCheckHeaderValueLabel')}
-												data-testid="hc-header-value"
-												class="flex-1 min-w-0 bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono disabled:opacity-50"
-											/>
+								<details
+									class="rounded-md border border-border-subtle"
+									bind:open={hcAdvancedOpen}
+									data-invalid={hcAdvancedInvalid ? '' : undefined}
+									data-testid="health-check-advanced"
+								>
+									<summary class="px-3 py-2 text-sm text-secondary cursor-pointer select-none">
+										{language.current && t('routes.form.healthCheckAdvanced')}
+									</summary>
+									<div class="p-3 flex flex-col gap-3 border-t border-border-subtle">
+										<div class="grid grid-cols-2 gap-3">
+											<div class="flex flex-col gap-1.5">
+												<label
+													for="hc-passes"
+													class="text-sm font-medium text-secondary">{language.current && t('routes.form.healthCheckPassesLabel')}</label
+												>
+												<input
+													id="hc-passes"
+													type="number"
+													min="1"
+													bind:value={formData.healthCheck.passes}
+													placeholder={String(HEALTH_CHECK_DEFAULTS.passes)}
+													oninput={markHealthCheckTouched}
+													class="bg-surface border rounded-md px-3 py-2 text-sm text-primary disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-cyan focus:shadow-glow-cyan transition-shadow"
+													class:border-down={!!errors['healthCheck.passes']}
+													class:border-border-default={!errors['healthCheck.passes']}
+												/>
+												{#if errors['healthCheck.passes']}
+													<p data-field-error class="text-xs text-down">{errors['healthCheck.passes']}</p>
+												{/if}
+											</div>
+											<div class="flex flex-col gap-1.5">
+												<label
+													for="hc-fails"
+													class="text-sm font-medium text-secondary">{language.current && t('routes.form.healthCheckFailsLabel')}</label
+												>
+												<input
+													id="hc-fails"
+													type="number"
+													min="1"
+													bind:value={formData.healthCheck.fails}
+													placeholder={String(HEALTH_CHECK_DEFAULTS.fails)}
+													oninput={markHealthCheckTouched}
+													class="bg-surface border rounded-md px-3 py-2 text-sm text-primary disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-cyan focus:shadow-glow-cyan transition-shadow"
+													class:border-down={!!errors['healthCheck.fails']}
+													class:border-border-default={!errors['healthCheck.fails']}
+												/>
+												{#if errors['healthCheck.fails']}
+													<p data-field-error class="text-xs text-down">{errors['healthCheck.fails']}</p>
+												{/if}
+											</div>
+										</div>
+										<Input
+											label={language.current && t('routes.form.healthCheckExpectBodyLabel')}
+											bind:value={formData.healthCheck.expectBody}
+											oninput={markHealthCheckTouched}
+											error={errors['healthCheck.expectBody'] ?? undefined}
+										/>
+										<div class="flex flex-col gap-1.5">
+											<span class="text-sm font-medium text-secondary">
+												{language.current && t('routes.form.healthCheckHeadersLabel')}
+											</span>
+											{#each healthCheckHeaderRows as row, i (i)}
+												<div class="flex gap-2 items-start">
+													<input
+														type="text"
+														bind:value={row.name}
+														placeholder="Authorization"
+														oninput={markHealthCheckTouched}
+														aria-label={language.current && t('routes.form.repeater.probeHeaderName', { n: i + 1 })}
+														data-testid="hc-header-name"
+														class="flex-1 min-w-0 bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono disabled:opacity-50"
+													/>
+													<input
+														type="text"
+														bind:value={row.value}
+														placeholder="Bearer …"
+														oninput={markHealthCheckTouched}
+														aria-label={language.current && t('routes.form.repeater.probeHeaderValue', { n: i + 1 })}
+														data-testid="hc-header-value"
+														class="flex-1 min-w-0 bg-surface border border-border-default rounded-md px-3 py-2 text-sm text-primary font-mono disabled:opacity-50"
+													/>
+													<Button
+														variant="ghost"
+														size="sm"
+														onclick={() => removeHealthCheckHeader(i)}
+														aria-label={language.current && t('routes.form.repeater.probeHeaderRemove', { n: i + 1 })}
+													>
+														{#snippet children()}{language.current && t('routes.form.healthCheckHeaderRemove')}{/snippet}
+													</Button>
+												</div>
+											{/each}
+											{#if errors['healthCheck.headers']}
+												<p data-field-error class="text-xs text-down">{errors['healthCheck.headers']}</p>
+											{/if}
 											<Button
-												variant="ghost"
+												variant="secondary"
 												size="sm"
-												onclick={() => removeHealthCheckHeader(i)}
-												disabled={!formData.healthCheck.enabled}
+												onclick={addHealthCheckHeader}
 											>
-												{#snippet children()}{language.current && t('routes.form.healthCheckHeaderRemove')}{/snippet}
+												{#snippet children()}{language.current && t('routes.form.healthCheckHeaderAdd')}{/snippet}
 											</Button>
 										</div>
-									{/each}
-									{#if errors['healthCheck.headers']}
-										<p data-field-error class="text-xs text-down">{errors['healthCheck.headers']}</p>
-									{/if}
-									<Button
-										variant="secondary"
-										size="sm"
-										onclick={addHealthCheckHeader}
-										disabled={!formData.healthCheck.enabled}
-									>
-										{#snippet children()}{language.current && t('routes.form.healthCheckHeaderAdd')}{/snippet}
-									</Button>
-								</div>
+									</div>
+								</details>
 
 								<!-- v2.56 — run the check before saving it.
 								     Until now a misconfigured check surfaced only as
@@ -6118,7 +6290,7 @@
 											size="sm"
 											onclick={runHealthCheckProbe}
 											loading={hcProbeRunning}
-											disabled={!formData.healthCheck.enabled || hcProbeRunning}
+											disabled={hcProbeRunning}
 										>
 											{#snippet children()}{language.current && t('routes.form.healthCheckProbeButton')}{/snippet}
 										</Button>
@@ -6191,16 +6363,10 @@
 										</div>
 									{/each}
 								</div>
-								<Input
-									label={language.current && t('routes.form.healthCheckExpectBodyLabel')}
-									bind:value={formData.healthCheck.expectBody}
-									disabled={!formData.healthCheck.enabled}
-									oninput={markHealthCheckTouched}
-									error={errors['healthCheck.expectBody'] ?? undefined}
-								/>
 								<p class="text-xs text-muted">
 									{language.current && t('routes.form.healthCheckHelper')}
 								</p>
+								{/if}
 						</div>
 					</RouteSection>
 
@@ -6244,9 +6410,23 @@
 							{/if}
 							{#each requestHeaderRows as _, i (i)}
 								<div class="flex items-center gap-2">
-									<Input bind:value={requestHeaderRows[i][0]} placeholder={language.current && t('routes.form.headerNamePlaceholder')} />
-									<Input bind:value={requestHeaderRows[i][1]} placeholder={language.current && t('routes.form.headerValuePlaceholder')} />
-									<Button variant="ghost" size="sm" onclick={() => removeRequestHeader(i)} type="button">×</Button>
+									<Input
+										bind:value={requestHeaderRows[i][0]}
+										placeholder={language.current && t('routes.form.headerNamePlaceholder')}
+										aria-label={language.current && t('routes.form.repeater.requestHeaderName', { n: i + 1 })}
+									/>
+									<Input
+										bind:value={requestHeaderRows[i][1]}
+										placeholder={language.current && t('routes.form.headerValuePlaceholder')}
+										aria-label={language.current && t('routes.form.repeater.requestHeaderValue', { n: i + 1 })}
+									/>
+									<Button
+										variant="ghost"
+										size="sm"
+										onclick={() => removeRequestHeader(i)}
+										type="button"
+										aria-label={language.current && t('routes.form.repeater.requestHeaderRemove', { n: i + 1 })}
+									>×</Button>
 								</div>
 							{/each}
 							<div>
@@ -6275,9 +6455,23 @@
 							{/if}
 							{#each responseHeaderRows as _, i (i)}
 								<div class="flex items-center gap-2">
-									<Input bind:value={responseHeaderRows[i][0]} placeholder={language.current && t('routes.form.headerNamePlaceholder')} />
-									<Input bind:value={responseHeaderRows[i][1]} placeholder={language.current && t('routes.form.headerValuePlaceholder')} />
-									<Button variant="ghost" size="sm" onclick={() => removeResponseHeader(i)} type="button">×</Button>
+									<Input
+										bind:value={responseHeaderRows[i][0]}
+										placeholder={language.current && t('routes.form.headerNamePlaceholder')}
+										aria-label={language.current && t('routes.form.repeater.responseHeaderName', { n: i + 1 })}
+									/>
+									<Input
+										bind:value={responseHeaderRows[i][1]}
+										placeholder={language.current && t('routes.form.headerValuePlaceholder')}
+										aria-label={language.current && t('routes.form.repeater.responseHeaderValue', { n: i + 1 })}
+									/>
+									<Button
+										variant="ghost"
+										size="sm"
+										onclick={() => removeResponseHeader(i)}
+										type="button"
+										aria-label={language.current && t('routes.form.repeater.responseHeaderRemove', { n: i + 1 })}
+									>×</Button>
 								</div>
 							{/each}
 							<div>
@@ -6582,6 +6776,35 @@
 	.cell-pivot:focus-visible {
 		outline: 2px solid var(--accent);
 		outline-offset: 1px;
+	}
+
+	/* The host is the row's button and the column headers sort: both
+	   keep the look of the text they replace, and show their focus. */
+	.host-btn,
+	.sort-btn {
+		background: none;
+		border: 0;
+		padding: 0;
+		font: inherit;
+		color: inherit;
+		text-align: inherit;
+		text-transform: inherit;
+		letter-spacing: inherit;
+		cursor: pointer;
+		border-radius: var(--radius-sm);
+	}
+	.sort-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+	}
+	.sort-btn:hover {
+		color: var(--text-primary);
+	}
+	.host-btn:focus-visible,
+	.sort-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
 	}
 
 	.pivot-btn {

@@ -54,6 +54,19 @@
 		(preview?.candidates ?? []).filter((c) => c.importable && selected[c.host])
 	);
 
+	// A Caddyfile with thirty site blocks meant thirty clicks to take
+	// or leave them all. "All" ticks every importable block — a
+	// conflicting one is ticked too, and still skipped by the server
+	// unless its own "replace" box is ticked as well.
+	const importableCount = $derived((preview?.candidates ?? []).filter((c) => c.importable).length);
+
+	function selectAll(on: boolean): void {
+		const next: Record<string, boolean> = {};
+		for (const c of preview?.candidates ?? []) next[c.host] = on && c.importable;
+		selected = next;
+		if (!on) replace = {};
+	}
+
 	async function analyse(): Promise<void> {
 		if (text.trim() === '') return;
 		analysing = true;
@@ -154,14 +167,31 @@
 						{/each}
 					</ul>
 				{/if}
+				{#if importableCount > 1}
+					<div class="row" data-testid="import-select-bar">
+						<span class="sub">
+							{language.current && t('importCaddyfile.selectedCount', { count: chosen.length, total: importableCount })}
+						</span>
+						<Button variant="ghost" size="sm" type="button" onclick={() => selectAll(true)} data-testid="import-select-all">
+							{language.current && t('importCaddyfile.selectAll')}
+						</Button>
+						<Button variant="ghost" size="sm" type="button" onclick={() => selectAll(false)} data-testid="import-select-none">
+							{language.current && t('importCaddyfile.selectNone')}
+						</Button>
+					</div>
+				{/if}
 				<ul class="rows">
 					{#each preview.candidates as c (c.host)}
 						<li class="row-item" class:disabled={!c.importable} data-testid="import-candidate">
 							<label class="pick">
+								<!-- The box sat alone in its label, so a screen
+								     reader announced "checkbox, checked" with no
+								     word of which site block it takes. -->
 								<input
 									type="checkbox"
 									bind:checked={selected[c.host]}
 									disabled={!c.importable}
+									aria-label={language.current && t('importCaddyfile.pickLabel', { host: c.host })}
 									data-testid="import-pick-{c.host}"
 								/>
 							</label>

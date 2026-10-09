@@ -29,6 +29,11 @@
 		/** Link target. Takes precedence over onAction. */
 		actionHref?: string;
 		onAction?: () => void;
+		/** A second way out, shown beside the first in a quieter style
+		 *  (Routes: "Add a route" or "Import a Caddyfile"). Rendered only
+		 *  with both a label and a callback. */
+		secondaryActionLabel?: string;
+		onSecondaryAction?: () => void;
 		tone?: 'neutral' | 'filter' | 'warn';
 		testid?: string;
 		/** Extra content under the body (a second link, a hint). */
@@ -41,6 +46,8 @@
 		actionLabel = '',
 		actionHref = '',
 		onAction,
+		secondaryActionLabel = '',
+		onSecondaryAction,
 		tone = 'neutral',
 		testid,
 		children
@@ -62,12 +69,22 @@
 	{#if children}
 		<div class="extra">{@render children()}</div>
 	{/if}
-	{#if actionLabel}
-		{#if actionHref}
-			<a class="action" href={actionHref}>{actionLabel}</a>
-		{:else if onAction}
-			<Button onclick={onAction}>{actionLabel}</Button>
+	{#snippet primary()}
+		{#if actionLabel}
+			{#if actionHref}
+				<a class="action" href={actionHref}>{actionLabel}</a>
+			{:else if onAction}
+				<Button onclick={onAction}>{actionLabel}</Button>
+			{/if}
 		{/if}
+	{/snippet}
+	{#if secondaryActionLabel && onSecondaryAction}
+		<div class="actions">
+			{@render primary()}
+			<Button variant="secondary" onclick={onSecondaryAction}>{secondaryActionLabel}</Button>
+		</div>
+	{:else}
+		{@render primary()}
 	{/if}
 </div>
 
@@ -101,6 +118,13 @@
 		font-size: 13px;
 		line-height: 1.6;
 		color: var(--text-secondary);
+	}
+	.actions {
+		margin-top: 4px;
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 8px;
 	}
 	.action {
 		margin-top: 4px;

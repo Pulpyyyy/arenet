@@ -123,6 +123,36 @@ describe('ImportCaddyfileModal', () => {
 		expect(toastMock.pushToast.mock.calls[1][0]).toContain('already serves');
 	});
 
+	// The box sat alone in its label: "checkbox, checked", with no word
+	// of which site block it takes.
+	it('names each pick box after its host', async () => {
+		await analyse();
+		expect(screen.getByRole('checkbox', { name: 'Import app.example.com' })).toBe(
+			screen.getByTestId('import-pick-app.example.com')
+		);
+		expect(screen.getByRole('checkbox', { name: 'Import taken.example.com' })).toBeInTheDocument();
+		expect(screen.getByLabelText('Import static.example.com')).toBeDisabled();
+	});
+
+	it('selects every importable block, or none, in one click', async () => {
+		await analyse();
+		const pick = (host: string) => screen.getByTestId(`import-pick-${host}`) as HTMLInputElement;
+		expect(screen.getByTestId('import-select-bar').textContent).toContain('1 of 2 selected');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
+		expect(pick('app.example.com').checked).toBe(true);
+		expect(pick('taken.example.com').checked).toBe(true);
+		// A block that cannot be imported is never picked.
+		expect(pick('static.example.com').checked).toBe(false);
+		expect(screen.getByTestId('import-select-bar').textContent).toContain('2 of 2 selected');
+		expect(screen.getByTestId('import-run').textContent).toContain('2');
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Select none' }));
+		expect(pick('app.example.com').checked).toBe(false);
+		expect(pick('taken.example.com').checked).toBe(false);
+		expect((screen.getByTestId('import-run') as HTMLButtonElement).disabled).toBe(true);
+	});
+
 	it('shows the server error when the Caddyfile is invalid', async () => {
 		clientMock.previewCaddyfileImport.mockRejectedValue(new Error('this is not a valid Caddyfile'));
 		render(ImportCaddyfileModal, { props: { open: true, onClose: vi.fn() } });
