@@ -1481,3 +1481,57 @@ describe('/logs — Phase Z.5.3 SOURCE IP country enrichment', () => {
 		expect(toastMock.pushToast).not.toHaveBeenCalled();
 	});
 });
+
+// allSettled kept one failing source from taking the page down, but
+// nothing said a source had failed: its rows were simply missing,
+// and with every source down the page read "No event in this
+// window" — an outage that looked like a quiet system.
+describe('/logs — a source that does not answer is named', () => {
+	const rejectAll = () => {
+		for (const fn of [
+			securityMock.fetchEvents,
+			securityMock.fetchThrottleEvents,
+			securityMock.fetchAuthFailures,
+			securityMock.fetchCertEvents,
+			securityMock.fetchCountryBlockEvents,
+			securityMock.fetchRateLimitEvents
+		]) {
+			fn.mockRejectedValue(new Error('503'));
+		}
+	};
+
+	it('lists the failed sources and keeps the pill live', async () => {
+		securityMock.fetchCertEvents.mockRejectedValue(new Error('503'));
+		securityMock.fetchRateLimitEvents.mockRejectedValue(new Error('503'));
+		render(Page);
+
+		const banner = await screen.findByTestId('logs-sources-failed');
+		expect(banner).toHaveTextContent('2 of 6 sources did not answer: CERT, RATE-LIMIT');
+		expect(screen.getByTestId('logs-status')).toHaveTextContent('live');
+	});
+
+	it('does not call an outage "no event" when every source fails', async () => {
+		rejectAll();
+		render(Page);
+
+		expect(await screen.findByTestId('logs-unavailable')).toBeInTheDocument();
+		expect(screen.queryByTestId('logs-empty')).toBeNull();
+		expect(screen.getByTestId('logs-status')).toHaveTextContent('stale');
+		expect(screen.getByTestId('logs-sources-failed')).toHaveTextContent('No source answered');
+	});
+
+	it('retries from the unavailable state', async () => {
+		rejectAll();
+		render(Page);
+		await screen.findByTestId('logs-unavailable');
+
+		securityMock.fetchEvents.mockResolvedValue({ events: [] });
+		await userEvent.click(screen.getByText('Retry'));
+
+		expect(await screen.findByTestId('logs-empty')).toBeInTheDocument();
+		// One source answered: no longer stale, the five others named.
+		expect(screen.getByTestId('logs-status')).toHaveTextContent('live');
+		expect(screen.getByTestId('logs-sources-failed')).toHaveTextContent('5 of 6');
+	});
+});
+

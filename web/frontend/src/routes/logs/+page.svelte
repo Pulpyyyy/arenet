@@ -63,7 +63,7 @@
 	import { pushToast } from '$lib/stores/toast';
 	import { t } from '$lib/i18n';
 	import { language } from '$lib/stores/language.svelte';
-	import { sourceMeta } from '$lib/utils/sourceMeta';
+	import { sourceMeta, type ActivitySource } from '$lib/utils/sourceMeta';
 	import { levelMeta } from '$lib/utils/levelMeta';
 	import { formatSourceIP } from '$lib/utils/ipClass';
 	import ActivityHistogram from '$lib/components/ActivityHistogram.svelte';
@@ -117,10 +117,29 @@
 	}
 
 	const REFRESH_MS = 10_000;
+	// The sources load() reads, in the order of its fetches.
+	const LOG_SOURCES: readonly ActivitySource[] = [
+		'waf',
+		'throttle',
+		'auth',
+		'cert',
+		'country_block',
+		'rate_limit'
+	];
 
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 	let rows = $state<UnifiedRow[]>([]);
+	// Sources that failed on the last poll. allSettled keeps one
+	// failure from taking the page down, but nothing said which ones
+	// failed: their rows were simply missing, and with every source
+	// down the page read "No event in this window" — on a security
+	// log, an outage looked like a quiet system.
+	let failedSources = $state<ActivitySource[]>([]);
+	// Every source failed on the last poll: the rows on screen are
+	// the last good ones, and the pill stops saying "live".
+	let stale = $state(false);
+	let lastOkAt = $state<string | null>(null);
 	let search = $state('');
 	let levelFilter = $state<'all' | LevelTag>('all');
 	// Phase Z.5.2 — route + HTTP status code filters. Both
@@ -529,14 +548,21 @@
 			// (degraded endpoint, 5xx, missed wire-up) doesn't
 			// take down the page. Each fulfilled result is
 			// mapped into UnifiedRow shape and merged.
-			const [waf, throttle, auth, certs, countryBlock, rateLimit] = await Promise.allSettled([
+			const settled = await Promise.allSettled([
 				fetchEvents({ limit: 100 }),
 				fetchThrottleEvents({ limit: 100 }),
 				fetchAuthFailures('24h'),
 				fetchCertEvents({ limit: 100 }),
 				fetchCountryBlockEvents({ limit: 100 }),
 				fetchRateLimitEvents({ limit: 100 })
-			]);
+			] as const);
+			const [waf, throttle, auth, certs, countryBlock, rateLimit] = settled;
+			failedSources = LOG_SOURCES.filter((_, i) => settled[i].status === 'rejected');
+			stale = failedSources.length === LOG_SOURCES.length;
+			// Nothing answered: keep the last good rows rather than
+			// replacing them with an empty list that reads as silence.
+			if (stale) return;
+			lastOkAt = new Date().toISOString();
 
 			const merged: UnifiedRow[] = [];
 			if (waf.status === 'fulfilled') {
@@ -732,9 +758,16 @@
 			<button class:on={levelFilter === 'warn'} onclick={() => (levelFilter = 'warn')}>{language.current && t('logs.filterLevelWarn')}</button>
 			<button class:on={levelFilter === 'info'} onclick={() => (levelFilter = 'info')}>{language.current && t('logs.filterLevelInfo')}</button>
 		</div>
-		<span class="status-pill" class:paused>
+		<span
+			class="status-pill"
+			class:paused
+			class:stale={stale && !paused}
+			data-testid="logs-status"
+			title={language.current && stale && lastOkAt ? t('logs.statusStaleTitle', { time: fmtTime(lastOkAt).slice(0, 8) }) : undefined}
+		>
 			<span class="dot"></span>
-			{language.current && (paused ? t('logs.statusPaused') : t('logs.statusLive'))}
+			{language.current &&
+				(paused ? t('logs.statusPaused') : stale ? t('logs.statusStale') : t('logs.statusLive'))}
 		</span>
 	</div>
 </div>
@@ -746,6 +779,20 @@
   page height so the histogram has a real visual presence
   instead of the prior 80px slim band.
 -->
+{#if failedSources.length > 0}
+	<p class="sources-banner" role="status" data-testid="logs-sources-failed">
+		{language.current &&
+			(stale
+				? lastOkAt
+					? t('logs.sourcesAllFailedSince', { time: fmtTime(lastOkAt).slice(0, 8) })
+					: t('logs.sourcesAllFailed')
+				: t('logs.sourcesSomeFailed', {
+						count: failedSources.length,
+						total: LOG_SOURCES.length,
+						names: failedSources.map((s) => sourceMeta(s).label).join(', ')
+					}))}
+	</p>
+{/if}
 <div class="activity-area">
 <div class="card log-card">
 	<div class="log-header">
@@ -764,6 +811,15 @@
 		<div class="loading-wrap"><Spinner /></div>
 	{:else if loadError && rows.length === 0}
 		<div class="empty-row">{loadError}</div>
+	{:else if stale && rows.length === 0}
+		<!-- Not "no event": nothing could be read. -->
+		<EmptyState
+			testid="logs-unavailable"
+			title={language.current && t('logs.unavailableTitle')}
+			body={language.current && t('logs.unavailableBody')}
+			actionLabel={language.current && t('logs.unavailableRetry')}
+			onAction={() => void load()}
+		/>
 	{:else if filteredRows.length === 0}
 		<!-- v2.41 — was one italic line for two different situations.
 		     A filter that matched nothing offers a way back; a window
@@ -1021,6 +1077,20 @@
 		background: var(--surface-2);
 	}
 	.status-pill.paused .dot { box-shadow: none; }
+	.status-pill.stale {
+		color: var(--status-warn);
+		background: color-mix(in oklch, var(--status-warn) 14%, transparent);
+	}
+	.status-pill.stale .dot { box-shadow: none; }
+	.sources-banner {
+		margin: 0 0 12px;
+		padding: 8px 12px;
+		border-radius: 8px;
+		font-size: 13px;
+		color: var(--text-primary);
+		border: 1px solid color-mix(in oklch, var(--status-warn) 45%, transparent);
+		background: color-mix(in oklch, var(--status-warn) 10%, transparent);
+	}
 
 
 	.log-card { padding: 0; overflow: hidden; }
