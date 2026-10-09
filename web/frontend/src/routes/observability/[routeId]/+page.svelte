@@ -39,6 +39,7 @@ Viewer-accessible — relies on the API gate (AC #17).
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Card from '$lib/components/Card.svelte';
 	import Spinner from '$lib/components/Spinner.svelte';
+	import TimeRange from '$lib/components/TimeRange.svelte';
 	import { t } from '$lib/i18n';
 	import { bucketUnit } from '$lib/utils/bucket-unit';
 	import { language } from '$lib/stores/language.svelte';
@@ -252,16 +253,7 @@ Viewer-accessible — relies on the API gate (AC #17).
 {:else}
 	<!-- Window toggle -->
 	<div class="window-toggle">
-		<button
-			type="button"
-			class:active={window === '24h'}
-			onclick={() => switchWindow('24h')}>24h</button
-		>
-		<button
-			type="button"
-			class:active={window === '30d'}
-			onclick={() => switchWindow('30d')}>{tl('observability.window30d')}</button
-		>
+		<TimeRange value={window} options={['24h', '30d']} onChange={switchWindow} testIdPrefix="window" />
 		<!-- The numbers say something happened; the log says what. -->
 		<a class="logs-link" href="/logs?route={encodeURIComponent(routeId)}">{tl('logs.viewInLogs')}</a>
 	</div>
@@ -419,20 +411,6 @@ Viewer-accessible — relies on the API gate (AC #17).
 		display: flex;
 		gap: 0.25rem;
 		margin: 0 0 1rem 0;
-	}
-	.window-toggle button {
-		background: var(--bg-surface);
-		color: var(--text-secondary);
-		border: 1px solid var(--border-subtle, var(--bg-hover));
-		padding: 0.25rem 0.75rem;
-		border-radius: 4px;
-		font-size: var(--text-sm);
-		cursor: pointer;
-	}
-	.window-toggle button.active {
-		background: var(--accent-cyan);
-		color: var(--text-inverse);
-		border-color: var(--accent-cyan);
 	}
 	.logs-link {
 		margin-left: auto;
